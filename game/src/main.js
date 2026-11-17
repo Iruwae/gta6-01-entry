@@ -183,8 +183,12 @@ function updatePolice(dt) {
       car.heading += 0.6;
     }
     world.clampPos(car.pos);
-    // Ram the player.
-    if (dist < 3.4 && policeRamCooldown <= 0) {
+    // Ram the player. Radius 4.6 m, not 3.4: the player's own car
+    // separates from other cars at 4.0 m in _collideCars (which runs
+    // before updatePolice), so a 3.4 m ram could never fire on a driven
+    // car — playtest round 3: police closed to 2.9 m, the car took crash
+    // damage, the player took nothing.
+    if (dist < 4.6 && policeRamCooldown <= 0) {
       policeRamCooldown = 0.9;
       player.damage(9, 'police');
       S.fx.addShake(0.45);
@@ -430,6 +434,11 @@ function animate() {
     autoSaveT += rawDt;
     if (autoSaveT > 60) { autoSaveT = 0; saveGame(); }
   }
+
+  // End states can also be set outside the playing block (damage() flips
+  // S.mode directly): make sure the end screen shows either way. endRun
+  // is idempotent via runEnded, so this is safe to run every frame.
+  if (!runEnded && (S.mode === 'wasted' || S.mode === 'busted')) endRun(S.mode);
 
   S.fx.update(rawDt);
   if (world.water) world.water.position.y = 0.05 + Math.sin(S.time * 0.7) * 0.03;
