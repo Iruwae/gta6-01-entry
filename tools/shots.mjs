@@ -12,7 +12,11 @@
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
-import puppeteer from 'puppeteer-core';
+import { createRequire } from 'node:module';
+// puppeteer-core lives in ~/workspace/makefun/qa-tools/node_modules (shared
+// QA install), not in this repo — resolve it from there when present.
+const qaToolsPkg = process.env.HOME + '/workspace/makefun/qa-tools/node_modules/puppeteer-core/package.json';
+const puppeteer = createRequire(existsSync(qaToolsPkg) ? qaToolsPkg : import.meta.url)('puppeteer-core');
 
 const REPO = resolve(process.env.HOME + '/workspace/makefun/gta6-01-entry');
 const GAME = join(REPO, 'game');
@@ -67,6 +71,23 @@ async function waitGame(sec) {
 async function tapKey(code, holdMs = 500) {
   await page.keyboard.down(code); await sleep(holdMs); await page.keyboard.up(code);
 }
+// Press a key repeatedly until a condition is true: at ~1 fps headless a
+// single tap can fall between frames, and HOLDING the key only produces
+// ONE press edge — if that edge fires before the target exists (the
+// mission sport car spawns 1-2 frames after the mission starts), the
+// enter never happens. Cycling down/up generates a fresh edge each time.
+// The down-hold is long (2 s) so it covers a frame even at ~0.5 fps.
+async function holdKeyUntil(code, checkFn, timeoutMs = 20000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    await page.keyboard.down(code);
+    await sleep(2000);
+    await page.keyboard.up(code);
+    await sleep(300);
+    if (await checkFn()) return true;
+  }
+  return await checkFn();
+}
 async function teleport(x, z) {
   await page.evaluate((a, b) => {
     const w = window.__solmar;
@@ -111,10 +132,9 @@ async function newGame() {
 
 await newGame();
 
-// 1-chase (cover): driving with 3 stars, police on the tail, mission live.
+// 1-chase (cover): driving with 4 stars, police on the tail, mission live.
 await teleport(-76, -67.5);
-await tapKey('KeyE');
-await sleep(500);
+await holdKeyUntil('KeyE', async () => (await st()).inCar);
 // Put the car on the z=-60 road heading east so the chase runs clean.
 await page.evaluate(() => {
   const S = window.__solmar.S;
@@ -124,18 +144,51 @@ await page.evaluate(() => { const S = window.__solmar.S; S.heat = 90; });
 await page.keyboard.down('KeyW');
 await waitGame(6); // police arrive and close in
 await page.keyboard.up('KeyW');
+// Face the nearest police car so the chase is in frame (the chase cam
+// looks forward, so police behind the car would otherwise be invisible).
+const pc = await page.evaluate(() => {
+  const S = window.__solmar.S;
+  let best = null, bd = 1e9;
+  for (const c of S.cars) { if (!c.aiPolice) continue; const d = Math.hypot(c.pos.x - S.player.pos.x, c.pos.z - S.player.pos.z); if (d < bd) { bd = d; best = c; } }
+  return best ? { x: best.pos.x, z: best.pos.z } : null;
+});
+if (pc) await aimAt(pc.x, pc.z);
+await waitGame(0.5);
 await shoot('1-chase.jpg');
 
 // 2-mission: mission 1, sport car, beacon over the bank, objective on HUD.
 await newGame();
 await teleport(-90, -64);
-await tapKey('KeyE'); // mission sport car
+// Wait for the mission sport car to spawn (it appears 1-2 frames after
+// the mission auto-starts), then enter it — pressing E before it exists
+// wastes the press edge.
+for (let i = 0; i < 20; i++) {
+  const has = await page.evaluate(() => !!window.__solmar.S.missions.missionCar);
+  if (has) break;
+  await sleep(500);
+}
+await holdKeyUntil('KeyE', async () => (await st()).inCar); // mission sport car
 await sleep(500);
-// Drive toward the bank along the roads; screenshot mid-route with the
-// beacon visible ahead.
-await page.keyboard.down('KeyW');
-await waitGame(4);
-await page.keyboard.up('KeyW');
+// Stage the car on the open road heading east, then drive; face the bank
+// (and its beacon) for the shot. If the enter somehow failed, stay put
+// and frame the sport car + beacon on foot instead of walking into a wall.
+if ((await st()).inCar) {
+  await page.evaluate(() => {
+    const S = window.__solmar.S;
+    if (S.car) { S.car.pos.set(0, 0, -60); S.car.heading = Math.PI / 2; S.car.speed = 10; }
+  });
+  await page.keyboard.down('KeyW');
+  await waitGame(4);
+  await page.keyboard.up('KeyW');
+  await aimAt(30, 50); // the bank + mission beacon
+} else {
+  const mc = await page.evaluate(() => {
+    const c = window.__solmar.S.missions.missionCar;
+    return c ? { x: c.pos.x, z: c.pos.z } : null;
+  });
+  if (mc) { await teleport(mc.x + 6, mc.z + 6); await waitGame(0.5); await aimAt(mc.x, mc.z); }
+}
+await waitGame(0.5);
 await shoot('2-mission.jpg');
 
 async function exitCarIfAny() {
@@ -143,9 +196,11 @@ async function exitCarIfAny() {
   if (s.inCar) { await tapKey('KeyE'); await sleep(300); }
 }
 // 3-drive: cruising a busy road — traffic, buildings, speed on the HUD.
-await exitCarIfAny();
+// Fresh game (no dependence on shot 2's state — its exit is unreliable at
+// ~1 fps, which left shot 3 on foot last run).
+await newGame();
 await teleport(-76, -67.5);
-await tapKey('KeyE'); // parked sport car by the garage
+await holdKeyUntil('KeyE', async () => (await st()).inCar); // parked sport car by the garage
 await sleep(500);
 await page.evaluate(() => {
   const S = window.__solmar.S;
@@ -157,7 +212,11 @@ await page.keyboard.up('KeyW');
 await shoot('3-drive.jpg');
 
 // 4-onfoot: harbor crew fight — crosshair, rivals, wanted stars, objective.
-await exitCarIfAny();
+// Exit the car reliably first (tapKey can fall between frames at ~1 fps).
+{
+  const s0 = await st();
+  if (s0.inCar) await holdKeyUntil('KeyE', async () => !(await st()).inCar);
+}
 await page.evaluate(() => { const S = window.__solmar.S; S.missions.start(2); });
 await teleport(90, 128);
 await sleep(500);
