@@ -1,53 +1,49 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
-
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
-
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
-
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
-
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
-
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+// SOLMAR BAY — keyboard + mouse input. Tracks held keys, edge-triggered
+// presses, mouse drag orbit and click-to-shoot. No pointer lock: dragging
+// orbits the camera, which also works in headless playtests.
+export class Input {
+  constructor(canvas) {
+    this.keys = new Set();
+    this.pressed = new Set();
+    this.mouseDX = 0; this.mouseDY = 0;
+    this.mouseDown = false; this.mouseClicked = false;
+    this.dragging = false; this.lastX = 0; this.lastY = 0;
+    this._down = (e) => {
+      if (e.repeat) return;
+      this.keys.add(e.code);
+      this.pressed.add(e.code);
+    };
+    this._up = (e) => this.keys.delete(e.code);
+    this._blur = () => { this.keys.clear(); this.dragging = false; };
+    this._md = (e) => {
+      this.mouseDown = true; this.mouseClicked = true;
+      this.dragging = true; this.lastX = e.clientX; this.lastY = e.clientY;
+    };
+    this._mu = () => { this.mouseDown = false; this.dragging = false; };
+    this._mm = (e) => {
+      if (!this.dragging) return;
+      this.mouseDX += e.clientX - this.lastX;
+      this.mouseDY += e.clientY - this.lastY;
+      this.lastX = e.clientX; this.lastY = e.clientY;
+    };
+    window.addEventListener('keydown', this._down);
+    window.addEventListener('keyup', this._up);
+    window.addEventListener('blur', this._blur);
+    canvas.addEventListener('mousedown', this._md);
+    window.addEventListener('mouseup', this._mu);
+    window.addEventListener('mousemove', this._mm);
+  }
+  held(code) { return this.keys.has(code); }
+  wasPressed(code) { return this.pressed.has(code); }
+  axis(neg, pos) { return (this.keys.has(pos) ? 1 : 0) - (this.keys.has(neg) ? 1 : 0); }
+  // Call once per frame after the game has read the input.
+  endFrame() {
+    this.pressed.clear();
+    this.mouseDX = 0; this.mouseDY = 0; this.mouseClicked = false;
+  }
+  // Scripted input for the automated playtest and screenshot staging.
+  inject(code, down) {
+    if (down) { this.keys.add(code); this.pressed.add(code); }
+    else this.keys.delete(code);
+  }
 }

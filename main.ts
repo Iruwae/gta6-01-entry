@@ -1,12 +1,12 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. Only the plumbing, not an open world: Block
-// Dodger, a plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a
-// title screen, score, lives and levels, game over and restart, flat colours and no sound. Build
-// your own open-world crime game in its place (three.js or any library you vendor under game/),
-// put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// SOLMAR BAY — an original open-world crime game for make.fun gta6-01,
+// built by the recorded agent session: a 3D Three.js city to explore on foot
+// and by car, with traffic, pedestrians, a wanted level and police, four
+// story missions, combat, a minimap HUD and a save. The program below hands
+// the game in: it copies game/ and screenshots/ from beside this file to
+// /output and writes /output/dossier.json with the vendored make.fun library.
+// (Node 22, standard library only; game/ is plain static files a desktop
+// browser loads offline — game/index.html and its ES modules, Three.js
+// vendored minified under game/vendor, no network request.)
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:

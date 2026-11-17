@@ -1,79 +1,102 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// SOLMAR BAY — screenshot scenes behind ?shot=title|chase|mission|drive.
+// Each one plays the real rules forward from a fresh world for a fixed
+// number of steps with scripted inputs, so the frame is what a short game
+// really looks like and the same seed always gives the same frame.
+import * as THREE from 'three';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
-
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+function hideOverlay(game) {
+  document.getElementById('overlay').style.display = 'none';
+  game.state = 'play';
+  game.hud.show();
+  game.hud.setCash(game.cash);
+  game.hud.setHealth(game.playerHp, 100);
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
+function putPlayerInCar(game, x, z, heading) {
+  // Take the nearest traffic car, move it onto the road, and get in.
+  let best = null, bd = 1e9;
+  for (const car of game.traffic.cars) {
+    if (car.kind !== 'traffic' || car.dead) continue;
+    const d = Math.hypot(car.pos.x - x, car.pos.z - z);
+    if (d < bd) { bd = d; best = car; }
   }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
+  if (!best) return null;
+  best.pos.set(x, 0, z);
+  best.heading = heading;
+  best.speed = 12;
+  best.syncMesh();
+  game.playerCar = best;
+  best.kind = 'player';
+  best.driver = 'player';
+  best.owned = true;
+  game.playerMesh.visible = false;
   return best;
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+function runSteps(game, n, keys) {
+  if (keys) for (const k of keys) game.input.inject(k, true);
+  for (let i = 0; i < n; i++) {
+    game.update(1 / 60);
+    game.updateCamera(1 / 60);
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+  if (keys) for (const k of keys) game.input.inject(k, false);
+}
+
+function stageChase(game) {
+  hideOverlay(game);
+  game.missions.index = 1;
+  game.missions.start(); // Courier Run: waypoint + timer on the HUD.
+  game.hud.setMissionTitle('COURIER RUN');
+  putPlayerInCar(game, -40, 40, Math.PI / 2);
+  game.setWanted(3);
+  // Two cruisers right on the player's tail.
+  const p = game.playerPos();
+  game.traffic.spawnPolice(p.x - 14, p.z - 8);
+  game.traffic.spawnPolice(p.x - 18, p.z + 6);
+  runSteps(game, 200, ['KeyW']);
+  game.hud.showToast('WANTED — 3 stars! Lose the Solmar Bay PD!');
+  game.hud.setObjective('Drop 1 of 3 — the pier kiosk');
+}
+
+function stageMission(game) {
+  hideOverlay(game);
+  game.missions.index = 2;
+  game.missions.start(); // Harbor Heat: gang members spawn at the harbor.
+  game.hud.setMissionTitle('HARBOR HEAT');
+  // Stage the fight on the beach road facing the water: the player east,
+  // the Dock Rats between the player and the harbor, waypoint beam behind them.
+  game.playerPosV.set(-158, 0, 152);
+  game.playerYaw = -Math.PI / 2; // face west, toward the water
+  game.camYaw = -Math.PI / 2;
+  game.setWanted(1);
+  const gang = game.people.enemies.filter((e) => e.kind === 'gang');
+  const spots = [[-170, 146], [-174, 152], [-170, 158], [-178, 149], [-176, 157], [-172, 162]];
+  gang.forEach((e, i) => {
+    const s = spots[i % spots.length];
+    e.pos.set(s[0], 0, s[1]);
+  });
+  runSteps(game, 45, []);
+  game.hud.setObjective('Clear out the Dock Rats at the harbor');
+}
+
+function stageDrive(game) {
+  hideOverlay(game);
+  game.missions.index = 0;
+  game.missions.start(); // First Wheels: steal a car, drive to the garage.
+  game.hud.setMissionTitle('FIRST WHEELS');
+  putPlayerInCar(game, 0, -120, 0);
+  game.playerCar.speed = 20;
+  runSteps(game, 240, ['KeyW']);
+  game.hud.setObjective('Drive the car to the Bayline garage');
+}
+
+export function stageShot(game, name) {
+  if (name === 'chase') stageChase(game);
+  else if (name === 'mission') stageMission(game);
+  else if (name === 'drive') stageDrive(game);
+  else {
+    // Title: leave the title screen up over the orbiting city.
+    game.state = 'title';
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  game.renderer.render(game.scene, game.camera);
 }
