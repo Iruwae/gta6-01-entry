@@ -129,10 +129,12 @@ export class HUD {
       this._setText(this.elMissionTitle, title);
     }
 
-    // Crosshair only when armed and on foot.
+    // Crosshair only when armed and on foot. Class-based like everything
+    // else: the element starts with class `hidden` (.hidden is !important,
+    // so an inline style.display toggle could never reveal it).
     if (this.elCrosshair) {
       const show = !!(S.player && S.player.armed && S.player.onFoot && S.mode === 'playing');
-      this.elCrosshair.style.display = show ? '' : 'none';
+      this.elCrosshair.classList.toggle('hidden', !show);
     }
 
     this.drawMinimap();
