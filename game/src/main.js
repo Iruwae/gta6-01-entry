@@ -300,13 +300,17 @@ function updateCamera(dt) {
   camPitch = THREE.MathUtils.clamp(camPitch + m.dy * 0.0022, -0.05, 0.85);
   S.camYaw = camYaw;
   const target = player.onFoot ? player.pos : (S.car ? S.car.pos : player.pos);
-  const dist = player.onFoot ? 7.5 : 11;
-  const height = player.onFoot ? 3.1 : 4.2;
+  // Shoulder-aim framing on foot while armed: a closer, lower camera
+  // looking further out at chest height, so the crosshair stays near
+  // targets instead of diving at the ground a few metres ahead.
+  const aiming = player.onFoot && player.armed;
+  const dist = player.onFoot ? (aiming ? 5.5 : 7.5) : 11;
+  const height = player.onFoot ? (aiming ? 2.4 : 3.1) : 4.2;
   const back = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
   const speed01 = S.car ? Math.min(Math.abs(S.car.speed) / CFG.CAR.maxSpeed, 1) : 0;
   const want = new THREE.Vector3(
     target.x + back.x * dist,
-    target.y + height + camPitch * 4,
+    target.y + height + camPitch * (aiming ? 1.0 : 4),
     target.z + back.z * dist,
   );
   const k = 1 - Math.exp(-7 * dt);
@@ -315,10 +319,12 @@ function updateCamera(dt) {
   if (world.isInBuilding(camPos.x, camPos.z, 0.5)) camPos.y = Math.max(camPos.y, 14);
   const shake = S.fx.shakeOffset(dt);
   camera.position.set(camPos.x + shake.x, camPos.y + shake.y, camPos.z);
+  const lookDist = aiming ? 12 : 2.5;
+  const lookY = aiming ? 1.3 : 1.6;
   const look = new THREE.Vector3(
-    target.x + back.x * -2.5,
-    target.y + 1.6,
-    target.z + back.z * -2.5,
+    target.x + back.x * -lookDist,
+    target.y + lookY,
+    target.z + back.z * -lookDist,
   );
   camera.lookAt(look);
   const wantFov = 62 + speed01 * 13;

@@ -278,13 +278,21 @@ export class Player {
     this.shootCooldown = 0.25;
     if (S.stats) S.stats.shotsFired = (S.stats.shotsFired || 0) + 1;
 
-    // Ray from the camera through the crosshair (fallback: player heading).
+    // Ray from the shooter's shoulder through the crosshair's aim.
+    // Shoulder-aim: the ray starts at shoulder height (y 1.5) and follows
+    // the camera's HORIZONTAL aim with a fixed gentle downward slope
+    // (-0.03), which keeps it inside a car body (0.3–1.4 m) from 5 to
+    // 35 m. The old ray used the raw camera direction from the camera
+    // position: the camera sits ~4 m up looking down at ~-0.26, so that
+    // ray hit the ground ~8 m out and could never reach a car at 15–35 m.
     const ray = new THREE.Raycaster();
     ray.far = 60;
     if (S.camera) {
-      const dir = new THREE.Vector3();
-      S.camera.getWorldDirection(dir);
-      ray.set(S.camera.position, dir);
+      const camDir = new THREE.Vector3();
+      S.camera.getWorldDirection(camDir);
+      const hLen = Math.hypot(camDir.x, camDir.z) || 1;
+      const dir = new THREE.Vector3(camDir.x / hLen, -0.03, camDir.z / hLen).normalize();
+      ray.set(new THREE.Vector3(this.pos.x, this.pos.y + 1.5, this.pos.z), dir);
     } else {
       ray.set(
         new THREE.Vector3(this.pos.x, this.pos.y + 1.5, this.pos.z),
