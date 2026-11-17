@@ -100,16 +100,12 @@ export class Ped {
     if (dt <= 0) return;
     this.scaredT = Math.max(0, this.scaredT - dt);
 
-    // Fight: hostile peds face the player and shoot every ~1.6 s inside
-    // 30 m. 4 damage a shot: four rivals focus-firing is ~10 dps, so a
-    // player who fights back (2 pistol hits per rival) survives the crew,
-    // while standing still in the open still hurts. (Was 6 dmg / 1.2 s /
-    // 35 m — ~20 dps with no accuracy roll, a death sentence.)
+    // Fight: hostile peds face the player and shoot every ~1.2 s inside 40 m.
     if (this.hostile && playerPos) {
       const dx = playerPos.x - this.pos.x;
       const dz = playerPos.z - this.pos.z;
       const dist = Math.hypot(dx, dz);
-      if (dist < 30) {
+      if (dist < 40) {
         this.heading = Math.atan2(dx, dz);
         this.mesh.rotation.y = this.heading;
         this.shootT -= dt;
@@ -120,9 +116,9 @@ export class Ped {
         const pz = -Math.sin(this.heading);
         this.pos.x += px * this.strafeDir * 1.0 * dt;
         this.pos.z += pz * this.strafeDir * 1.0 * dt;
-        if (this.shootT <= 0 && dist < 28) {
-          this.shootT = 1.6;
-          if (S.player && S.player.damage) S.player.damage(4);
+        if (this.shootT <= 0 && dist < 35) {
+          this.shootT = 1.2;
+          if (S.player && S.player.damage) S.player.damage(6);
           if (S.fx && S.fx.burst) {
             S.fx.burst(playerPos, 0xffee88, 4, 3, 0.3);
           }

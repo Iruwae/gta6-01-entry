@@ -183,12 +183,8 @@ function updatePolice(dt) {
       car.heading += 0.6;
     }
     world.clampPos(car.pos);
-    // Ram the player. Radius 4.6 m, not 3.4: the player's own car
-    // separates from other cars at 4.0 m in _collideCars (which runs
-    // before updatePolice), so a 3.4 m ram could never fire on a driven
-    // car — playtest round 3: police closed to 2.9 m, the car took crash
-    // damage, the player took nothing.
-    if (dist < 4.6 && policeRamCooldown <= 0) {
+    // Ram the player.
+    if (dist < 3.4 && policeRamCooldown <= 0) {
       policeRamCooldown = 0.9;
       player.damage(9, 'police');
       S.fx.addShake(0.45);
@@ -304,51 +300,25 @@ function updateCamera(dt) {
   camPitch = THREE.MathUtils.clamp(camPitch + m.dy * 0.0022, -0.05, 0.85);
   S.camYaw = camYaw;
   const target = player.onFoot ? player.pos : (S.car ? S.car.pos : player.pos);
-  // Aiming (on foot, pistol out): a low, flat SHOULDER camera — 6.5 m back,
-  // 1.3 m to the camera-right, 1.6 m up, looking 20 m ahead at chest height
-  // (1.1 m). The ray from it stays inside a ped's torso (0.7–1.4 m) and a
-  // car's body (0.2–1.4 m) from ~5 m out to ~35 m, so the crosshair is
-  // honest at every range. The earlier high overview camera made the ray
-  // dive under cars past ~5 m (playtest round 2: peds took headshots, cars
-  // took 0 damage), and a centred low camera would put the player's back
-  // in the crosshair — the side offset is what lets it sit this low.
-  const aiming = player.onFoot && player.armed;
-  let dist = aiming ? 6.5 : (player.onFoot ? 7.5 : 11);
-  const side = aiming ? 1.3 : 0;
-  const height = aiming
-    ? 1.6 + (camPitch - 0.32)
-    : (player.onFoot ? 3.1 : 4.2);
+  const dist = player.onFoot ? 7.5 : 11;
+  const height = player.onFoot ? 3.1 : 4.2;
   const back = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
-  const right = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
   const speed01 = S.car ? Math.min(Math.abs(S.car.speed) / CFG.CAR.maxSpeed, 1) : 0;
-  const camWant = (d) => new THREE.Vector3(
-    target.x + back.x * d + right.x * side,
-    target.y + height + (aiming ? 0 : camPitch * 4),
-    target.z + back.z * d + right.z * side,
+  const want = new THREE.Vector3(
+    target.x + back.x * dist,
+    target.y + height + camPitch * 4,
+    target.z + back.z * dist,
   );
-  const want = camWant(dist);
   const k = 1 - Math.exp(-7 * dt);
   camPos.lerp(want, k);
-  // Keep the camera out of buildings. Overview: lift it. Aiming: pull it
-  // in instead — lifting to 14 m would point the crosshair at the ground.
-  if (world.isInBuilding(camPos.x, camPos.z, 0.5)) {
-    if (aiming) {
-      while (dist > 2.5 && world.isInBuilding(camPos.x, camPos.z, 0.5)) {
-        dist -= 1.5;
-        camPos.copy(camWant(dist));
-      }
-    } else {
-      camPos.y = Math.max(camPos.y, 14);
-    }
-  }
+  // Keep the camera out of buildings (simple: lift it).
+  if (world.isInBuilding(camPos.x, camPos.z, 0.5)) camPos.y = Math.max(camPos.y, 14);
   const shake = S.fx.shakeOffset(dt);
   camera.position.set(camPos.x + shake.x, camPos.y + shake.y, camPos.z);
-  const lookDist = aiming ? -20 : -2.5;
-  const lookY = aiming ? 1.1 + (camPitch - 0.32) * 4 : 1.6;
   const look = new THREE.Vector3(
-    target.x + back.x * lookDist,
-    target.y + lookY,
-    target.z + back.z * lookDist,
+    target.x + back.x * -2.5,
+    target.y + 1.6,
+    target.z + back.z * -2.5,
   );
   camera.lookAt(look);
   const wantFov = 62 + speed01 * 13;
@@ -434,11 +404,6 @@ function animate() {
     autoSaveT += rawDt;
     if (autoSaveT > 60) { autoSaveT = 0; saveGame(); }
   }
-
-  // End states can also be set outside the playing block (damage() flips
-  // S.mode directly): make sure the end screen shows either way. endRun
-  // is idempotent via runEnded, so this is safe to run every frame.
-  if (!runEnded && (S.mode === 'wasted' || S.mode === 'busted')) endRun(S.mode);
 
   S.fx.update(rawDt);
   if (world.water) world.water.position.y = 0.05 + Math.sin(S.time * 0.7) * 0.03;
