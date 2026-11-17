@@ -100,9 +100,7 @@ export class Ped {
     if (dt <= 0) return;
     this.scaredT = Math.max(0, this.scaredT - dt);
 
-    // Fight: hostile peds face the player and shoot every ~1.6 s inside 40 m.
-    // Tuned down (4 dmg, 1.6 s) so four rivals focus-firing are ~10 dps,
-    // survivable with cover — not a 5-second death sentence.
+    // Fight: hostile peds face the player and shoot every ~1.2 s inside 40 m.
     if (this.hostile && playerPos) {
       const dx = playerPos.x - this.pos.x;
       const dz = playerPos.z - this.pos.z;
@@ -119,8 +117,8 @@ export class Ped {
         this.pos.x += px * this.strafeDir * 1.0 * dt;
         this.pos.z += pz * this.strafeDir * 1.0 * dt;
         if (this.shootT <= 0 && dist < 35) {
-          this.shootT = 1.6;
-          if (S.player && S.player.damage) S.player.damage(4);
+          this.shootT = 1.2;
+          if (S.player && S.player.damage) S.player.damage(6);
           if (S.fx && S.fx.burst) {
             S.fx.burst(playerPos, 0xffee88, 4, 3, 0.3);
           }

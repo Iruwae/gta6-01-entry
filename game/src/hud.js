@@ -81,11 +81,9 @@ export class HUD {
     if (el) el.textContent = text;
   }
 
-  // Visibility is class-based ONLY (never inline display): main.js and the
-  // screens all toggle the same `hidden` class, so no half-hidden states.
   _show(el, show) {
     if (!el) return;
-    el.classList.toggle('hidden', !show);
+    el.style.display = show ? '' : 'none';
   }
 
   // ---- per-frame ---------------------------------------------------------
@@ -129,12 +127,10 @@ export class HUD {
       this._setText(this.elMissionTitle, title);
     }
 
-    // Crosshair only when armed and on foot. Class-based like everything
-    // else: the element starts with class `hidden` (.hidden is !important,
-    // so an inline style.display toggle could never reveal it).
+    // Crosshair only when armed and on foot.
     if (this.elCrosshair) {
       const show = !!(S.player && S.player.armed && S.player.onFoot && S.mode === 'playing');
-      this.elCrosshair.classList.toggle('hidden', !show);
+      this.elCrosshair.style.display = show ? '' : 'none';
     }
 
     this.drawMinimap();

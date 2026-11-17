@@ -89,7 +89,7 @@ scene.add(beacon);
 // Camera forward is (-sin yaw, -cos yaw) (player.js convention): the camera
 // sits behind the player at +back, looking back along -back.
 let camYaw = 0.31; // spawn faces the Bayline garage (-90,-90) from (-84,-72)
-let camPitch = 0.2; // flatter default: keeps the crosshair ray off the ground
+let camPitch = 0.32;
 let camPos = new THREE.Vector3(0, 30, 60);
 S.camYaw = camYaw;
 
@@ -183,12 +183,8 @@ function updatePolice(dt) {
       car.heading += 0.6;
     }
     world.clampPos(car.pos);
-    // Ram the player. Recompute distance AFTER the police car moves: the
-    // player car's own collision push restores ~4 m separation every frame,
-    // so a pre-move <3.4 m check could never fire while driving.
-    const rdx = player.pos.x - car.pos.x;
-    const rdz = player.pos.z - car.pos.z;
-    if (Math.hypot(rdx, rdz) < 4.6 && policeRamCooldown <= 0) {
+    // Ram the player.
+    if (dist < 3.4 && policeRamCooldown <= 0) {
       policeRamCooldown = 0.9;
       player.damage(9, 'police');
       S.fx.addShake(0.45);
@@ -227,11 +223,7 @@ function resetRunState(fromSave) {
       S.stats = { ...S.stats, ...(sv.stats || {}) };
       const sp = sv.player || {};
       player.reset(sp.x ?? world.spawn.x, sp.z ?? world.spawn.z, sp.heading ?? 0);
-      // reset() zeroes health; restore the saved value (a 0-health save
-      // means the run ended dead — respawn with full health instead).
-      const h = (sv.health && sv.health > 0) ? sv.health : 100;
-      player.health = h;
-      S.health = h;
+      player.health = S.health;
     } else {
       S.cash = 120; S.missionIndex = 0;
       player.reset(world.spawn.x, world.spawn.z, 0);
@@ -323,12 +315,9 @@ function updateCamera(dt) {
   if (world.isInBuilding(camPos.x, camPos.z, 0.5)) camPos.y = Math.max(camPos.y, 14);
   const shake = S.fx.shakeOffset(dt);
   camera.position.set(camPos.x + shake.x, camPos.y + shake.y, camPos.z);
-  // Look slightly above the player's head so the crosshair ray (screen
-  // centre) stays near chest height on targets 10-20 m out instead of
-  // dropping to the ground.
   const look = new THREE.Vector3(
     target.x + back.x * -2.5,
-    target.y + 2.4,
+    target.y + 1.6,
     target.z + back.z * -2.5,
   );
   camera.lookAt(look);
@@ -363,6 +352,8 @@ function animate() {
     }
 
     player.update(dt, S.input);
+    // Player death flips S.mode to 'wasted' inside player.damage().
+    if (S.mode === 'wasted') endRun('wasted');
 
     // Car-vs-pedestrian: running someone over is a crime.
     if (!player.onFoot && S.car) {
@@ -413,11 +404,6 @@ function animate() {
     autoSaveT += rawDt;
     if (autoSaveT > 60) { autoSaveT = 0; saveGame(); }
   }
-
-  // Death can flip S.mode inside any update above (rival shots, cop punches,
-  // police rams all run after player.update), so the wasted check must live
-  // OUTSIDE the playing block or it is skipped forever once mode flips.
-  if (S.mode === 'wasted' && !runEnded) endRun('wasted');
 
   S.fx.update(rawDt);
   if (world.water) world.water.position.y = 0.05 + Math.sin(S.time * 0.7) * 0.03;
