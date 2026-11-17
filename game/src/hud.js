@@ -81,9 +81,11 @@ export class HUD {
     if (el) el.textContent = text;
   }
 
+  // Visibility is class-based ONLY (never inline display): main.js and the
+  // screens all toggle the same `hidden` class, so no half-hidden states.
   _show(el, show) {
     if (!el) return;
-    el.style.display = show ? '' : 'none';
+    el.classList.toggle('hidden', !show);
   }
 
   // ---- per-frame ---------------------------------------------------------

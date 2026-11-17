@@ -142,6 +142,7 @@ export class Car {
     scene.add(mesh);
     this.mesh = mesh;
     this.pos = mesh.position; // pos IS mesh.position (contract)
+    mesh.userData.ref = this; // so the shooting raycast resolves hits to this car
   }
 
   // ---- player driving (arcade) ----
