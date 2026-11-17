@@ -1,161 +1,325 @@
-// SOLMAR BAY — people: sidewalk pedestrians who stroll and flee gunfire,
-// gang members who fight, and foot cops who chase the player. The player
-// avatar is built by the same mesh factory.
-import * as THREE from 'three';
-import { CFG, PALETTE } from './config.js';
+// SOLMAR BAY — people.js
+// Original open-world crime game for make.fun gta6-01. All code written
+// from scratch in this session. No Rockstar / GTA assets, no network use.
+// Low-poly pedestrians (civilians + hostile shooters) and foot police.
+//
+// AI shape (game-ai skill): one small FSM per ped — Wander / Flee / Fight
+// (hostile) / Chase (cop) / Fallen — with separate enter/exit ranges so
+// states do not flicker, and a 2 s stuck guard that picks a new waypoint.
 
-export function makePersonMesh(shirt, pants) {
-  const g = new THREE.Group();
-  const shirtMat = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.8 });
-  const pantsMat = new THREE.MeshStandardMaterial({ color: pants || 0x2a2a3a, roughness: 0.9 });
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xd8a070, roughness: 0.7 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.9, 8), shirtMat);
-  body.position.y = 1.05; body.castShadow = true;
-  g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), skinMat);
-  head.position.y = 1.78; head.castShadow = true;
-  g.add(head);
-  const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.7, 6), pantsMat);
-  legL.position.set(-0.14, 0.35, 0); g.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.14; g.add(legR);
-  const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.7, 6), shirtMat);
-  armL.position.set(-0.45, 1.05, 0); g.add(armL);
-  const armR = armL.clone(); armR.position.x = 0.45; g.add(armR);
-  g.userData = { legL, legR, armL, armR, body };
-  return g;
+import * as THREE from 'three';
+import { S } from './state.js';
+
+const SHIRTS = [0xcc5544, 0x4488cc, 0x44aa66, 0xddcc44, 0xaa66cc, 0xeeeeee, 0xcc8844, 0x558888];
+const SKINS = [0xe8b98a, 0xc98d5f, 0x8a5a34, 0xf0c8a0, 0x6e4423];
+const NAMES = [
+  'Mara', 'Dito', 'Sari', 'Bimo', 'Lena', 'Raka', 'Nia', 'Tono',
+  'Ayu', 'Fajar', 'Rani', 'Eko', 'Putri', 'Agus', 'Dewi', 'Joko',
+];
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function buildPersonMesh(shirt, skin, withCap) {
+  const body = new THREE.Group();
+  const shirtMat = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.85 });
+  const pantsMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.9 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.7 });
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.72, 0.28), pantsMat);
+  legs.position.y = 0.36;
+  body.add(legs);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.68, 0.34), shirtMat);
+  torso.position.y = 1.06;
+  body.add(torso);
+  const armGeo = new THREE.BoxGeometry(0.14, 0.62, 0.16);
+  for (const sx of [-1, 1]) {
+    const arm = new THREE.Mesh(armGeo, shirtMat);
+    arm.position.set(sx * 0.39, 1.06, 0);
+    body.add(arm);
+  }
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 12, 10), skinMat);
+  head.position.y = 1.62;
+  body.add(head);
+  if (withCap) {
+    const cap = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.1, 0.5),
+      new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.8 }),
+    );
+    cap.position.y = 1.82;
+    body.add(cap);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.22),
+      new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.8 }));
+    brim.position.set(0, 1.78, 0.3);
+    body.add(brim);
+  }
+  return body;
 }
 
-export class People {
-  constructor(scene, city, rng) {
-    this.scene = scene; this.city = city; this.rng = rng;
-    this.peds = [];
-    this.enemies = [];
-    for (let i = 0; i < CFG.traffic.peds; i++) this.spawnPed(true);
+export class Ped {
+  constructor(scene, world, opts = {}) {
+    this.scene = scene;
+    this.world = world;
+    this.name = opts.name || pick(NAMES);
+    this.shirt = opts.shirt !== undefined ? opts.shirt : pick(SHIRTS);
+    this.hostile = !!opts.hostile;
+    this.health = this.hostile ? 60 : 100;
+    this.alive = true;
+    this.heading = rand(0, Math.PI * 2);
+    this.walkSpeed = rand(1.5, 2.5);
+    this.target = null;
+    this.pauseT = rand(0, 2);
+    this.shootT = rand(0.4, 1.2);
+    this.fallT = 0;
+    this.scaredT = 0;
+    this.strafeDir = 1;
+    this.strafeT = 0;
+    this.stuckT = 0;
+    this._lastX = opts.x || 0;
+    this._lastZ = opts.z || 0;
+    this._bobT = rand(0, 6);
+
+    const mesh = new THREE.Group();
+    this.body = buildPersonMesh(this.shirt, pick(SKINS), false);
+    mesh.add(this.body);
+    mesh.position.set(opts.x || 0, 0, opts.z || 0);
+    mesh.rotation.y = this.heading;
+    scene.add(mesh);
+    this.mesh = mesh;
+    this.pos = mesh.position; // pos IS mesh.position (contract)
+    mesh.userData.ref = this;
   }
-  spawnPed(anywhere) {
-    // Retry: most random points land on a road or inside a building.
-    for (let tries = 0; tries < 24; tries++) {
-      const bx = this.rng.int(-5, 4) * 40 + 20, bz = this.rng.int(-5, 4) * 40 + 20;
-      if (bx < -160) continue;
-      const x = bx + this.rng.range(-12, 12), z = bz + this.rng.range(-12, 12);
-      if (this.city.onRoad(x, z) || this.city.collideCircle(x, z, 2)) continue;
-      const mesh = makePersonMesh(this.rng.pick(PALETTE.pedShirt));
-      mesh.position.set(x, 0, z);
-      this.scene.add(mesh);
-      const ped = {
-        mesh, pos: mesh.position, heading: this.rng.range(0, Math.PI * 2),
-        speed: this.rng.range(1.2, 2.2), target: null, flee: 0, walkT: Math.random() * 10,
+
+  update(dt, playerPos, dangerPos) {
+    if (!this.alive) {
+      // Fallen: rotate flat over 0.3 s, then rest (game-feel: death reads).
+      this.fallT += dt;
+      const k = Math.min(1, this.fallT / 0.3);
+      this.mesh.rotation.x = -k * (Math.PI / 2) * 0.96;
+      return;
+    }
+    if (dt <= 0) return;
+    this.scaredT = Math.max(0, this.scaredT - dt);
+
+    // Fight: hostile peds face the player and shoot every ~1.2 s inside 40 m.
+    if (this.hostile && playerPos) {
+      const dx = playerPos.x - this.pos.x;
+      const dz = playerPos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 40) {
+        this.heading = Math.atan2(dx, dz);
+        this.mesh.rotation.y = this.heading;
+        this.shootT -= dt;
+        // Strafe slowly so the shooter is not a static turret.
+        this.strafeT -= dt;
+        if (this.strafeT <= 0) { this.strafeT = rand(1, 2); this.strafeDir *= -1; }
+        const px = Math.cos(this.heading);
+        const pz = -Math.sin(this.heading);
+        this.pos.x += px * this.strafeDir * 1.0 * dt;
+        this.pos.z += pz * this.strafeDir * 1.0 * dt;
+        if (this.shootT <= 0 && dist < 35) {
+          this.shootT = 1.2;
+          if (S.player && S.player.damage) S.player.damage(6);
+          if (S.fx && S.fx.burst) {
+            S.fx.burst(playerPos, 0xffee88, 4, 3, 0.3);
+          }
+          if (S.audio && S.audio.shot) S.audio.shot(0.4); // quiet distant shot
+        }
+        return;
+      }
+    }
+
+    // Flee: danger (explosion / gunfire / the player after a shooting) close by.
+    if (dangerPos) {
+      const dx = this.pos.x - dangerPos.x;
+      const dz = this.pos.z - dangerPos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 15 && dist > 0.01) {
+        this._fleeFrom(dangerPos, dt, 5);
+        return;
+      }
+    }
+    if (this.scaredT > 0 && playerPos) {
+      this._fleeFrom(playerPos, dt, 5);
+      return;
+    }
+
+    this._wander(dt);
+  }
+
+  _fleeFrom(from, dt, speed) {
+    const dx = this.pos.x - from.x;
+    const dz = this.pos.z - from.z;
+    const d = Math.hypot(dx, dz) || 1;
+    this.heading = Math.atan2(dx / d, dz / d);
+    this.mesh.rotation.y = this.heading;
+    this.pos.x += (dx / d) * speed * dt;
+    this.pos.z += (dz / d) * speed * dt;
+    this._clampAndBob(dt, speed);
+  }
+
+  _wander(dt) {
+    if (this.pauseT > 0) {
+      this.pauseT -= dt;
+      return;
+    }
+    if (!this.target) {
+      this._pickTarget();
+      return;
+    }
+    const dx = this.target.x - this.pos.x;
+    const dz = this.target.z - this.pos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 1) {
+      this.target = null;
+      if (Math.random() < 0.35) this.pauseT = rand(1, 4);
+      return;
+    }
+    this.heading = Math.atan2(dx / dist, dz / dist);
+    this.mesh.rotation.y = this.heading;
+    this.pos.x += (dx / dist) * this.walkSpeed * dt;
+    this.pos.z += (dz / dist) * this.walkSpeed * dt;
+    // Stuck guard: no progress in 2 s -> pick a fresh waypoint.
+    const moved = Math.hypot(this.pos.x - this._lastX, this.pos.z - this._lastZ);
+    if (moved < 0.05) {
+      this.stuckT += dt;
+      if (this.stuckT > 2) { this.stuckT = 0; this._pickTarget(); }
+    } else {
+      this.stuckT = 0;
+    }
+    this._lastX = this.pos.x;
+    this._lastZ = this.pos.z;
+    this._clampAndBob(dt, this.walkSpeed);
+  }
+
+  _pickTarget() {
+    if (this.world && this.world.randomSidewalkPoint) {
+      this.target = this.world.randomSidewalkPoint(Math.random);
+    } else {
+      this.target = {
+        x: this.pos.x + rand(-30, 30),
+        z: this.pos.z + rand(-30, 30),
       };
-      ped.target = this.pickStrollTarget(ped.pos);
-      this.peds.push(ped);
-      return ped;
-    }
-    return null;
-  }
-  pickStrollTarget(from) {
-    // A point on the same block's sidewalk ring (blocks centre on 40k+20).
-    const bx = Math.round((from.x - 20) / 40) * 40 + 20;
-    const bz = Math.round((from.z - 20) / 40) * 40 + 20;
-    return new THREE.Vector3(
-      bx + this.rng.pick([-13, 13, this.rng.range(-12, 12)]),
-      0,
-      bz + this.rng.pick([-13, 13, this.rng.range(-12, 12)]),
-    );
-  }
-  spawnEnemy(x, z, kind) {
-    const shirt = kind === 'cop' ? 0x1a2a5a : 0x8a2020;
-    const mesh = makePersonMesh(shirt, kind === 'cop' ? 0x1a2a5a : 0x3a3a3a);
-    mesh.position.set(x, 0, z);
-    this.scene.add(mesh);
-    const e = {
-      mesh, pos: mesh.position, heading: 0, kind: kind || 'gang',
-      hp: kind === 'cop' ? CFG.combat.copHp : CFG.combat.enemyHp,
-      speed: kind === 'cop' ? 5.2 : 3.6, shootT: this.rng.range(0.5, 1.5),
-      dead: false, walkT: 0,
-    };
-    this.enemies.push(e);
-    return e;
-  }
-  removeEnemy(e) {
-    this.scene.remove(e.mesh);
-    this.enemies = this.enemies.filter((x) => x !== e);
-  }
-  scare(x, z, radius) {
-    for (const p of this.peds) {
-      if (Math.hypot(p.pos.x - x, p.pos.z - z) < radius) p.flee = 4;
     }
   }
-  damageEnemy(e, amount, fx, onKill) {
-    if (e.dead) return;
-    e.hp -= amount;
-    if (fx) fx.blood(e.pos.clone().setY(1.4));
-    if (e.hp <= 0) {
-      e.dead = true;
-      if (fx) fx.blood(e.pos.clone().setY(1));
-      this.removeEnemy(e);
-      if (onKill) onKill(e);
-    }
+
+  _clampAndBob(dt, speed) {
+    if (this.world && this.world.clampPos) this.world.clampPos(this.pos);
+    this._bobT += dt * speed * 3.2;
+    this.body.position.y = Math.abs(Math.sin(this._bobT)) * 0.05;
   }
-  update(dt, playerPos, playerAlive, events) {
-    // Pedestrians stroll the block edges; flee from gunfire.
-    for (const p of [...this.peds]) {
-      p.walkT += dt;
-      const speed = p.flee > 0 ? 5 : p.speed;
-      if (p.flee > 0) p.flee -= dt;
-      const dx = p.target.x - p.pos.x, dz = p.target.z - p.pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d < 1) {
-        p.target = p.flee > 0
-          ? new THREE.Vector3(p.pos.x + (p.pos.x - playerPos.x), 0, p.pos.z + (p.pos.z - playerPos.z))
-          : this.pickStrollTarget(p.pos);
-      } else {
-        const want = Math.atan2(dx, dz);
-        let dh = want - p.heading;
-        while (dh > Math.PI) dh -= Math.PI * 2;
-        while (dh < -Math.PI) dh += Math.PI * 2;
-        p.heading += Math.max(-3 * dt, Math.min(3 * dt, dh));
-        p.pos.x += Math.sin(p.heading) * speed * dt;
-        p.pos.z += Math.cos(p.heading) * speed * dt;
-        this.city.resolveCircle(p.pos, 0.6);
-      }
-      p.mesh.rotation.y = p.heading;
-      const swing = Math.sin(p.walkT * (p.flee > 0 ? 14 : 8)) * 0.5;
-      p.mesh.userData.legL.rotation.x = swing;
-      p.mesh.userData.legR.rotation.x = -swing;
-      p.mesh.userData.armL.rotation.x = -swing * 0.7;
-      p.mesh.userData.armR.rotation.x = swing * 0.7;
-      if (Math.abs(p.pos.x) > 205 || Math.abs(p.pos.z) > 205) {
-        this.scene.remove(p.mesh);
-        this.peds = this.peds.filter((x) => x !== p);
-        this.spawnPed(true);
+
+  damage(amount) {
+    if (!this.alive) return false;
+    this.health -= amount;
+    if (S.fx && S.fx.damageNumber) {
+      S.fx.damageNumber(
+        { x: this.pos.x, y: this.pos.y + 2.1, z: this.pos.z },
+        `-${Math.round(amount)}`,
+        '#ff7777',
+      );
+    }
+    if (this.health <= 0) {
+      this.health = 0;
+      this.alive = false;
+      this.fallT = 0;
+      if (S.fx && S.fx.burst) S.fx.burst(this.pos, 0xcc2222, 12, 4, 0.6);
+      return true;
+    }
+    // A wounded civilian runs from whoever shot them.
+    if (!this.hostile && S.player) this.scaredT = 3;
+    return false;
+  }
+
+  remove() {
+    if (this.scene && this.mesh) this.scene.remove(this.mesh);
+  }
+}
+
+export class Cop extends Ped {
+  constructor(scene, world, x, z) {
+    super(scene, world, { x, z, shirt: 0x1a2a55, name: 'Officer' });
+    this.health = 80;
+    this.walkSpeed = 2.2; // patrol pace
+    this.chaseSpeed = 4.5;
+    this.punchCooldown = 0;
+    // Dark-blue uniform: swap the torso/arms to navy (built navy via shirt).
+    this.mesh.userData.ref = this;
+  }
+
+  update(dt, playerPos) {
+    if (!this.alive) {
+      this.fallT += dt;
+      const k = Math.min(1, this.fallT / 0.3);
+      this.mesh.rotation.x = -k * (Math.PI / 2) * 0.96;
+      return;
+    }
+    if (dt <= 0) return;
+    this.punchCooldown = Math.max(0, this.punchCooldown - dt);
+    const wanted = (S && S.wanted) || 0;
+    if (wanted > 0 && playerPos) {
+      const dx = playerPos.x - this.pos.x;
+      const dz = playerPos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      // Enter chase inside 45 m; only give up when the player is far / wanted clears.
+      if (dist < 45) {
+        this.heading = Math.atan2(dx / dist, dz / dist);
+        this.mesh.rotation.y = this.heading;
+        if (dist > 1.6) {
+          this.pos.x += (dx / dist) * this.chaseSpeed * dt;
+          this.pos.z += (dz / dist) * this.chaseSpeed * dt;
+          this._clampAndBob(dt, this.chaseSpeed);
+        } else if (this.punchCooldown <= 0) {
+          this.punchCooldown = 0.8;
+          if (S.player && S.player.damage) S.player.damage(8);
+          if (S.fx && S.fx.addShake) S.fx.addShake(0.2);
+          if (S.fx && S.fx.burst) S.fx.burst(playerPos, 0xffffff, 4, 2, 0.3);
+        }
+        return;
       }
     }
-    // Enemies: close in and shoot at the player.
-    for (const e of [...this.enemies]) {
-      if (e.dead) continue;
-      const dx = playerPos.x - e.pos.x, dz = playerPos.z - e.pos.z;
-      const d = Math.hypot(dx, dz);
-      e.walkT += dt;
-      if (playerAlive && d > 2.5 && d < 60) {
-        const want = Math.atan2(dx, dz);
-        let dh = want - e.heading;
-        while (dh > Math.PI) dh -= Math.PI * 2;
-        while (dh < -Math.PI) dh += Math.PI * 2;
-        e.heading += Math.max(-4 * dt, Math.min(4 * dt, dh));
-        e.pos.x += Math.sin(e.heading) * e.speed * dt;
-        e.pos.z += Math.cos(e.heading) * e.speed * dt;
-        this.city.resolveCircle(e.pos, 0.6);
-      }
-      e.mesh.rotation.y = e.heading;
-      const swing = Math.sin(e.walkT * 10) * 0.4;
-      e.mesh.userData.legL.rotation.x = swing;
-      e.mesh.userData.legR.rotation.x = -swing;
-      e.shootT -= dt;
-      if (playerAlive && d < 42 && d > 3 && e.shootT <= 0) {
-        e.shootT = e.kind === 'cop' ? 1.6 : 1.1;
-        if (events && events.enemyShot) events.enemyShot(e, d);
-      }
-      if (playerAlive && d < 1.6 && events && events.enemyTouch) events.enemyTouch(e);
-    }
+    this._wander(dt);
   }
+
+  damage(amount) {
+    if (!this.alive) return false;
+    this.health -= amount;
+    if (S.fx && S.fx.damageNumber) {
+      S.fx.damageNumber(
+        { x: this.pos.x, y: this.pos.y + 2.1, z: this.pos.z },
+        `-${Math.round(amount)}`,
+        '#ff7777',
+      );
+    }
+    if (this.health <= 0) {
+      this.health = 0;
+      this.alive = false;
+      this.fallT = 0;
+      if (S.fx && S.fx.burst) S.fx.burst(this.pos, 0xcc2222, 12, 4, 0.6);
+      return true;
+    }
+    return false;
+  }
+}
+
+export function spawnPeds(scene, world, n) {
+  if (!S.peds) S.peds = [];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const p = world && world.randomSidewalkPoint
+      ? world.randomSidewalkPoint(Math.random)
+      : { x: (Math.random() - 0.5) * 200, z: (Math.random() - 0.5) * 200 };
+    // Civilians only: armed street shooters are spawned by missions, never
+    // at random — free roam should not ambush the player unprovoked.
+    const ped = new Ped(scene, world, { x: p.x, z: p.z, hostile: false });
+    S.peds.push(ped);
+    out.push(ped);
+  }
+  return out;
+}
+
+export function spawnCop(scene, world, x, z) {
+  if (!S.cops) S.cops = [];
+  const cop = new Cop(scene, world, x, z);
+  S.cops.push(cop);
+  return cop;
 }

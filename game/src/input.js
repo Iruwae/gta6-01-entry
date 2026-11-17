@@ -1,49 +1,100 @@
-// SOLMAR BAY — keyboard + mouse input. Tracks held keys, edge-triggered
-// presses, mouse drag orbit and click-to-shoot. No pointer lock: dragging
-// orbits the camera, which also works in headless playtests.
+// Keyboard + mouse input. No imports.
+// Pointer-lock mouse-look when locked; click-drag look as a fallback so the
+// game stays playable in browsers / embeds where pointer lock is refused.
 export class Input {
   constructor(canvas) {
+    this.canvas = canvas;
     this.keys = new Set();
-    this.pressed = new Set();
-    this.mouseDX = 0; this.mouseDY = 0;
-    this.mouseDown = false; this.mouseClicked = false;
-    this.dragging = false; this.lastX = 0; this.lastY = 0;
-    this._down = (e) => {
-      if (e.repeat) return;
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.mouseDown = false;
+    this._clicked = false;
+    this._lastX = 0;
+    this._lastY = 0;
+    this._dragging = false;
+
+    window.addEventListener('keydown', (e) => {
+      // Stop Space / arrows scrolling the page while playing.
+      if (
+        e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'ArrowDown' ||
+        e.code === 'ArrowLeft' || e.code === 'ArrowRight'
+      ) {
+        e.preventDefault();
+      }
       this.keys.add(e.code);
-      this.pressed.add(e.code);
-    };
-    this._up = (e) => this.keys.delete(e.code);
-    this._blur = () => { this.keys.clear(); this.dragging = false; };
-    this._md = (e) => {
-      this.mouseDown = true; this.mouseClicked = true;
-      this.dragging = true; this.lastX = e.clientX; this.lastY = e.clientY;
-    };
-    this._mu = () => { this.mouseDown = false; this.dragging = false; };
-    this._mm = (e) => {
-      if (!this.dragging) return;
-      this.mouseDX += e.clientX - this.lastX;
-      this.mouseDY += e.clientY - this.lastY;
-      this.lastX = e.clientX; this.lastY = e.clientY;
-    };
-    window.addEventListener('keydown', this._down);
-    window.addEventListener('keyup', this._up);
-    window.addEventListener('blur', this._blur);
-    canvas.addEventListener('mousedown', this._md);
-    window.addEventListener('mouseup', this._mu);
-    window.addEventListener('mousemove', this._mm);
+    });
+
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+    });
+
+    // Losing focus must not leave a key stuck down.
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.mouseDown = false;
+      this._dragging = false;
+    });
+
+    canvas.addEventListener('mousedown', (e) => {
+      this.mouseDown = true;
+      this._clicked = true;
+      this._dragging = true;
+      this._lastX = e.clientX;
+      this._lastY = e.clientY;
+    });
+
+    window.addEventListener('mouseup', () => {
+      this.mouseDown = false;
+      this._dragging = false;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === canvas) {
+        // Pointer-locked: use raw movement deltas.
+        this.mouseDX += e.movementX || 0;
+        this.mouseDY += e.movementY || 0;
+      } else if (this._dragging) {
+        // Fallback: click-drag look.
+        this.mouseDX += e.clientX - this._lastX;
+        this.mouseDY += e.clientY - this._lastY;
+        this._lastX = e.clientX;
+        this._lastY = e.clientY;
+      }
+    });
   }
-  held(code) { return this.keys.has(code); }
-  wasPressed(code) { return this.pressed.has(code); }
-  axis(neg, pos) { return (this.keys.has(pos) ? 1 : 0) - (this.keys.has(neg) ? 1 : 0); }
-  // Call once per frame after the game has read the input.
-  endFrame() {
-    this.pressed.clear();
-    this.mouseDX = 0; this.mouseDY = 0; this.mouseClicked = false;
+
+  // True while the named physical key (e.code, e.g. 'KeyW') is held.
+  down(code) {
+    return this.keys.has(code);
   }
-  // Scripted input for the automated playtest and screenshot staging.
-  inject(code, down) {
-    if (down) { this.keys.add(code); this.pressed.add(code); }
-    else this.keys.delete(code);
+
+  // Accumulated mouse movement since the last call; resets to zero.
+  takeMouse() {
+    const out = { dx: this.mouseDX, dy: this.mouseDY };
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    return out;
+  }
+
+  // True once per mouse press; consumes the flag.
+  consumeClick() {
+    const c = this._clicked;
+    this._clicked = false;
+    return c;
+  }
+
+  // Request pointer lock. Must be called from a user gesture (click).
+  lockPointer() {
+    if (document.pointerLockElement !== this.canvas) {
+      try {
+        this.canvas.requestPointerLock();
+      } catch (e) {
+        // Pointer lock unavailable — drag-look fallback still works.
+      }
+    }
+  }
+
+  get pointerLocked() {
+    return document.pointerLockElement === this.canvas;
   }
 }
