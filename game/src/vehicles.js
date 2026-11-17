@@ -142,6 +142,9 @@ export class Car {
     scene.add(mesh);
     this.mesh = mesh;
     this.pos = mesh.position; // pos IS mesh.position (contract)
+    mesh.userData.ref = this; // raycast hit resolution: shoot() walks up
+    // from the hit child mesh looking for userData.ref — without this,
+    // cars could never take pistol damage (peds set it; cars did not).
   }
 
   // ---- player driving (arcade) ----
