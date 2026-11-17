@@ -142,6 +142,10 @@ export class Car {
     scene.add(mesh);
     this.mesh = mesh;
     this.pos = mesh.position; // pos IS mesh.position (contract)
+    // The shooting raycast walks up from the hit mesh to userData.ref: a
+    // car without it can never take bullet damage (playtest: cars were
+    // unshootable even on a direct hit).
+    mesh.userData.ref = this;
   }
 
   // ---- player driving (arcade) ----
@@ -416,13 +420,17 @@ export function makeParkedCars(scene, world) {
   const g = (world && world.garage) || { x: 0, z: 0 };
   const h = (world && world.harbor) || { x: 60, z: 60 };
   const b = (world && world.bank) || { x: -60, z: -60 };
+  // Parked cars sit on open ground in front of their landmark — never
+  // inside a building footprint (the garage pair used to spawn inside the
+  // garage itself, and the bank pair inside the bank, half-buried with
+  // their lights poking through the wall and unreachable to enter).
   const spots = [
-    { x: g.x + 8, z: g.z + 2, kind: 'sedan', color: 0xaa4444 },
-    { x: g.x + 8, z: g.z + 8, kind: 'sport', color: 0x2244aa },
+    { x: g.x + 6, z: g.z + 20, kind: 'sedan', color: 0xaa4444 },
+    { x: g.x + 14, z: g.z + 20, kind: 'sport', color: 0x2244aa },
     { x: h.x - 8, z: h.z + 4, kind: 'taxi', color: 0xf7c948 },
     { x: h.x - 8, z: h.z + 10, kind: 'van', color: 0xdddddd },
-    { x: b.x + 6, z: b.z - 6, kind: 'sedan', color: 0x226622 },
-    { x: b.x + 12, z: b.z - 6, kind: 'police', color: 0xf2f2f2 },
+    { x: b.x + 18, z: b.z - 6, kind: 'sedan', color: 0x226622 },
+    { x: b.x + 18, z: b.z + 2, kind: 'police', color: 0xf2f2f2 },
   ];
   const out = [];
   for (const s of spots) {

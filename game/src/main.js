@@ -300,25 +300,49 @@ function updateCamera(dt) {
   camPitch = THREE.MathUtils.clamp(camPitch + m.dy * 0.0022, -0.05, 0.85);
   S.camYaw = camYaw;
   const target = player.onFoot ? player.pos : (S.car ? S.car.pos : player.pos);
-  const dist = player.onFoot ? 7.5 : 11;
-  const height = player.onFoot ? 3.1 : 4.2;
+  // Aiming (on foot, pistol out): a low, flat shoulder camera whose
+  // look point sits 20 m ahead at chest height, so the crosshair ray
+  // stays on a target's torso from ~5 m out to ~35 m. The old overview
+  // camera (7.5 m back, 4.4 m up, looking 2.5 m ahead) made the ray dive
+  // under every ped and car past ~5 m — playtest: 6 shots, 0 hits.
+  const aiming = player.onFoot && player.armed;
+  let dist = aiming ? 6.5 : (player.onFoot ? 7.5 : 11);
+  const height = aiming
+    ? 2.0 + (camPitch - 0.32)
+    : (player.onFoot ? 3.1 : 4.2);
   const back = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
   const speed01 = S.car ? Math.min(Math.abs(S.car.speed) / CFG.CAR.maxSpeed, 1) : 0;
   const want = new THREE.Vector3(
     target.x + back.x * dist,
-    target.y + height + camPitch * 4,
+    target.y + height + (aiming ? 0 : camPitch * 4),
     target.z + back.z * dist,
   );
   const k = 1 - Math.exp(-7 * dt);
   camPos.lerp(want, k);
-  // Keep the camera out of buildings (simple: lift it).
-  if (world.isInBuilding(camPos.x, camPos.z, 0.5)) camPos.y = Math.max(camPos.y, 14);
+  // Keep the camera out of buildings. Overview: lift it. Aiming: pull it
+  // in instead — lifting to 14 m would point the crosshair at the ground.
+  if (world.isInBuilding(camPos.x, camPos.z, 0.5)) {
+    if (aiming) {
+      while (dist > 2.5 && world.isInBuilding(camPos.x, camPos.z, 0.5)) {
+        dist -= 1.5;
+        camPos.set(
+          target.x + back.x * dist,
+          target.y + height,
+          target.z + back.z * dist,
+        );
+      }
+    } else {
+      camPos.y = Math.max(camPos.y, 14);
+    }
+  }
   const shake = S.fx.shakeOffset(dt);
   camera.position.set(camPos.x + shake.x, camPos.y + shake.y, camPos.z);
+  const lookDist = aiming ? -20 : -2.5;
+  const lookY = aiming ? 1.3 + (camPitch - 0.32) * 4 : 1.6;
   const look = new THREE.Vector3(
-    target.x + back.x * -2.5,
-    target.y + 1.6,
-    target.z + back.z * -2.5,
+    target.x + back.x * lookDist,
+    target.y + lookY,
+    target.z + back.z * lookDist,
   );
   camera.lookAt(look);
   const wantFov = 62 + speed01 * 13;

@@ -9,7 +9,7 @@
 // then feedback (toasts). Minimap bottom-left, objective top-centre,
 // vitals bottom-right — nothing covers the crosshair or the road ahead.
 
-import { S } from './state.js';
+import { S, loadGame } from './state.js';
 
 function $(id) {
   const el = document.getElementById(id);
@@ -81,9 +81,13 @@ export class HUD {
     if (el) el.textContent = text;
   }
 
+  // Visibility is class-based: .hidden is display:none !important, so an
+  // inline style.display can never show an element that carries the class
+  // (that bug hid the HUD, the pause menu, the end screen and the
+  // crosshair — all of them carry .hidden in the markup).
   _show(el, show) {
     if (!el) return;
-    el.style.display = show ? '' : 'none';
+    el.classList.toggle('hidden', !show);
   }
 
   // ---- per-frame ---------------------------------------------------------
@@ -127,10 +131,10 @@ export class HUD {
       this._setText(this.elMissionTitle, title);
     }
 
-    // Crosshair only when armed and on foot.
+    // Crosshair only when armed and on foot (class-based: see _show).
     if (this.elCrosshair) {
       const show = !!(S.player && S.player.armed && S.player.onFoot && S.mode === 'playing');
-      this.elCrosshair.style.display = show ? '' : 'none';
+      this.elCrosshair.classList.toggle('hidden', !show);
     }
 
     this.drawMinimap();
@@ -298,18 +302,21 @@ export class HUD {
     this._show(this.elEnd, false);
     this._show(this.elTitle, true);
     this._show(this.elBtnContinue, !!hasSave);
-    if (this.elContinueLabel && hasSave && S) {
+    // Show the SAVE's own numbers, not the fresh-run defaults.
+    const sv = hasSave ? loadGame() : null;
+    const cash = sv ? (sv.cash ?? 0) : 0;
+    const jobs = sv && sv.stats ? (sv.stats.missionsDone || 0) : 0;
+    const hp = sv ? (sv.health ?? 100) : 100;
+    if (this.elContinueLabel && hasSave) {
       this.elContinueLabel.textContent =
-        'Cash $' + Math.floor(S.cash || 0) +
-        ' · Jobs done: ' + (S.stats ? (S.stats.missionsDone || 0) : 0);
+        'Cash $' + Math.floor(cash) + ' · Jobs done: ' + jobs;
     }
     if (this.elTitleSaveInfo) {
-      if (hasSave && S) {
-        const jobs = S.stats ? (S.stats.missionsDone || 0) : 0;
+      if (hasSave) {
         this.elTitleSaveInfo.textContent =
-          'Saved game — Cash $' + Math.floor(S.cash || 0) +
+          'Saved game — Cash $' + Math.floor(cash) +
           ' · Jobs done: ' + jobs +
-          ' · Health: ' + Math.round(S.health || 0);
+          ' · Health: ' + Math.round(hp);
         this.elTitleSaveInfo.style.display = '';
       } else {
         this.elTitleSaveInfo.textContent = '';
