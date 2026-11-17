@@ -8,6 +8,9 @@
 //
 // Local check:  mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 // Play locally: node serve.ts, then open http://localhost:8080
+// QA round 2 (2026-11-18): playtested headless end to end — HUD/pause/end
+// visibility, shootable cars, aim camera, bank targets and rival tuning
+// were all fixed from what that playtest showed; see README for the list.
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
