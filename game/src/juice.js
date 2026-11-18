@@ -86,6 +86,16 @@ export class FX {
     this.burst(pos, 0x8a8a8a, 3, 0.9, 1.3, 1, 2.2);
   }
 
+  // Rotor wash: a ring of dust kicked up under a low helicopter.
+  rotorWash(pos) {
+    this.burst(pos, 0xc8b98a, 10, 3.5, 0.9, 1, 0.4);
+  }
+
+  // Healing sparkle: soft green motes rising where Marco rests.
+  healSparkle(pos) {
+    this.burst(pos, 0x8affc1, 12, 1.6, 1.1, 1, 3.2);
+  }
+
   muzzle(pos) {
     // Gun flash: bright yellow core + orange halo, very short life.
     this.burst(pos, 0xffee66, 10, 6, 0.18, 1, 1);

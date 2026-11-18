@@ -39,6 +39,17 @@ const MIME: Record<string, string> = {
 
 createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
+  // Health probe for automation (smoke tests, screenshot tooling): a tiny
+  // JSON answer that never touches the filesystem.
+  if (url.pathname === '/health') {
+    const body = JSON.stringify({ ok: true, game: 'solmar-bay', port });
+    response.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': Buffer.byteLength(body),
+    });
+    response.end(body);
+    return;
+  }
   let pathname: string;
   try {
     pathname = decodeURIComponent(url.pathname);

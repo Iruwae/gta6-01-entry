@@ -46,7 +46,7 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 
-await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'networkidle0', timeout: 30000 });
+await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'load', timeout: 60000 });
 await sleep(2500);
 
 const st = () => page.evaluate(() => {
@@ -114,6 +114,41 @@ async function aimAt(x, z) {
     await sleep(120);
   }
 }
+// Aim the camera at the SKY-7 news chopper so the heli reads in the chase
+// frame: like aimAt, but the target is 17 m up — the in-game camera tilt
+// (tiltBoost) lifts the pitch the rest of the way once we face its azimuth.
+async function aimAtHeli() {
+  const hp = await page.evaluate(() => {
+    const S = window.__solmar.S;
+    const h = S.skyWatch && S.skyWatch.mesh ? S.skyWatch.mesh.position : null;
+    return h ? { x: h.x, y: h.y, z: h.z } : null;
+  });
+  if (!hp) { console.log('heli: SKY-7 not up'); return false; }
+  await aimAt(hp.x, hp.z);
+  console.log(`heli in frame at (${hp.x.toFixed(1)}, ${hp.y.toFixed(1)}, ${hp.z.toFixed(1)})`);
+  return true;
+}
+// Tilt the camera up so the heli reads: a vertical drag raises camPitch
+// (clamped 0.85 rad). ~200 px down ≈ +0.44 rad of upward tilt.
+async function lookUp(px = 200) {
+  await page.mouse.move(640, 360);
+  await page.mouse.down();
+  await page.mouse.move(640, 360 + px, { steps: 8 });
+  await page.mouse.up();
+  await sleep(300);
+}
+// The m1 briefing dialogue auto-starts at the garage and eats the E key
+// (E advances the dialogue, it does not enter the car) — clear it first.
+async function clearDialogue() {
+  await sleep(2500); // let the auto-starting briefing appear
+  for (let i = 0; i < 10; i++) {
+    const active = await page.evaluate(() => !!(window.__solmar.S.dialogue && window.__solmar.S.dialogue.active));
+    if (!active) return true;
+    await page.evaluate(() => { const d = window.__solmar.S.dialogue; if (d) d.advance(); });
+    await sleep(1200);
+  }
+  return await page.evaluate(() => !(window.__solmar.S.dialogue && window.__solmar.S.dialogue.active));
+}
 async function shoot(name) {
   const path = join(SHOTS, name);
   await page.screenshot({ path, type: 'jpeg', quality: 80 });
@@ -124,28 +159,55 @@ async function shoot(name) {
 }
 async function newGame() {
   await page.evaluate(() => { localStorage.clear(); });
-  await page.reload({ waitUntil: 'networkidle0' });
+  // networkidle0 times out on the reload (the module graph is large and
+  // headless is slow) — load + 60 s is what the smoke test uses.
+  await page.reload({ waitUntil: 'load', timeout: 60000 });
   await sleep(2000);
   await page.click('#btn-new');
   await sleep(1200);
+  // Round 5 intro cutscene swallows the first keypress (any key skips
+  // it) — end it explicitly before staging, or the E to enter the car
+  // just skips the cutscene instead. Poll until it is up, then finish it.
+  for (let i = 0; i < 10; i++) {
+    const active = await page.evaluate(() => !!(window.__solmar.S.cutsceneDirector && window.__solmar.S.cutsceneDirector.active));
+    if (active) { await page.evaluate(() => window.__solmar.S.cutsceneDirector.finish()); break; }
+    await sleep(1000);
+  }
+  await sleep(1000);
 }
 
 await newGame();
 
 // 1-chase (cover): driving with 4 stars, police on the tail, mission live.
 await teleport(-76, -67.5);
+await clearDialogue();
 await holdKeyUntil('KeyE', async () => (await st()).inCar);
 // Put the car on the z=-60 road heading east so the chase runs clean.
 await page.evaluate(() => {
   const S = window.__solmar.S;
-  if (S.car) { S.car.pos.set(-40, 0, -60); S.car.heading = Math.PI / 2; S.car.speed = 12; }
+  if (S.car) {
+    S.car.pos.set(-40, 0, -60); S.car.heading = Math.PI / 2; S.car.speed = 12;
+    // Staging: the chase car must survive six police rams for the shot.
+    S.car.health = 999; S.car.maxHealth = 999;
+  }
 });
 await page.evaluate(() => { const S = window.__solmar.S; S.heat = 90; });
 await page.keyboard.down('KeyW');
 await waitGame(6); // police arrive and close in
 await page.keyboard.up('KeyW');
+// Refresh the heat so the police are still hunting (not searching) at
+// shoot time, and put the car back up to speed for a dynamic frame.
+await page.evaluate(() => {
+  const S = window.__solmar.S;
+  S.heat = 90;
+  if (S.car) S.car.speed = 12;
+});
+await waitGame(1);
 // Face the nearest police car so the chase is in frame (the chase cam
 // looks forward, so police behind the car would otherwise be invisible).
+// Do NOT aim at the heli here: it is still flying in from far away and
+// aiming at it turns the camera away from the police. Its searchlight
+// pool on the ground reads in frame regardless.
 const pc = await page.evaluate(() => {
   const S = window.__solmar.S;
   let best = null, bd = 1e9;
@@ -153,41 +215,23 @@ const pc = await page.evaluate(() => {
   return best ? { x: best.pos.x, z: best.pos.z } : null;
 });
 if (pc) await aimAt(pc.x, pc.z);
+await lookUp(60); // a slight lift — the heli's pool and the sky read in
 await waitGame(0.5);
 await shoot('1-chase.jpg');
 
-// 2-mission: mission 1, sport car, beacon over the bank, objective on HUD.
+// 2-mission: mission 5 Payday at the Pier — Vic's briefing + Lena crew.
 await newGame();
-await teleport(-90, -64);
-// Wait for the mission sport car to spawn (it appears 1-2 frames after
-// the mission auto-starts), then enter it — pressing E before it exists
-// wastes the press edge.
-for (let i = 0; i < 20; i++) {
-  const has = await page.evaluate(() => !!window.__solmar.S.missions.missionCar);
-  if (has) break;
-  await sleep(500);
-}
-await holdKeyUntil('KeyE', async () => (await st()).inCar); // mission sport car
-await sleep(500);
-// Stage the car on the open road heading east, then drive; face the bank
-// (and its beacon) for the shot. If the enter somehow failed, stay put
-// and frame the sport car + beacon on foot instead of walking into a wall.
-if ((await st()).inCar) {
-  await page.evaluate(() => {
-    const S = window.__solmar.S;
-    if (S.car) { S.car.pos.set(0, 0, -60); S.car.heading = Math.PI / 2; S.car.speed = 10; }
-  });
-  await page.keyboard.down('KeyW');
-  await waitGame(4);
-  await page.keyboard.up('KeyW');
-  await aimAt(30, 50); // the bank + mission beacon
-} else {
-  const mc = await page.evaluate(() => {
-    const c = window.__solmar.S.missions.missionCar;
-    return c ? { x: c.pos.x, z: c.pos.z } : null;
-  });
-  if (mc) { await teleport(mc.x + 6, mc.z + 6); await waitGame(0.5); await aimAt(mc.x, mc.z); }
-}
+await page.evaluate(() => { const S = window.__solmar.S; S.missions.start(4); });
+await sleep(1500); // briefing dialogue up (Vic Torres, portrait on screen)
+await teleport(95, 152); // the open pier end — water behind the crew, no wall
+await waitGame(1);
+const crew = await page.evaluate(() => {
+  const S = window.__solmar.S;
+  const c = S.crew && S.crew.mesh ? S.crew.mesh.position : null;
+  return c ? { x: c.x, z: c.z } : null;
+});
+if (crew) await aimAt(crew.x, crew.z);
+else await aimAt(90, 150);
 await waitGame(0.5);
 await shoot('2-mission.jpg');
 
@@ -195,47 +239,65 @@ async function exitCarIfAny() {
   const s = await st();
   if (s.inCar) { await tapKey('KeyE'); await sleep(300); }
 }
-// 3-drive: cruising a busy road — traffic, buildings, speed on the HUD.
-// Fresh game (no dependence on shot 2's state — its exit is unreliable at
-// ~1 fps, which left shot 3 on foot last run).
+// 3-drive: street race — gold checkpoint gates, timer and prize on HUD.
 await newGame();
 await teleport(-76, -67.5);
+await clearDialogue();
 await holdKeyUntil('KeyE', async () => (await st()).inCar); // parked sport car by the garage
 await sleep(500);
 await page.evaluate(() => {
   const S = window.__solmar.S;
-  if (S.car) { S.car.pos.set(0, 0, -60); S.car.heading = Math.PI / 2; S.car.speed = 10; }
+  if (S.car) { S.car.pos.set(-60, 0, -60); S.car.heading = Math.PI / 2; S.car.speed = 10; }
 });
+await holdKeyUntil('KeyT', async () => await page.evaluate(() => { const S = window.__solmar.S; return !!(S.sideActivities && S.sideActivities.race.active); }));
 await page.keyboard.down('KeyW');
 await waitGame(3);
 await page.keyboard.up('KeyW');
+// Face the next gold gate so the race line reads in frame.
+// RACE_GATES lives in side.js as a module const (not on the instance) —
+// mirror its four corners here for the aim.
+const gate = await page.evaluate(() => {
+  const S = window.__solmar.S;
+  const GATES = [{ x: 60, z: -60 }, { x: 60, z: 60 }, { x: -60, z: 60 }, { x: -60, z: -60 }];
+  const g = GATES[S.sideActivities.race.gate];
+  return g ? { x: g.x, z: g.z } : null;
+});
+if (gate) await aimAt(gate.x, gate.z);
+await waitGame(0.5);
 await shoot('3-drive.jpg');
 
-// 4-onfoot: harbor crew fight — crosshair, rivals, wanted stars, objective.
-// Exit the car reliably first (tapKey can fall between frames at ~1 fps).
-{
-  const s0 = await st();
-  if (s0.inCar) await holdKeyUntil('KeyE', async () => !(await st()).inCar);
-}
-await page.evaluate(() => { const S = window.__solmar.S; S.missions.start(2); });
-await teleport(90, 128);
+// 4-onfoot: night ride on the street bike — day/night cycle, lit windows,
+// headlights, district name on the HUD. The night ramp is per-frame, so
+// hold W for a long wall stretch while the sky darkens.
+await newGame();
+await teleport(-88, -66); // right on the parked bike
+await clearDialogue();
+await holdKeyUntil('KeyE', async () => (await st()).inCar); // the bike
 await sleep(500);
-// Face the harbor crew so the crosshair sits on them.
-const r = await page.evaluate(() => {
+await page.evaluate(() => {
   const S = window.__solmar.S;
-  const rs = S.missions.rivals.filter((p) => p.alive);
-  return rs.length ? { x: rs[0].pos.x, z: rs[0].pos.z } : null;
+  S.time = 200; // 21:48 — night
+  if (S.car) { S.car.pos.set(0, 0, -60); S.car.heading = Math.PI / 2; S.car.speed = 12; }
 });
-if (r) await aimAt(r.x, r.z);
-await waitGame(1);
+await page.keyboard.down('KeyW');
+await sleep(45000); // ride while the night ramp lands
+await page.keyboard.up('KeyW');
+// Re-stage the bike onto an open stretch for the frame: the 45 s ride
+// can end wedged against traffic (a van), which reads as a crash, not a
+// ride. The night ramp is already landed by now.
+await page.evaluate(() => {
+  const S = window.__solmar.S;
+  if (S.car) { S.car.pos.set(0, 0, -60); S.car.heading = Math.PI / 2; S.car.speed = 25; }
+});
+await sleep(800);
 await shoot('4-onfoot.jpg');
 
 if (errors.length) console.log('PAGE ERRORS:', errors.join(' | '));
 writeFileSync(join(REPO, 'shots.json'), JSON.stringify([
   { name: '1-chase.jpg', scene: 'Police chase at 3 stars: driving the stolen sport car with police cars on the tail, wanted stars + minimap + mission objective on the HUD' },
-  { name: '2-mission.jpg', scene: 'Mission 1 First Wheels: driving the sport car toward the Solmar Bank, mission beacon and objective on the HUD' },
-  { name: '3-drive.jpg', scene: 'Cruising the city roads in traffic: buildings, lamps, speed on the HUD' },
-  { name: '4-onfoot.jpg', scene: 'Mission 3 Harbor Heat on foot: crosshair on the harbor crew, wanted stars and objective on the HUD' },
+  { name: '2-mission.jpg', scene: 'Mission 5 Payday at the Pier: Vic Torres briefing with portrait, crew member Lena following on foot at the harbor' },
+  { name: '3-drive.jpg', scene: 'Street race side activity: driving the ring road toward a gold checkpoint gate, race timer and $300 prize on the HUD' },
+  { name: '4-onfoot.jpg', scene: 'Night ride on the street bike: day/night cycle at 21:48, lit windows, headlights and district name on the HUD' },
 ], null, 2) + '\n');
 console.log('shots.json written');
 

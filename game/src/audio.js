@@ -290,4 +290,60 @@ export class AudioEngine {
       this.master.gain.setTargetAtTime(this.muted ? 0 : MASTER_LEVEL, this._now(), 0.05);
     }
   }
+
+  // ---- round 5 systems ---------------------------------------------------
+  // Rotor wash: a low chopping loop while a helicopter is overhead.
+  rotor(on) {
+    if (!this.ctx) return;
+    if (on && !this.rotorOsc) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = 11;
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0.05;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 320;
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      osc.start();
+      this.rotorOsc = osc;
+      this.rotorGain = gain;
+    } else if (!on && this.rotorOsc) {
+      try { this.rotorOsc.stop(); } catch (e) { /* already stopped */ }
+      this.rotorOsc = null;
+      this.rotorGain = null;
+    }
+  }
+
+  // DJ jingle: a bright two-note sting when the radio DJ talks.
+  djJingle() {
+    if (!this.ctx) return;
+    this._tone({ type: 'triangle', freq: 880, dur: 0.09, vol: 0.12 });
+    this._tone({ type: 'triangle', freq: 1318, dur: 0.14, vol: 0.12, delay: 0.09 });
+  }
+
+  // Pay-n-spray: a short airbrush hiss + a cash-register chirp.
+  spray() {
+    if (!this.ctx) return;
+    this._noise({ dur: 0.5, vol: 0.18, filterType: 'bandpass', filterFreq: 5200 });
+    this._tone({ type: 'sine', freq: 1568, dur: 0.08, vol: 0.14, delay: 0.45 });
+    this._tone({ type: 'sine', freq: 2093, dur: 0.12, vol: 0.14, delay: 0.53 });
+  }
+
+  // Shop purchase: a single coin chirp.
+  purchase() {
+    if (!this.ctx) return;
+    this._tone({ type: 'sine', freq: 1046, dur: 0.08, vol: 0.16 });
+    this._tone({ type: 'sine', freq: 1568, dur: 0.12, vol: 0.16, delay: 0.07 });
+  }
+
+  // Safehouse rest: a soft warm chord that says the day is done.
+  rest() {
+    if (!this.ctx) return;
+    this._tone({ type: 'sine', freq: 261.63, dur: 0.7, vol: 0.1 });
+    this._tone({ type: 'sine', freq: 329.63, dur: 0.7, vol: 0.1, delay: 0.05 });
+    this._tone({ type: 'sine', freq: 392.0, dur: 0.9, vol: 0.1, delay: 0.1 });
+  }
 }

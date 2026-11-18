@@ -17,7 +17,7 @@ import { Car } from './vehicles.js';
 import { Ped } from './people.js';
 import { DIALOGUE } from './dialogue.js';
 
-const FALLBACK_REWARDS = [500, 800, 1200, 2500];
+const FALLBACK_REWARDS = [500, 800, 1200, 2500, 4000, 5500, 7000, 9000, 12000, 20000];
 const RIVAL_SHIRTS = [0xc0392b, 0x8e44ad, 0xd35400, 0x2c3e50];
 
 function rewardFor(i) {
@@ -44,6 +44,7 @@ export class Missions {
       {
         id: 'm1',
         title: 'First Wheels',
+        flavor: 'Steal the sport car, lose nobody, bring it to the bank.',
         briefing: 'Lena: "Marco! You\'re back. I need wheels moved — get to my garage, take the sport car, and drop it by the bank. Don\'t scratch it."',
         stages: [
           { type: 'goto', target: { x: -90, z: -66, r: 8 }, text: 'Go to the Bayline garage' },
@@ -54,6 +55,7 @@ export class Missions {
       {
         id: 'm2',
         title: 'Courier Run',
+        flavor: 'Two drops against the clock. Late means no pay.',
         briefing: 'Lena: "Package waiting at the harbor. Two drops, and the clock is ticking — late means no pay. Move!"',
         stages: [
           { type: 'goto', target: { x: 90, z: 138, r: 10 }, text: 'Pick up the package at the harbor' },
@@ -64,6 +66,7 @@ export class Missions {
       {
         id: 'm3',
         title: 'Harbor Heat',
+        flavor: "A rival crew on Lena's turf. Clear them out.",
         briefing: 'Lena: "A crew is muscling in on my harbor turf. Go clear them out — then come home. Watch your back."',
         stages: [
           { type: 'goto', target: { x: 90, z: 138, r: 10 }, text: 'Go to the harbor' },
@@ -74,11 +77,83 @@ export class Missions {
       {
         id: 'm4',
         title: 'The Big Score',
+        flavor: 'The bank van. The whole city on you. Bring it home.',
         briefing: 'Lena: "One last job, Marco. The bank van. Take it, and the whole city will be on you — bring it to my garage and we\'re square. All of it."',
         stages: [
           { type: 'goto', target: { x: 30, z: 52, r: 10 }, text: 'Go to the Solmar Bank' },
           { type: 'enter', spawn: 'van', target: { x: 30, z: 52, r: 12 }, text: 'Get in the getaway van' },
           { type: 'escape', target: { x: -90, z: -66, r: 10 }, text: 'Escape! Bring the van to the Bayline garage' },
+        ],
+      },
+      {
+        id: 'm5',
+        title: 'Payday at the Pier',
+        flavor: 'Move the take from the pier to the bank. Vic is watching.',
+        briefing: 'Lena: "The debt is gone but the garage still eats. A buyer at the pier wants the take moved — fast, quiet, no questions. Vic will be watching."',
+        stages: [
+          { type: 'goto', target: { x: 90, z: 138, r: 10 }, text: 'Go to the harbor pier' },
+          { type: 'deliver', target: { x: 30, z: 52, r: 8 }, time: 75, heat: 25, text: 'Deliver the take to the bank (75s)' },
+          { type: 'goto', target: { x: -90, z: -66, r: 8 }, text: 'Get back to the Bayline garage' },
+        ],
+      },
+      {
+        id: 'm6',
+        title: 'The Fence',
+        flavor: 'A hot GT at the motel. The cops like that car.',
+        briefing: 'Vic: "You move clean, kid. I got a hot GT at the motel — take it across town to the north docks. Cops like that car. Do not let them keep it."',
+        stages: [
+          { type: 'goto', target: { x: 120, z: -120, r: 10 }, text: 'Meet Vic at the motel' },
+          { type: 'enter', spawn: 'sport', spawnAt: { x: 108, z: -120 }, target: { x: 108, z: -120, r: 12 }, text: 'Get in the hot sport car' },
+          { type: 'drive', target: { x: -30, z: 120, r: 10 }, heat: 40, text: 'Drive the hot car to the north docks' },
+        ],
+      },
+      {
+        id: 'm7',
+        title: 'Turf War',
+        flavor: 'Two crews, two turf fights, one afternoon.',
+        briefing: 'Lena: "Two crews moved in while we were busy — one on my harbor, one at the bank. Take both lots down, Marco. The bay is ours."',
+        stages: [
+          { type: 'goto', target: { x: 90, z: 138, r: 10 }, text: 'Go to the harbor' },
+          { type: 'kill', spawn: 'rivals', crewAt: { x: 90, z: 138 }, target: { x: 90, z: 138, r: 14 }, text: 'Clear the harbor crew' },
+          { type: 'goto', target: { x: 30, z: 52, r: 10 }, text: 'Go to the bank' },
+          { type: 'kill', spawn: 'rivals', crewAt: { x: 30, z: 52 }, target: { x: 30, z: 52, r: 14 }, heat: 55, text: 'Clear the bank crew' },
+          { type: 'goto', target: { x: -90, z: -66, r: 8 }, text: 'Get back to the Bayline garage' },
+        ],
+      },
+      {
+        id: 'm8',
+        title: 'Midnight Run',
+        flavor: 'Two drops, one hold, and the PD on overtime.',
+        briefing: 'Vic: "Big night, kid. Two drops, one pickup, and the whole PD on overtime. You hold the pier for twenty seconds while the deal closes — then you vanish."',
+        stages: [
+          { type: 'deliver', target: { x: -30, z: 90, r: 8 }, time: 90, text: 'Drop one — North Docks (90s)' },
+          { type: 'deliver', target: { x: 90, z: -30, r: 8 }, time: 60, text: 'Drop two — East Side (60s)' },
+          { type: 'hold', target: { x: 90, z: 138, r: 10 }, time: 20, heat: 70, text: 'Hold the pier — 20s while the deal closes' },
+          { type: 'goto', target: { x: -90, z: -66, r: 8 }, text: 'Get back to the Bayline garage' },
+        ],
+      },
+      {
+        id: 'm9',
+        title: 'Hot Wheels',
+        flavor: 'Steal a PD interceptor in daylight. Five stars.',
+        briefing: 'Lena: "You want legend status? Take a PD interceptor off the bank forecourt, in daylight, and bring it home. Five stars, Marco. Five."',
+        stages: [
+          { type: 'goto', target: { x: 30, z: 52, r: 10 }, text: 'Go to the Solmar Bank' },
+          { type: 'enter', spawn: 'interceptor', target: { x: 30, z: 52, r: 12 }, text: 'Steal the PD interceptor' },
+          { type: 'escape', target: { x: -90, z: -66, r: 10 }, heat: 90, text: 'Escape! Five stars — bring it to the garage' },
+        ],
+      },
+      {
+        id: 'm10',
+        title: 'King of the Bay',
+        flavor: 'Everything we built, one last run. The city is watching.',
+        briefing: 'Lena: "Everything we built comes down to this. The bank van, the harbor, the whole city watching. Bring it all home, Marco — and Solmar Bay is yours. Forever."',
+        stages: [
+          { type: 'goto', target: { x: 30, z: 52, r: 10 }, text: 'Go to the Solmar Bank' },
+          { type: 'enter', spawn: 'van', target: { x: 30, z: 52, r: 12 }, text: 'Get in the getaway van' },
+          { type: 'escape', target: { x: 90, z: 138, r: 10 }, heat: 95, text: 'Escape to the harbor — five stars' },
+          { type: 'hold', target: { x: 90, z: 138, r: 10 }, time: 15, text: 'Hold the harbor — 15s for the crew to load up' },
+          { type: 'goto', target: { x: -90, z: -66, r: 8 }, text: 'Bring it home to the Bayline garage' },
         ],
       },
     ];
@@ -88,7 +163,13 @@ export class Missions {
     this.timer = 0;
     this.rivals = [];
     this.targetVan = null;
+    this.targetInterceptor = null; // m9: the stolen PD interceptor
     this.missionCar = null;
+  }
+
+  // Reward for job i (menu.js reads this for the job list).
+  rewardOf(i) {
+    return rewardFor(i);
   }
 
   // ---- helpers -----------------------------------------------------------
@@ -140,6 +221,17 @@ export class Missions {
     return car;
   }
 
+  _spawnSportCarAt(x, z) {
+    const scene = this._scene();
+    if (!scene) return null;
+    if (this.missionCar && !this.missionCar.dead) return this.missionCar;
+    const car = new Car(scene, { x, z, heading: Math.PI / 2, color: 0xe74c3c, kind: 'sport' });
+    car.parked = true;
+    if (S && Array.isArray(S.cars)) S.cars.push(car);
+    this.missionCar = car;
+    return car;
+  }
+
   _spawnVan() {
     const scene = this._scene();
     if (!scene) return null;
@@ -152,6 +244,45 @@ export class Missions {
     if (S && Array.isArray(S.cars)) S.cars.push(van);
     this.targetVan = van;
     return van;
+  }
+
+  // m9: a PD interceptor parked on the bank forecourt, waiting to be
+  // stolen in daylight. Same shape as the van spawn, different prey.
+  _spawnInterceptor() {
+    const scene = this._scene();
+    if (!scene) return null;
+    if (this.targetInterceptor && !this.targetInterceptor.dead) return this.targetInterceptor;
+    const car = new Car(scene, { x: 30, z: 52, heading: -Math.PI / 2, color: 0xf2f2f2, kind: 'police' });
+    car.parked = true;
+    if (S && Array.isArray(S.cars)) S.cars.push(car);
+    this.targetInterceptor = car;
+    return car;
+  }
+
+  // A hostile crew at an arbitrary corner (m7 hits two spots). Same
+  // four-fighter shape as the harbor crew, placed where the stage says.
+  _spawnCrewAt(x, z, count) {
+    const scene = this._scene();
+    if (!scene || !S || !S.world) return;
+    if (this.rivals.length > 0) return;
+    const offsets = [
+      { x: -8, z: -6 }, { x: 8, z: -6 },
+      { x: -8, z: 8 }, { x: 8, z: 8 },
+      { x: 0, z: -12 }, { x: 0, z: 12 },
+    ];
+    const n = Math.max(1, Math.min(6, count || 4));
+    for (let i = 0; i < n; i++) {
+      const o = offsets[i % offsets.length];
+      const ped = new Ped(scene, S.world, {
+        x: clampCoord(x + o.x),
+        z: clampCoord(z + o.z),
+        hostile: true,
+        shirt: RIVAL_SHIRTS[i % RIVAL_SHIRTS.length],
+      });
+      if (S && Array.isArray(S.peds)) S.peds.push(ped);
+      this.rivals.push(ped);
+    }
+    this._toast('Hostile crew: ' + n + ' — clear them out!');
   }
 
   _spawnRivals() {
@@ -176,6 +307,15 @@ export class Missions {
     this._toast('Harbor crew: 4 hostiles — clear them out!');
   }
 
+  // Which vehicle an 'enter' stage wants: the van for m4/m10, the
+  // interceptor for m9, the sport car for the rest.
+  _enterTarget() {
+    if (!this.current) return null;
+    if (this.current.id === 'm9') return this.targetInterceptor;
+    if (this.current.id === 'm4' || this.current.id === 'm10') return this.targetVan;
+    return this.missionCar;
+  }
+
   _clearSpawns(removeVan) {
     for (const ped of this.rivals) {
       if (ped && typeof ped.remove === 'function') ped.remove();
@@ -186,6 +326,11 @@ export class Missions {
       if (typeof this.targetVan.remove === 'function') this.targetVan.remove();
       this._removeFrom(S ? S.cars : null, this.targetVan);
       this.targetVan = null;
+    }
+    if (removeVan && this.targetInterceptor) {
+      if (typeof this.targetInterceptor.remove === 'function') this.targetInterceptor.remove();
+      this._removeFrom(S ? S.cars : null, this.targetInterceptor);
+      this.targetInterceptor = null;
     }
   }
 
@@ -200,6 +345,8 @@ export class Missions {
     this.timer = 0;
     this._enterStage();
     this._toast(this.current.briefing);
+    // Lena joins every job as the getaway companion (crew.js).
+    if (S && S.crew && typeof S.crew.joinMission === 'function') S.crew.joinMission(i);
     // Mission briefing as a dialogue box with Lena's portrait — the toast
     // stays as the stage text, the dialogue carries the story.
     if (S && S.dialogue && typeof S.dialogue.play === 'function') {
@@ -227,19 +374,33 @@ export class Missions {
     this.timer = 0;
     this.missionCar = null;
     this.targetVan = null;
+    this.targetInterceptor = null;
   }
 
   _enterStage() {
     const stage = this.current.stages[this.stageIdx];
     if (!stage) return;
-    if (stage.type === 'deliver') {
+    if (stage.type === 'deliver' || stage.type === 'hold') {
       this.timer = typeof stage.time === 'number' ? stage.time : 60;
     } else {
       this.timer = 0;
     }
-    if (stage.spawn === 'rivals') this._spawnRivals();
+    if (stage.spawn === 'rivals') {
+      if (stage.crewAt) this._spawnCrewAt(stage.crewAt.x, stage.crewAt.z, 4);
+      else this._spawnRivals();
+    }
     if (stage.spawn === 'van') this._spawnVan();
-    if (stage.spawn === 'sport') this._spawnSportCar();
+    if (stage.spawn === 'interceptor') this._spawnInterceptor();
+    if (stage.spawn === 'sport') {
+      if (stage.spawnAt) this._spawnSportCarAt(stage.spawnAt.x, stage.spawnAt.z);
+      else this._spawnSportCar();
+    }
+    // Stage heat: a stage can declare the wanted level it brings —
+    // the stakes rise across the ten jobs, and the heat lands on entry.
+    if (typeof stage.heat === 'number' && S) {
+      S.heat = Math.max(S.heat || 0, stage.heat);
+      if (stage.heat >= 70) this._toast('The whole city is on you now!');
+    }
   }
 
   _advance() {
@@ -265,14 +426,29 @@ export class Missions {
   }
 
   _complete() {
-    const reward = rewardFor(this.currentIdx);
+    // Replays pay the repeat rate (menu.js sets S.replayPay to 0.5 for
+    // a replayed job); first runs pay full. The rate resets here so the
+    // next job always starts at full pay.
+    const reward = Math.round(rewardFor(this.currentIdx) * (S ? (S.replayPay || 1) : 1));
+    if (S) S.replayPay = 1;
     if (S) {
       S.cash += reward;
       if (S.stats) S.stats.missionsDone++;
       S.missionIndex++;
     }
+    // Respect, chatter, and the clean-job tally live here: the moment a
+    // job lands is the moment the bay notices.
+    const doneIdx = this.currentIdx;
+    if (S && S.respectDirector) S.respectDirector.jobDone(doneIdx);
+    if (S && S.banterDirector) S.banterDirector.missionDone();
+    if (S && S.stats && (S.wanted || 0) <= 1) S.stats.cleanJobs = (S.stats.cleanJobs || 0) + 1;
+    // The tenth job ends the story: the outro sweep plays once the
+    // done-line has cleared (main.js watches outroPending).
+    if (doneIdx === 9 && S) S.outroPending = true;
     this._jingle();
     this._toast('Job done! +$' + reward);
+    // Lena steps off the job with Marco (crew.js).
+    if (S && S.crew && typeof S.crew.leaveMission === 'function') S.crew.leaveMission();
     if (S && S.dialogue && typeof S.dialogue.play === 'function') {
       const lines = DIALOGUE[this.current.id + '_done'];
       if (lines) S.dialogue.play(lines);
@@ -288,11 +464,13 @@ export class Missions {
     this.rivals = [];
     // The getaway van stays where the player left it; the sport car is theirs.
     this.targetVan = null;
+    this.targetInterceptor = null;
   }
 
   fail() {
     const idx = this.currentIdx;
     this._toast('Job failed — try again');
+    if (S && S.crew && typeof S.crew.leaveMission === 'function') S.crew.leaveMission();
     if (S && S.audio && typeof S.audio.siren === 'function') S.audio.siren(false);
     this._clearSpawns(true);
     this.current = null;
@@ -352,8 +530,17 @@ export class Missions {
     }
 
     if (stage.type === 'enter') {
-      const want = this.current.id === 'm4' ? this.targetVan : this.missionCar;
+      const want = this._enterTarget();
       if (S && S.car && (!want || S.car === want)) this._advance();
+      return;
+    }
+
+    if (stage.type === 'hold') {
+      // Hold the zone: the timer only runs while Marco stands inside.
+      if (this._near(stage.target)) {
+        this.timer -= dt;
+        if (this.timer <= 0) this._advance();
+      }
       return;
     }
 
@@ -363,7 +550,7 @@ export class Missions {
     }
 
     if (stage.type === 'escape') {
-      if (S && S.car === this.targetVan && this._near(stage.target)) {
+      if (S && S.car && S.car === this._enterTarget() && this._near(stage.target)) {
         this._advance();
       }
       return;
@@ -383,6 +570,9 @@ export class Missions {
       if (stage.type === 'deliver' && this.timer > 0) {
         text += ' — ' + Math.ceil(this.timer) + 's';
       }
+      if (stage.type === 'hold' && this.timer > 0) {
+        text += ' — hold ' + Math.ceil(this.timer) + 's';
+      }
       return text;
     }
     if (S && typeof S.missionIndex === 'number' && S.missionIndex >= this.defs.length) {
@@ -396,7 +586,7 @@ export class Missions {
     const stage = this.current.stages[this.stageIdx];
     if (!stage) return null;
     if (stage.type === 'enter') {
-      const want = this.current.id === 'm4' ? this.targetVan : this.missionCar;
+      const want = this._enterTarget();
       if (want && want.pos) return { x: want.pos.x, z: want.pos.z };
     }
     if (stage.target) return { x: stage.target.x, z: stage.target.z };

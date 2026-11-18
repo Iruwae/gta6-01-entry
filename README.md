@@ -26,7 +26,7 @@ What is in the game:
 - **Wanted level + police** — 5 stars driven by a heat system (stealing,
   shooting, running people over); police cars chase and ram, foot cops chase
   and arrest (BUSTED) when they hold you.
-- **Missions + story** — 4 sequential jobs from Lena: move the sport car to
+- **Missions + story** — 10 sequential jobs from Lena and Vic: move the sport car to
   the bank, a timed two-drop courier run, clear the harbor crew, and the big
   score: steal the bank van and escape a 3-star dragnet to the garage.
 - **Combat** — pistol with crosshair aim, raycast hits, damage numbers,
@@ -62,3 +62,44 @@ Controls: **WASD** move / drive · **Mouse** look · **Click** shoot ·
 ---
 
 <sub>Entered on [make.fun](https://make.fun/?ref=817k0hr2&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
+
+## Round 5 — the city lives (10 jobs, commerce, districts, crew, day/night)
+
+- **10 story missions** — the original four plus six more (Pier Payday, The Fence,
+  Turf War, Midnight Run, Hot Wheels, King of the Bay), each with a briefing and
+  a completion dialogue (Lena + Vic Torres, a new fence character), escalating
+  wanted levels, and a mission-select screen (replay finished jobs at half pay).
+- **Shop, safehouse, garage** — the 24/7 MART sells ammo, food, medkits and car
+  repair for real cash; the Sunset Motel safehouse restores HP, sheds two stars
+  of heat and saves; the Bayline Garage stores stolen cars and sells engine /
+  armor / NOS / paint upgrades.
+- **Districts** — Old Town, Downtown, Harbor, Industrial, Beach, Uptown and The
+  Strip, each with its own fog tint, props (neon billboards, smokestacks, beach
+  umbrellas, an uptown glass obelisk) and a HUD + minimap name banner when you
+  cross into one.
+- **Crew** — Lena rides every job with you: she follows on foot, rides shotgun,
+  and shoots hostile crew members beside you.
+- **Side activities** — street races (T: four gates around the ring road, $300),
+  taxi fares (Y: pick up at the stand, $80+ by distance), and 12 collectible
+  packages worth $50 each.
+- **Day/night cycle** — the 18:30 sunset slides into a real night (city lights,
+  lit windows, headlight beams, stars and a moon) and back to dawn, driven by
+  the same clock the HUD shows.
+- **Vehicle variety** — a street bike (nimble, fast, fragile) and a desert pickup
+  (slow, tough), both stealable and garage-storable, plus beach cruisers parked
+  on the sand.
+- **The city talks back** — Lena and Vic drop one-liners as the job unfolds
+  (chases, heat spikes, nightfall, district crossings, race wins, fares), never
+  over a briefing, never more than one line every nine seconds.
+- **Respect** — a real meter, never bought: jobs, races, fares, packages, crew
+  kills and fence sales earn it; WHEELMAN → STREET HUSTLER → SHOT CALLER →
+  BAY BOSS → KING OF THE BAY, with a HUD bar and a rank-up toast.
+- **Cutscenes** — a golden-hour flyover opens every new game (harbor, beach,
+  downtown, garage), and a dawn sweep closes the story when the tenth job lands.
+  Any key skips.
+- **Vic's fence** — sell stolen cars at the harbor yard (V) for kind-based cash,
+  half the upgrade money back, and a daily wanted board: three specific rides
+  pay a bonus on top. Cop cars are refused, and Vic says so.
+- **Daily challenges** — three fresh goals every game day (steal 3 cars, win 2
+  races, shed 100 heat at hideouts…), picked by a day seed so the whole bay
+  chases the same three, paying out the moment they complete.

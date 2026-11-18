@@ -101,6 +101,7 @@ export class Ped {
     this.name = opts.name || pick(NAMES);
     this.shirt = opts.shirt !== undefined ? opts.shirt : pick(SHIRTS);
     this.hostile = !!opts.hostile;
+    this.archetype = opts.archetype || null; // jogger | tourist | beachgoer | busker (ambient.js)
     this.health = this.hostile ? 60 : 100;
     this.alive = true;
     this.heading = rand(0, Math.PI * 2);
@@ -238,6 +239,16 @@ export class Ped {
   }
 
   _pickTarget() {
+    // Archetype rhythms (ambient.js tags the ped; this file drives it):
+    // beachgoers stay on the sand, tourists linger at each stop.
+    if (this.archetype === 'beachgoer') {
+      this.target = { x: this.pos.x + rand(-25, 25), z: rand(152, 178) };
+      return;
+    }
+    if (this.archetype === 'tourist' && Math.random() < 0.5) {
+      this.pauseT = rand(4, 8);
+      return;
+    }
     if (this.world && this.world.randomSidewalkPoint) {
       this.target = this.world.randomSidewalkPoint(Math.random);
     } else {

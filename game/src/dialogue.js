@@ -41,11 +41,63 @@ export const DIALOGUE = {
   m4_done: [
     { who: 'lena', expr: 'happy', text: "We did it. $2,500. Debt's gone, Marco. Solmar Bay is yours now." },
   ],
+  m5_brief: [
+    { who: 'lena', expr: 'neutral', text: "The debt is gone but the garage still eats. A buyer at the pier wants the take moved — fast and quiet. Vic will be watching." },
+    { who: 'vic', expr: 'neutral', text: 'Move it clean, kid, and there is more where that came from. My buyers pay for discretion.' },
+  ],
+  m5_done: [
+    { who: 'vic', expr: 'happy', text: 'Clean as glass. $4,000. You and me, kid — we are going to do business.' },
+  ],
+  m6_brief: [
+    { who: 'vic', expr: 'neutral', text: 'A hot GT is waiting at the motel. Take it across town to the north docks. The cops like that car — do not let them keep it.' },
+    { who: 'marco', expr: 'happy', text: 'Hot car, cold nerves. I am your man, Vic.' },
+  ],
+  m6_done: [
+    { who: 'vic', expr: 'happy', text: 'The GT is gone and the docks never saw you. $5,500. Beautiful work.' },
+  ],
+  m7_brief: [
+    { who: 'lena', expr: 'angry', text: 'Two crews moved in while we were busy — one on my harbor, one at the bank. Take both lots down. The bay is ours.' },
+    { who: 'marco', expr: 'angry', text: 'Two crews, one afternoon. Tell the harbor to watch the show.' },
+  ],
+  m7_done: [
+    { who: 'lena', expr: 'happy', text: "Both crews gone. $7,000. Nobody moves on our turf now — they know the name Solis." },
+  ],
+  m8_brief: [
+    { who: 'vic', expr: 'neutral', text: 'Big night, kid. Two drops, then you hold the pier for twenty seconds while the deal closes. The whole PD is on overtime — be a ghost.' },
+    { who: 'marco', expr: 'neutral', text: 'Twenty seconds is a long time with five stars watching. Let us go.' },
+  ],
+  m8_done: [
+    { who: 'vic', expr: 'happy', text: 'Two drops, one hold, zero witnesses. $9,000. You are not a driver anymore — you are a professional.' },
+  ],
+  m9_brief: [
+    { who: 'lena', expr: 'neutral', text: 'You want legend status? Take a PD interceptor off the bank forecourt, in daylight, and bring it home. Five stars, Marco. Five.' },
+    { who: 'marco', expr: 'happy', text: 'Steal a cop car from the cops? Lena — you know me too well.' },
+  ],
+  m9_done: [
+    { who: 'lena', expr: 'happy', text: 'A PD interceptor, in our garage. $12,000. The whole city is talking about you.' },
+  ],
+  m10_brief: [
+    { who: 'lena', expr: 'neutral', text: 'Everything we built comes down to this. The bank van, the harbor, the whole city watching. Bring it all home, Marco.' },
+    { who: 'vic', expr: 'happy', text: 'Do this, kid, and you are not working for anyone ever again. King of the Bay. Go take it.' },
+  ],
+  m10_done: [
+    { who: 'lena', expr: 'happy', text: "We did it. $20,000. Debt, crews, cops — all behind us. Solmar Bay is yours now. Forever." },
+    { who: 'vic', expr: 'happy', text: 'King of the Bay. My door is always open to you, Marco. Always.' },
+  ],
+  // Lena's own lines as a crew companion — she speaks when she joins a job
+  // and when she steps off it (crew.js only plays them over silence).
+  crew_join: [
+    { who: 'lena', expr: 'happy', text: "I'm riding with you on this one, Marco. You drive, I watch the mirrors." },
+  ],
+  crew_done: [
+    { who: 'lena', expr: 'happy', text: 'We make a good crew, you and me. Same time tomorrow?' },
+  ],
 };
 
 export const SPEAKERS = {
   lena: { name: 'LENA CRUZ', color: '#ffb703' },
   marco: { name: 'MARCO SOLIS', color: '#ff8a7a' },
+  vic: { name: 'VIC TORRES', color: '#d4af37' },
 };
 
 // ---- procedural portraits ------------------------------------------------
@@ -109,6 +161,65 @@ export function drawPortrait(canvas, who, expr) {
     ctx.quadraticCurveTo(cx - 24, 78, cx - 8, 80);
     ctx.lineTo(cx + 8, 80);
     ctx.quadraticCurveTo(cx + 24, 78, cx + 30, H);
+    ctx.closePath();
+    ctx.fill();
+  } else if (who === 'vic') {
+    // VIC the fence: grey short hair, dark sunglasses, gold chain,
+    // navy suit shoulders, a smirk that never quite commits.
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.ellipse(cx, 52, 22, 26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Grey hair: short cap, swept back, receding at the temples.
+    ctx.fillStyle = '#8a8a8a';
+    ctx.beginPath();
+    ctx.ellipse(cx, 32, 22, 11, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx - 19, 40, 5, 10, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx + 19, 40, 5, 10, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    // Sunglasses: one dark bar across the eyes, with a glint line.
+    ctx.fillStyle = '#101018';
+    ctx.fillRect(cx - 16, 44, 32, 8);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(cx - 12, 45, 8, 2);
+    ctx.fillRect(cx + 4, 45, 8, 2);
+    // Smirk: asymmetric — one corner lifted.
+    ctx.strokeStyle = '#5a2a20';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (expr === 'happy') {
+      ctx.moveTo(cx - 8, 66);
+      ctx.quadraticCurveTo(cx + 2, 70, cx + 10, 63);
+    } else {
+      ctx.moveTo(cx - 8, 67);
+      ctx.quadraticCurveTo(cx, 69, cx + 9, 65);
+    }
+    ctx.stroke();
+    // Gold chain over a navy suit.
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, 76, 12, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+    ctx.fillStyle = '#1c2a4a';
+    ctx.beginPath();
+    ctx.moveTo(cx - 30, H);
+    ctx.quadraticCurveTo(cx - 24, 80, cx - 8, 82);
+    ctx.lineTo(cx + 8, 82);
+    ctx.quadraticCurveTo(cx + 24, 80, cx + 30, H);
+    ctx.closePath();
+    ctx.fill();
+    // White shirt V under the chain.
+    ctx.fillStyle = '#f2f2f2';
+    ctx.beginPath();
+    ctx.moveTo(cx - 6, 82);
+    ctx.lineTo(cx + 6, 82);
+    ctx.lineTo(cx, 94);
     ctx.closePath();
     ctx.fill();
   } else {

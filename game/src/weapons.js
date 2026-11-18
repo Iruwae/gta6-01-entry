@@ -26,6 +26,8 @@ export const CAR_NAMES = {
   sport: 'BAYLINE GT',
   van: 'HARBOUR VAN',
   police: 'PD INTERCEPTOR',
+  bike: 'STREET BIKE',
+  pickup: 'DESERT PICKUP',
 };
 
 export class Loadout {
@@ -46,6 +48,18 @@ export class Loadout {
 
   current() {
     return this.slots[this.equipped];
+  }
+
+  // Magazine as a 0..1 fraction (the shop's ammo readout + HUD low-ammo
+  // warnings read this, not raw counts).
+  ammoPercent() {
+    const slot = this.slots[this.equipped];
+    if (!slot || !slot.def || !slot.def.mag) return 1;
+    return Math.max(0, Math.min(1, slot.ammo / slot.def.mag));
+  }
+
+  isLowAmmo() {
+    return this.ammoPercent() < 0.25;
   }
 
   // Returns { ok, reason } — the caller toasts the reason when locked.

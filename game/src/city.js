@@ -179,6 +179,9 @@ export function buildCity(scene) {
   const rng = mulberry32(CITY_SEED);
   const colliders = [];
   const B = CFG.CITY.bounds;
+  // Night-glow materials: facade emissive maps + lamp halos, collected as
+  // they are built so the day/night director can scale them after dark.
+  const glowMats = [];
 
   const groundTex = makeNoiseTexture('#8f8f80', '#7a7a6e', '#a5a596', 4242);
   groundTex.repeat.set(24, 24);
@@ -206,6 +209,7 @@ export function buildCity(scene) {
     color: 0xfff2c0,
     emissive: 0xffe9a0,
   });
+  glowMats.push(lampGlowMat);
   const hydrantMat = new THREE.MeshLambertMaterial({ color: 0xc02020 });
   const crateMat = new THREE.MeshLambertMaterial({ color: 0xb07830 });
   const crateMat2 = new THREE.MeshLambertMaterial({ color: 0x3f7a8c });
@@ -281,6 +285,9 @@ export function buildCity(scene) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     m.position.set(cx, h / 2, cz);
     scene.add(m);
+    // Facade materials carry a lit-window emissive map — collect each one
+    // once so night can turn the windows up.
+    if (mat && mat.emissiveMap && glowMats.indexOf(mat) < 0) glowMats.push(mat);
     // Flat roof slab, slightly proud of the walls.
     const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.6, 0.5, d + 0.6), roofMat);
     roof.position.set(cx, h + 0.25, cz);
@@ -583,6 +590,48 @@ export function buildCity(scene) {
     }
   }
 
+  // --- Round 5 commerce: the shop kiosk, the motel safehouse, the garage sign. ---
+  // All three sit on clear ground (forecourt / margin strips) so no building
+  // footprint ever moves. Positions match shop.js / safehouse.js / garage.js.
+  function addCommerceProps() {
+    const signMat = (text, bg, fg) => new THREE.MeshBasicMaterial({
+      map: makeSignTexture(text, bg, fg),
+    });
+    // 24/7 MART kiosk on the garage forecourt strip (z = -66).
+    const kioskMat = new THREE.MeshLambertMaterial({ color: 0x2e6f5e });
+    const kiosk = new THREE.Mesh(new THREE.BoxGeometry(5, 3.2, 4), kioskMat);
+    kiosk.position.set(-72, 1.6, -66);
+    scene.add(kiosk);
+    colliders.push({ minX: -74.5, maxX: -69.5, minZ: -68, maxZ: -64, h: 3.2 });
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.25, 2), new THREE.MeshLambertMaterial({ color: 0xffd60a }));
+    awning.position.set(-72, 3.4, -63.6);
+    scene.add(awning);
+    const shopSign = new THREE.Mesh(new THREE.PlaneGeometry(6, 2.2), signMat('24/7 MART', '#0b3d2e', '#8affc1'));
+    shopSign.position.set(-72, 5.2, -66);
+    scene.add(shopSign);
+    // Sunset Motel safehouse: low motel block + pole sign at the road corner.
+    const motelMat = new THREE.MeshLambertMaterial({ color: 0xc98a6a });
+    const motel = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 8), motelMat);
+    motel.position.set(132, 2.5, -132);
+    scene.add(motel);
+    colliders.push({ minX: 127, maxX: 137, minZ: -136, maxZ: -128, h: 5 });
+    const motelPole = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 7, 8), darkMat);
+    motelPole.position.set(120, 3.5, -120);
+    scene.add(motelPole);
+    const motelSign = new THREE.Mesh(new THREE.PlaneGeometry(7, 2.6), signMat('SUNSET MOTEL', '#5a1e2e', '#ffd9a0'));
+    motelSign.position.set(120, 8, -120);
+    motelSign.rotation.y = Math.PI / 4;
+    scene.add(motelSign);
+    const porch = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), lampGlowMat);
+    porch.position.set(127, 3.2, -128);
+    scene.add(porch);
+    // Bayline Garage sign above the garage door, facing the road south.
+    const garageSign = new THREE.Mesh(new THREE.PlaneGeometry(10, 3), signMat('BAYLINE GARAGE', '#123a3a', '#2ec4b6'));
+    garageSign.position.set(-90, 7.5, -66);
+    scene.add(garageSign);
+  }
+  addCommerceProps();
+
   // -------------------------------------------------------------------------
   // World interface for the rest of the game.
   // -------------------------------------------------------------------------
@@ -650,10 +699,13 @@ export function buildCity(scene) {
     bounds: B,
     garage: { x: -90, z: -90 },
     garageDoor: { x: -90, z: -66 },
+    shop: { x: -72, z: -66 },
+    safehouse: { x: 120, z: -120 },
     harbor: { x: 90, z: 138 },
     bank: { x: 30, z: 30 },
     spawn: { x: -84, z: -72 },
     water,
+    glowMats,
     isOnRoad,
     isInBuilding,
     clampPos,

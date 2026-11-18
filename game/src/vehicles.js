@@ -19,6 +19,10 @@ const KIND_DEFAULTS = {
   sport: { maxSpeed: 34, accel: 19, accelReverse: 11, len: 4.0, wid: 2.0, bodyH: 0.5, cabinH: 0.48 },
   van: { maxSpeed: 22, accel: 11, accelReverse: 9, len: 4.8, wid: 2.1, bodyH: 1.05, cabinH: 0.9 },
   police: { maxSpeed: 30, accel: 17, accelReverse: 10, len: 4.3, wid: 1.95, bodyH: 0.62, cabinH: 0.55 },
+  // Round 5 vehicle variety: the bike is nimble and fast but fragile
+  // (maxHealth 60, 1.5x damage); the pickup is slow, tough, roomy.
+  bike: { maxSpeed: 38, accel: 22, accelReverse: 8, len: 2.2, wid: 0.9, bodyH: 0.5, cabinH: 0.4 },
+  pickup: { maxSpeed: 28, accel: 16, accelReverse: 10, len: 4.6, wid: 2.0, bodyH: 0.8, cabinH: 0.7 },
 };
 
 function kindCfg(kind) {
@@ -51,6 +55,12 @@ function headConeMat() {
   }
   return _headConeMat;
 }
+// Night boost for the shared headlight-beam material (daynight.js):
+// beams read far stronger after dark.
+export function setHeadlightBoost(v) {
+  const m = headConeMat();
+  m.opacity = 0.07 + Math.max(0, Math.min(1, v)) * 0.25;
+}
 function angleLerp(a, b, t) {
   let d = b - a;
   while (d > Math.PI) d -= Math.PI * 2;
@@ -75,6 +85,11 @@ export class Car {
     this.smokeT = 0;
     this.exhaustT = 0;
     this.steerAngle = 0;
+    // Garage tuning (garage.js shape): engine/armor/nos booleans + paint
+    // index. NOS bottle charge 0..100, refills when not spraying.
+    this.tune = { engine: false, armor: false, nos: false, paint: 0 };
+    this.nosCharge = 100;
+    this.maxHealth = 100;
     this.aiAxis = Math.random() < 0.5 ? 'x' : 'z';
     this.aiDir = Math.random() < 0.5 ? 1 : -1;
     this.aiLine = ROAD_LINES[Math.floor(Math.random() * ROAD_LINES.length)];
@@ -85,6 +100,10 @@ export class Car {
     this.blueLight = null;
 
     const k = kindCfg(this.kind);
+    // Kind health: a bike is fragile (60), a pickup is tough (130).
+    if (this.kind === 'bike') this.maxHealth = 60;
+    if (this.kind === 'pickup') this.maxHealth = 130;
+    this.health = this.maxHealth;
     const paint = this.kind === 'police' ? 0xf2f2f2
       : this.kind === 'taxi' ? 0xf7c948 : this.color;
     // Sunset-ready paint: clearcoat-smooth with a strong env reflection;
@@ -92,6 +111,7 @@ export class Car {
     const bodyMat = new THREE.MeshStandardMaterial({
       color: paint, roughness: 0.28, metalness: 0.55, envMapIntensity: 1.2,
     });
+    this.bodyMat = bodyMat; // garage paint upgrades recolour this live
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x181c22, roughness: 0.8, metalness: 0.2 });
     const glassMat = new THREE.MeshStandardMaterial({
       color: 0x223344, roughness: 0.06, metalness: 0.9, envMapIntensity: 1.5,
@@ -199,6 +219,30 @@ export class Car {
       this.wheels.push(pivot);
     }
 
+    if (this.kind === 'bike') {
+      // Motorcycle: collapse the four car wheels into two in-line wheels
+      // and seat a rider figure on the narrow frame (the slim body + glass
+      // fairing already read as a faired bike at game scale).
+      const keep = [this.wheels[0], this.wheels[2]];
+      for (const w of this.wheels) if (keep.indexOf(w) < 0) mesh.remove(w);
+      this.wheels = keep;
+      keep[0].position.set(0, 0.38, k.len / 2 - 0.7);
+      keep[1].position.set(0, 0.38, -(k.len / 2 - 0.7));
+      const riderMat = new THREE.MeshStandardMaterial({ color: 0x181c22, roughness: 0.8 });
+      const rider = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.35), riderMat);
+      rider.position.set(0, bodyY + bodyH + 0.35, -0.2);
+      mesh.add(rider);
+      const helmet = new THREE.Mesh(
+        new THREE.SphereGeometry(0.2, 10, 8),
+        new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.3 }),
+      );
+      helmet.position.set(0, bodyY + bodyH + 0.85, -0.2);
+      mesh.add(helmet);
+      const bars = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.06, 0.06), darkMat);
+      bars.position.set(0, bodyY + bodyH + 0.35, 0.7);
+      mesh.add(bars);
+    }
+
     mesh.position.set(opts.x || 0, 0, opts.z || 0);
     mesh.rotation.y = this.heading;
     scene.add(mesh);
@@ -229,14 +273,35 @@ export class Car {
       this.speed -= this.speed * 0.55 * dt;
       if (Math.abs(this.speed) < 0.05) this.speed = 0;
     }
-    this.speed = clamp(this.speed, -10, k.maxSpeed);
+    // NOS (Shift): a tuned burst — the clamp opens to 1.35x while the
+    // bottle lasts; the bottle refills slowly when not spraying.
+    const nos = (input.down('ShiftLeft') || input.down('ShiftRight'))
+      && this.tune && this.tune.nos && this.nosCharge > 0 && this.speed > 2;
+    this.speed = clamp(this.speed, -10, this.perf() * (nos ? 1.35 : 1));
+    if (nos) {
+      this.nosCharge = Math.max(0, this.nosCharge - 30 * dt);
+      if (S.fx && S.fx.exhaust && Math.abs(this.speed) > 10) {
+        this.exhaustT -= dt;
+        if (this.exhaustT <= 0) {
+          this.exhaustT = 0.1;
+          S.fx.exhaust({
+            x: this.pos.x - Math.sin(this.heading) * (k.len / 2 + 0.3),
+            y: 0.4,
+            z: this.pos.z - Math.cos(this.heading) * (k.len / 2 + 0.3),
+          });
+        }
+      }
+    } else {
+      this.nosCharge = Math.min(100, this.nosCharge + 4 * dt);
+    }
     // Brake lights flare while braking.
     if (this.tailMat) this.tailMat.emissiveIntensity = (back && this.speed > 0.5) ? 3.2 : 0.9;
 
     // Steering: A = left (+1), D = right (-1); authority falls with speed
-    // (physics-tuning: no twitchy steering at top speed).
+    // (physics-tuning: no twitchy steering at top speed). A bike is
+    // nimbler: 1.6x steer authority at the same speed.
     const steerIn = (left ? 1 : 0) - (right ? 1 : 0);
-    const maxSteer = 0.55 / (1 + Math.abs(this.speed) * 0.045);
+    const maxSteer = (this.kind === 'bike' ? 0.88 : 0.55) / (1 + Math.abs(this.speed) * 0.045);
     const steerTarget = steerIn * maxSteer;
     this.steerAngle += (steerTarget - this.steerAngle) * Math.min(1, dt * 8);
     this.heading += this.steerAngle * this.speed * dt * 0.09;
@@ -266,6 +331,18 @@ export class Car {
       this._collideCars();
       if (world.clampPos) world.clampPos(this.pos);
     }
+  }
+
+  // Effective top speed with the garage engine tune (+20% when fitted).
+  perf() {
+    const k = kindCfg(this.kind);
+    return k.maxSpeed * (this.tune && this.tune.engine ? 1.2 : 1);
+  }
+
+  // Traffic cruise speed, clamped — rush hour (ambient.js) calls this to
+  // pack the roads without touching the AI state machine.
+  setCruise(v) {
+    this.aiCruise = Math.max(4, Math.min(20, typeof v === 'number' ? v : this.aiCruise));
   }
 
   // ---- traffic AI: follow the road grid (game-ai skill: perceive -> decide
@@ -444,6 +521,8 @@ export class Car {
 
   damage(amount) {
     if (this.dead) return;
+    // A bike has no crumple zone: it takes 1.5x damage.
+    if (this.kind === 'bike') amount *= 1.5;
     this.health -= amount;
     if (this.health <= 0) {
       this.health = 0;
@@ -472,7 +551,7 @@ export class Car {
 
 export function spawnTraffic(scene, world, n) {
   if (!S.cars) S.cars = [];
-  const kinds = ['sedan', 'sedan', 'sedan', 'taxi', 'sport', 'van'];
+  const kinds = ['sedan', 'sedan', 'sedan', 'taxi', 'sport', 'van', 'pickup', 'bike'];
   const out = [];
   for (let i = 0; i < n; i++) {
     const p = world && world.randomRoadPoint
@@ -507,12 +586,30 @@ export function makeParkedCars(scene, world) {
     { x: h.x - 8, z: h.z + 10, kind: 'van', color: 0xdddddd },
     { x: b.x - 6, z: 52, kind: 'sedan', color: 0x226622 },
     { x: b.x + 6, z: 52, kind: 'police', color: 0xf2f2f2 },
+    { x: g.x + 2, z: -66, kind: 'bike', color: 0xcc2222 },
+    { x: 60, z: 158, kind: 'pickup', color: 0x8a6a42 },
   ];
   const out = [];
   for (const s of spots) {
     const car = new Car(scene, {
       x: s.x, z: s.z, heading: (Math.random() - 0.5) * 0.6,
       color: s.color, kind: s.kind,
+    });
+    car.parked = true;
+    S.cars.push(car);
+    out.push(car);
+  }
+  return out;
+}
+
+// Beach cruisers: two stealable rides parked on the sand by the boardwalk
+// (a sport car and a bike), so the beach is worth the drive, not just a view.
+export function spawnBeachCruisers(scene, world) {
+  if (!S.cars) S.cars = [];
+  const out = [];
+  for (const [x, z, kind, color] of [[-40, 158, 'sport', 0xf2c200], [80, 166, 'bike', 0x2ed573]]) {
+    const car = new Car(scene, {
+      x, z, heading: (Math.random() - 0.5) * 0.6, color, kind,
     });
     car.parked = true;
     S.cars.push(car);

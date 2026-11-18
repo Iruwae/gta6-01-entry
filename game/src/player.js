@@ -152,6 +152,13 @@ export class Player {
     if (dt <= 0) return;
     this.shootCooldown = Math.max(0, this.shootCooldown - dt);
     this.invulnT = Math.max(0, this.invulnT - dt);
+    // Low-health warning: Lena says so once per dip, not every frame.
+    if (this.health < 30 && !this._lowWarned) {
+      this._lowWarned = true;
+      if (S && S.banterDirector) S.banterDirector.lowHp();
+    } else if (this.health > 50) {
+      this._lowWarned = false;
+    }
     if (this.reloading) {
       this.reloadT -= dt;
       if (this.reloadT <= 0) {
@@ -310,6 +317,7 @@ export class Player {
         S.heat = (S.heat || 0) + 25;
         if (S.stats) S.stats.carsStolen = (S.stats.carsStolen || 0) + 1;
       }
+      if (S && S.banterDirector) S.banterDirector.carStolen();
     }
     this.pos.copy(car.pos);
   }
@@ -484,6 +492,19 @@ export class Player {
 
   damage(amount, source) {
     if (this.invulnT > 0) return;
+    // Kevlar (shop item): the vest soaks damage first, point for point.
+    if (this.armor > 0) {
+      const soaked = Math.min(this.armor, amount);
+      this.armor -= soaked;
+      amount -= soaked;
+      if (S && S.hud && typeof S.hud.toast === 'function' && soaked > 0) {
+        S.hud.toast('Vest soaked ' + soaked + ' damage' + (this.armor <= 0 ? ' — vest gone.' : ' — ' + this.armor + ' left.'));
+      }
+      if (amount <= 0) {
+        this.invulnT = 0.25;
+        return;
+      }
+    }
     this.health -= amount;
     this.invulnT = 0.25;
     if (S) S.health = this.health;
@@ -496,5 +517,16 @@ export class Player {
         S.mode = 'wasted'; // main loop shows the wasted screen
       }
     }
+  }
+
+  // Heal (the inverse of damage): clamped to 100, syncs S.health, and
+  // returns the HP actually restored — the shop and the safehouse both
+  // pay for exactly this much, never for overheal.
+  heal(amount) {
+    if (this.health >= 100) return 0;
+    const before = this.health;
+    this.health = Math.min(100, this.health + (amount || 0));
+    if (S) S.health = this.health;
+    return this.health - before;
   }
 }

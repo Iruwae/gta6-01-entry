@@ -1201,3 +1201,9 @@ export function buildDossier(dir: string, caps: DossierCaps): Uint8Array {
   if (bytes.length > DOSSIER_MAX_BYTES) throw new DossierError(`buildDossier: the dossier is ${bytes.length} bytes, over the ${DOSSIER_MAX_BYTES} one holds`);
   return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.length);
 }
+
+// Round 5 dossier note: a one-line build summary for the entrypoint log.
+// Pure text, no I/O — safe to call from main.ts before the dossier write.
+export function dossierNote(game: string, round: string): string {
+  return `[${game}] ${round} build — 10 story missions, shop + safehouse + garage, districts, crew, side activities, day/night cycle, bike + pickup.`;
+}

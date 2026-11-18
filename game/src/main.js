@@ -6,7 +6,7 @@ import { CFG } from './config.js';
 import { S, saveGame, loadGame, clearSave } from './state.js';
 import { buildCity } from './city.js';
 import { Input } from './input.js';
-import { Car, spawnTraffic, makeParkedCars } from './vehicles.js';
+import { Car, spawnTraffic, makeParkedCars, spawnBeachCruisers } from './vehicles.js';
 import { spawnPeds, spawnCop } from './people.js';
 import { Player } from './player.js';
 import { FX } from './juice.js';
@@ -15,8 +15,25 @@ import { HUD } from './hud.js';
 import { AudioEngine } from './audio.js';
 import { makeSkyDome, makeClouds, makeEnvironment, SUN_DIR } from './sky.js';
 import { PostFX } from './postfx.js';
-import { PoliceBrain, Helicopter, nextCallsign } from './police.js';
+import { PoliceBrain, Helicopter, nextCallsign, ramHeatSpike } from './police.js';
 import { Dialogue } from './dialogue.js';
+import { SkyWatch } from './heli2.js';
+import { HeatDirector } from './heat.js';
+import { CityLife } from './ambient.js';
+import { MenuDirector } from './menu.js';
+import { RadioDirector } from './radio2.js';
+import { ShopDirector } from './shop.js';
+import { SafehouseDirector } from './safehouse.js';
+import { GarageDirector } from './garage.js';
+import { DistrictDirector } from './districts.js';
+import { CrewMember } from './crew.js';
+import { SideActivities } from './side.js';
+import { DayNightDirector } from './daynight.js';
+import { BanterDirector } from './banter.js';
+import { RespectDirector } from './respect.js';
+import { CutsceneDirector } from './cutscene.js';
+import { FenceDirector } from './fence.js';
+import { ChallengesDirector } from './challenges.js';
 
 const canvas = document.getElementById('game-canvas');
 const errBox = document.getElementById('err');
@@ -41,7 +58,9 @@ renderer.toneMappingExposure = 1.15;
 
 const scene = new THREE.Scene();
 // Sunset sky dome replaces the flat background colour; warm haze fog.
-scene.add(makeSkyDome());
+const skyDome = makeSkyDome();
+scene.add(skyDome);
+S.skyDome = skyDome;
 makeClouds(scene);
 scene.fog = new THREE.Fog(0xe08a5e, 150, 520);
 
@@ -60,8 +79,11 @@ sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.6;
 scene.add(sun);
 scene.add(sun.target);
+S.sunLight = sun;
 // Warm sky bounce + cool violet ground bounce.
-scene.add(new THREE.HemisphereLight(0xffd9a0, 0x4a3a30, 0.75));
+const hemi = new THREE.HemisphereLight(0xffd9a0, 0x4a3a30, 0.75);
+scene.add(hemi);
+S.hemiLight = hemi;
 
 // ---------- world ----------
 const world = buildCity(scene);
@@ -79,6 +101,31 @@ S.audio = new AudioEngine();
 S.input = new Input(canvas);
 S.missions = new Missions();
 S.dialogue = new Dialogue();
+// Round 5 directors: heat depth, the visible news chopper, ambient life,
+// mission-select menu, and the doubled radio dial.
+S.heatDirector = new HeatDirector();
+S.skyWatch = new SkyWatch(scene);
+S.cityLife = new CityLife(scene, world);
+S.cityLife.spawnCast();
+S.menuDirector = new MenuDirector();
+S.radioDirector = new RadioDirector();
+// Round 5 commerce + world systems: the shop, the safehouse and the garage
+// (real money/HP/heat systems), the named districts, Lena as a crew
+// companion, the side activities, and the day/night cycle.
+S.shopDirector = new ShopDirector();
+S.safehouseDirector = new SafehouseDirector();
+S.garageDirector = new GarageDirector(scene);
+S.districtDirector = new DistrictDirector(scene);
+S.crew = new CrewMember(scene);
+S.sideActivities = new SideActivities(scene);
+S.dayNight = new DayNightDirector();
+// Round 5 life systems: the respect meter, the chatter, the opening and
+// ending sweeps, Vic's fence, and the daily challenges board.
+S.banterDirector = new BanterDirector();
+S.respectDirector = new RespectDirector();
+S.cutsceneDirector = new CutsceneDirector();
+S.fenceDirector = new FenceDirector(scene);
+S.challengesDirector = new ChallengesDirector();
 S.hud = new HUD({
   onNewGame: () => startGame(false),
   onContinue: () => startGame(true),
@@ -93,6 +140,7 @@ const player = new Player(scene, world);
 S.player = player;
 spawnTraffic(scene, world, 14);
 makeParkedCars(scene, world);
+spawnBeachCruisers(scene, world);
 spawnPeds(scene, world, 24);
 
 // Mission beacon: tall light pillar + bobbing diamond over the current target.
@@ -250,6 +298,7 @@ function updatePolice(dt) {
     if (pDist < 4.6 && policeRamCooldown <= 0) {
       policeRamCooldown = 0.9;
       player.damage(9, 'police');
+      ramHeatSpike(); // a ram at 3+ stars spikes the heat (police.js)
       S.fx.addShake(0.45);
       S.audio.crash();
       if (!player.onFoot && S.car) S.car.damage(6);
@@ -265,6 +314,13 @@ function updatePolice(dt) {
     S.heli = null;
   }
   if (heli) heli.update(dt, player.pos);
+  // Rotor wash audio while any helicopter is up (PD bird or SKY-7).
+  if (S.audio && typeof S.audio.rotor === 'function') {
+    S.audio.rotor(!!heli || !!(S.skyWatch && S.skyWatch.active));
+  }
+  // SKY-7 news chopper: lower, closer, in-frame from 2 stars up.
+  if (S.skyWatch) S.skyWatch.update(dt, player.pos, want);
+  S.heliOverhead = S.skyWatch ? S.skyWatch.tiltBoost() : 0;
   // Busted: a foot cop standing on the player for 2s while wanted.
   if (want > 0 && player.onFoot) {
     let near = false;
@@ -285,7 +341,9 @@ function resetRunState(fromSave) {
   S.wanted = 0;
   S.car = null;
   runEnded = false;
-  S.stats = { kills: 0, carsStolen: 0, missionsDone: 0, shotsFired: 0 };
+  S.stats = { kills: 0, carsStolen: 0, missionsDone: 0, shotsFired: 0, packages: 0, racesWon: 0, faresDone: 0 };
+  Object.assign(S.stats, { heatShed: 0, crewKills: 0, fencesSold: 0, nightCash: 0, cleanJobs: 0, topSpeed: 0 });
+  S.respect = 0;
   S.health = 100;
   if (fromSave) {
     const sv = loadGame();
@@ -293,26 +351,48 @@ function resetRunState(fromSave) {
       S.cash = sv.cash ?? 120;
       S.missionIndex = sv.missionIndex ?? 0;
       S.health = sv.health ?? 100;
+      S.respect = sv.respect ?? 0;
+      S.garageCars = Array.isArray(sv.garageCars) ? sv.garageCars : [];
       S.stats = { ...S.stats, ...(sv.stats || {}) };
       const sp = sv.player || {};
       player.reset(sp.x ?? world.spawn.x, sp.z ?? world.spawn.z, sp.heading ?? 0);
       player.health = S.health;
     } else {
       S.cash = 120; S.missionIndex = 0;
+      S.garageCars = [];
       player.reset(world.spawn.x, world.spawn.z, 0);
     }
   } else {
     clearSave();
     S.cash = 120; S.missionIndex = 0;
+    S.garageCars = [];
     player.reset(world.spawn.x, world.spawn.z, 0);
   }
   // Clear police.
   for (const c of [...policeCars]) removePoliceCar(c);
   for (const c of [...S.cops]) { c.remove(); S.cops.splice(S.cops.indexOf(c), 1); }
   if (heli) { heli.remove(); heli = null; S.heli = null; }
+  if (S.skyWatch) S.skyWatch.reset();
+  S.heatDirector.reset();
+  S.menuDirector.reset();
+  // Round 5 systems reset with the run: panels close, Lena leaves, the
+  // race/taxi/packages restart, districts re-announce from the spawn.
+  if (S.shopDirector) S.shopDirector.close();
+  if (S.garageDirector) S.garageDirector.close();
+  if (S.crew) S.crew.leaveMission();
+  if (S.sideActivities) S.sideActivities.reset();
+  if (S.districtDirector) S.districtDirector.reset();
+  // Round 5 life systems reset too: chatter quiets, the daily board
+  // re-rolls for the new day, and no ending sweep is pending.
+  if (S.banterDirector) S.banterDirector.reset();
+  if (S.respectDirector) S.respectDirector.reset();
+  if (S.challengesDirector) S.challengesDirector.reset();
+  if (S.challengesDirector) S.challengesDirector.roll(1);
+  S.outroPending = false;
+  if (S.cutsceneDirector) S.cutsceneDirector.finish();
   S.lastKnown = null;
   S.missions.reset();
-  if (S.missionIndex < 4) S.missions.start(S.missionIndex);
+  if (S.missionIndex < 10) S.missions.start(S.missionIndex);
 }
 
 function startGame(fromSave) {
@@ -325,6 +405,8 @@ function startGame(fromSave) {
   S.audio.ensure();
   S.audio.startMusic();
   S.hud.toast(fromSave ? 'Welcome back to Solmar Bay.' : 'Marco Solis — $120 and a debt. Get to work.');
+  // A fresh run opens with the flyover; a continued run drops straight in.
+  if (!fromSave && S.cutsceneDirector) S.cutsceneDirector.start();
 }
 
 function setPaused(paused) {
@@ -344,6 +426,8 @@ function endRun(kind) {
   S.audio.siren(false);
   S.audio.setEngine(false, 0);
   if (heli) { heli.remove(); heli = null; S.heli = null; }
+  if (S.skyWatch) S.skyWatch.reset();
+  if (S.crew) S.crew.leaveMission();
   if (kind === 'busted') {
     const fine = Math.min(S.cash, 100);
     S.cash -= fine;
@@ -367,13 +451,11 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyM') toggleMute();
   if (e.code === 'KeyQ' && S.mode === 'playing') {
-    // Radio station cycle (Q): display-only + blip, music unchanged.
-    const stations = (CFG && CFG.RADIO) || [];
-    if (stations.length > 0) {
-      S.radioStation = ((S.radioStation || 0) + 1) % stations.length;
-      const stn = stations[S.radioStation];
-      S.hud.toast('RADIO: ' + stn.name + ' — ' + stn.genre);
-      if (S.audio && S.audio.blip) S.audio.blip();
+    // Radio station cycle (Q) through the merged six-station dial.
+    const total = S.radioDirector ? S.radioDirector.count() : 3;
+    if (total > 0) {
+      S.radioStation = ((S.radioStation || 0) + 1) % total;
+      if (S.radioDirector) S.radioDirector.announceSwitch();
     }
   }
   if (e.code === 'Enter' && S.mode === 'title') startGame(!!loadGame());
@@ -381,10 +463,19 @@ window.addEventListener('keydown', (e) => {
 
 // ---------- camera ----------
 function updateCamera(dt) {
+  // A running cutscene owns the camera outright (intro / outro sweep).
+  if (S.cutscene && S.cutsceneDirector && S.cutsceneDirector.active) {
+    S.cutsceneDirector.update(dt, camera);
+    return;
+  }
   const m = S.input.takeMouse();
   camYaw -= m.dx * 0.0032;
   camPitch = THREE.MathUtils.clamp(camPitch + m.dy * 0.0022, -0.05, 0.85);
   S.camYaw = camYaw;
+  // Round 5: when SKY-7 passes overhead, lift the camera pitch so the
+  // news chopper reads in frame instead of hiding above the lens.
+  const tiltUp = S.skyWatch ? S.skyWatch.tiltBoost() : 0;
+  const effPitch = camPitch + tiltUp * (CFG.HELI ? CFG.HELI.tiltGain : 0.45);
   // Aiming: right mouse held, on foot, armed. Over-the-shoulder framing —
   // the camera closes in, drops to shoulder height and slides to the
   // player's right, so the crosshair lines up with the shoulder-origin
@@ -408,7 +499,7 @@ function updateCamera(dt) {
   const speed01 = S.car ? Math.min(Math.abs(S.car.speed) / CFG.CAR.maxSpeed, 1) : 0;
   const want = new THREE.Vector3(
     target.x + back.x * dist + (aiming ? right.x * 0.95 : 0),
-    target.y + height + camPitch * (aiming ? 1.2 : 4),
+    target.y + height + effPitch * (aiming ? 1.2 : 4),
     target.z + back.z * dist + (aiming ? right.z * 0.95 : 0),
   );
   const k = 1 - Math.exp(-7 * dt);
@@ -438,15 +529,17 @@ function animate() {
   const rawDt = dt;
   dt *= S.fx.timeScale;
   S.time += dt;
+  S.day = 1 + Math.floor((18.5 + S.time / 60) / 24);
 
   if (S.mode === 'playing') {
-    // Wanted: heat decays, stars follow.
-    S.heat = Math.max(0, S.heat - CFG.WANTED.decayPerSec * dt);
+    // Wanted: the HeatDirector owns the drain now (lay-low triples it,
+    // speeding halves it, hideouts + spray shed stars); stars follow.
+    S.heatDirector.update(dt);
     S.wanted = wantedFromHeat(S.heat);
     S.health = player.health;
 
     // Auto-start the next job at the garage.
-    if (!S.missions.current && S.missionIndex < 4) {
+    if (!S.missions.current && S.missionIndex < 10) {
       const gd = world.garageDoor;
       if (Math.hypot(player.pos.x - gd.x, player.pos.z - gd.z) < 14) {
         S.missions.start(S.missionIndex);
@@ -489,6 +582,30 @@ function animate() {
     S.missions.update(dt);
     updatePolice(dt);
     if (S.dialogue) S.dialogue.update(dt);
+    // Round 5 directors tick with the playing simulation.
+    if (S.cityLife) S.cityLife.update(dt);
+    if (S.radioDirector) S.radioDirector.update(dt);
+    if (S.menuDirector) S.menuDirector.update();
+    // Round 5 world systems: shop/safehouse/garage panels, districts,
+    // Lena, side activities, and the day/night cycle.
+    if (S.shopDirector) S.shopDirector.update(dt);
+    if (S.safehouseDirector) S.safehouseDirector.update(dt);
+    if (S.garageDirector) S.garageDirector.update(dt);
+    if (S.districtDirector) S.districtDirector.update(dt);
+    if (S.crew) S.crew.update(dt);
+    if (S.sideActivities) S.sideActivities.update(dt);
+    if (S.dayNight) S.dayNight.update(dt);
+    // Round 5 life systems: chatter, the fence, the daily board.
+    if (S.banterDirector) S.banterDirector.update(dt);
+    if (S.fenceDirector) S.fenceDirector.update(dt);
+    if (S.challengesDirector) S.challengesDirector.update();
+    // Fastest speed this run (the speedster challenge reads it).
+    if (S.car) S.stats.topSpeed = Math.max(S.stats.topSpeed || 0, Math.abs(S.car.speed));
+    // The ending sweep, once the tenth job's done-line has cleared.
+    if (S.outroPending && !(S.dialogue && S.dialogue.active) && S.cutsceneDirector && !S.cutscene) {
+      S.outroPending = false;
+      S.cutsceneDirector.startOutro();
+    }
 
     // Engine sound follows the driven car.
     S.audio.setEngine(!!S.car, S.car ? Math.abs(S.car.speed) / CFG.CAR.maxSpeed : 0);
@@ -523,6 +640,9 @@ function animate() {
   }
   updateCamera(rawDt);
   S.hud.update(rawDt);
+  // Heat pulse follows the wanted level: a slow red throb at 3 stars,
+  // a fast hard pulse at 4+.
+  postfx.setHeatPulse(S.wanted >= 4 ? 0.55 + 0.35 * Math.sin(S.time * 5) : (S.wanted >= 3 ? 0.3 : 0));
   postfx.render(S.time);
 }
 

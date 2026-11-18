@@ -35,7 +35,68 @@ export const CFG = {
   },
 
   // Cash paid out when each story mission is completed, in order.
-  MISSIONS: [500, 800, 1200, 2500],
+  MISSIONS: [500, 800, 1200, 2500, 4000, 5500, 7000, 9000, 12000, 20000],
+
+  // Round 5: day/night cycle (daynight.js) — 1 game hour = 60 s, so the
+  // 18:30 sunset slides into night after ~5 minutes of play.
+  DAY: {
+    hourSecs: 60,
+    nightFrom: 20,   // game hour the night ramp completes
+    dawnTo: 7,       // game hour the night ramp ends
+  },
+
+  // Round 5: crew companion (crew.js) — Lena follows, rides, shoots.
+  CREW: {
+    followDist: 6,
+    speed: 7,
+    shootRange: 30,
+    damage: 12,
+    cooldown: 1.2,
+  },
+
+  // Round 5: side activities (side.js) — race prize, taxi fare, packages.
+  SIDE: {
+    racePrize: 300,
+    taxiBase: 80,
+    taxiTime: 90,
+    packageCash: 50,
+    packageCount: 12,
+  },
+
+  // Round 5: SkyWatch news chopper (heli2.js) — lower and closer than
+  // the PD heli so it reads in the chase-camera frame.
+  HELI: {
+    skyWatchStars: 2,   // stars needed before SKY-7 joins the chase
+    orbitRadius: 18,    // metres from the player
+    orbitHeight: 17,    // metres up
+    tiltGain: 0.45,     // camera pitch lift at full overhead
+  },
+
+  // Round 5: heat depth (heat.js) — lay-low drain, hideouts, pay-n-spray.
+  HEAT: {
+    layLowQuietSecs: 8, // no crime for this long + moving slowly = 3x drain
+    layLowMult: 3,
+    speedHalvesDrainAbove: 15, // m/s: flooring it halves the drain
+    hideoutHoldSecs: 3, // stand inside a hideout this long to shed a star
+    hideoutShed: 30,    // heat shed per hideout use (one star)
+    hideoutRestSecs: 60,
+    sprayCost: 150,
+    sprayShed: 60,      // two stars per repaint
+    spikeBonus: 5,      // extra heat for a crime at 3+ stars
+  },
+
+  // Round 5: ambient life (ambient.js) — archetypes, gulls, rush hour.
+  AMBIENT: {
+    gulls: 5,
+    rushWindows: [[18, 19], [7, 8]], // game-clock hours that pack the roads
+    rushExtraCars: 6,
+    archetypeCap: 20,   // ambient peds alive at once (top-up ceiling)
+  },
+
+  // Round 5: mission replay (menu.js) — replays pay a repeat rate.
+  MENU: {
+    replayPayRate: 0.5,
+  },
 
   // Radio stations: name + genre + a deterministic track rotation.
   // The track index is floor(S.time / 45) % tracks.length — no network,

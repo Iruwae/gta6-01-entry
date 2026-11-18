@@ -17,6 +17,7 @@
 
 import * as THREE from 'three';
 import { S } from './state.js';
+import { CFG } from './config.js';
 
 export const TACTICS = {
   PURSUIT: { label: 'PURSUIT', color: '#ffb703' },
@@ -30,6 +31,16 @@ let _callsignN = 0;
 export function nextCallsign() {
   _callsignN = (_callsignN % 99) + 1;
   return 'PD-' + String(_callsignN).padStart(2, '0');
+}
+
+// A RAMMING hit at 3+ stars spikes the heat (heat.js owns the drain; this
+// is the police side of the same rule — the PD holds a grudge at high
+// wanted, so every ram makes the chase harder to shake).
+export function ramHeatSpike() {
+  if (!S || (S.wanted || 0) < 3) return 0;
+  const bonus = (CFG && CFG.HEAT && CFG.HEAT.spikeBonus) || 5;
+  S.heat = Math.min(100, (S.heat || 0) + bonus);
+  return bonus;
 }
 
 function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }

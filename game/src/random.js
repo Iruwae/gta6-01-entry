@@ -33,3 +33,29 @@ export function pick(rng, arr) {
 export function chance(rng, p) {
   return rng() < p;
 }
+
+// One element, weighted by a parallel weights array (weights need not sum
+// to 1 — they are normalised here). Used for weighted spawns and drops.
+export function pickWeighted(rng, arr, weights) {
+  let total = 0;
+  for (const w of weights) total += Math.max(0, w);
+  if (total <= 0) return arr[0];
+  let roll = rng() * total;
+  for (let i = 0; i < arr.length; i++) {
+    roll -= Math.max(0, weights[i]);
+    if (roll <= 0) return arr[i];
+  }
+  return arr[arr.length - 1];
+}
+
+// In-place Fisher-Yates shuffle of a copy (the caller's array is untouched).
+export function shuffle(rng, arr) {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
+}

@@ -108,6 +108,22 @@ async function shoot(name) {
   if (size > 262144) console.log(`  WARNING: ${name} exceeds 256 KiB`);
   return s;
 }
+// Round 5 heli report: log where SKY-7 and the PD bird are after the shot,
+// so a missing helicopter in the frame is a fact, not a guess.
+async function heliReport(tag) {
+  const h = await page.evaluate(() => {
+    const S = window.__solmar.S;
+    const sky = S.skyWatch && S.skyWatch.active && S.skyWatch.pos
+      ? { x: +S.skyWatch.pos.x.toFixed(1), y: +S.skyWatch.pos.y.toFixed(1), z: +S.skyWatch.pos.z.toFixed(1) }
+      : null;
+    const pd = S.heli && S.heli.pos
+      ? { x: +S.heli.pos.x.toFixed(1), y: +S.heli.pos.y.toFixed(1), z: +S.heli.pos.z.toFixed(1) }
+      : null;
+    return { sky, pd, overhead: +(S.heliOverhead || 0).toFixed(2) };
+  });
+  console.log(`heli ${tag}: sky7=${h.sky ? JSON.stringify(h.sky) : 'down'} pd=${h.pd ? JSON.stringify(h.pd) : 'down'} overhead=${h.overhead}`);
+  return h;
+}
 async function newGame() {
   await page.evaluate(() => { localStorage.clear(); });
   await page.reload({ waitUntil: 'networkidle0' });
@@ -146,7 +162,9 @@ async function stageChase(driveSec) {
   });
   if (pc) await aimAt(pc.x, pc.z);
   await waitGame(0.5);
-  return shoot('1-chase.jpg');
+  const shot = await shoot('1-chase.jpg');
+  await heliReport('after-chase');
+  return shot;
 }
 
 let s = await stageChase(6);

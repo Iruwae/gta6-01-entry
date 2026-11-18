@@ -72,6 +72,7 @@ export function makeSkyDome() {
     fog: false,
     uniforms: {
       uSunDir: { value: SUN_DIR.clone() },
+      uNight: { value: 0 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -83,6 +84,7 @@ export function makeSkyDome() {
     fragmentShader: /* glsl */ `
       varying vec3 vDir;
       uniform vec3 uSunDir;
+      uniform float uNight;
       void main() {
         vec3 d = normalize(vDir);
         float h = clamp(d.y, -0.08, 1.0);
@@ -93,9 +95,18 @@ export function makeSkyDome() {
         col = mix(col, zen, smoothstep(0.18, 0.65, h));
         col = mix(vec3(0.14, 0.09, 0.13), col, smoothstep(-0.08, 0.02, d.y));
         float s = max(dot(d, uSunDir), 0.0);
-        col += vec3(1.0, 0.78, 0.50) * pow(s, 350.0) * 3.0;  // sun disc
-        col += vec3(1.0, 0.55, 0.25) * pow(s, 24.0) * 0.55;  // near glow
-        col += vec3(0.90, 0.35, 0.25) * pow(s, 6.0) * 0.22;   // wide haze
+        col += vec3(1.0, 0.78, 0.50) * pow(s, 350.0) * 3.0 * (1.0 - uNight);  // sun disc (sets at night)
+        col += vec3(1.0, 0.55, 0.25) * pow(s, 24.0) * 0.55 * (1.0 - uNight * 0.85);  // near glow
+        col += vec3(0.90, 0.35, 0.25) * pow(s, 6.0) * 0.22 * (1.0 - uNight * 0.85);   // wide haze
+        // Night: deep blue sky, a hashed star field, and a pale moon disc
+        // opposite the sunset so the sky never goes flat black.
+        float star = step(0.9985, fract(sin(dot(floor(d.xz * 220.0), vec2(12.9898, 78.233))) * 43758.5453));
+        vec3 nightCol = vec3(0.015, 0.02, 0.06)
+          + vec3(0.85, 0.9, 1.0) * star * smoothstep(0.08, 0.35, d.y);
+        float m = max(dot(d, normalize(vec3(0.4, 0.55, -0.3))), 0.0);
+        nightCol += vec3(0.75, 0.85, 1.0) * pow(m, 600.0) * 2.0;
+        nightCol += vec3(0.5, 0.6, 0.8) * pow(m, 24.0) * 0.12;
+        col = mix(col, nightCol, uNight);
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -145,6 +156,7 @@ export function makeWaterMaterial() {
     uniforms: {
       uTime: { value: 0 },
       uSunDir: { value: SUN_DIR.clone() },
+      uNight: { value: 0 },
     },
     vertexShader: /* glsl */ `
       uniform float uTime;
@@ -169,6 +181,7 @@ export function makeWaterMaterial() {
     fragmentShader: /* glsl */ `
       uniform float uTime;
       uniform vec3 uSunDir;
+      uniform float uNight;
       varying vec3 vNormal;
       varying vec3 vWorldPos;
       void main() {
@@ -180,10 +193,12 @@ export function makeWaterMaterial() {
         vec3 col = mix(deep, skyRef, fres * 0.85);
         vec3 R = reflect(-V, N);
         float g = pow(max(dot(R, uSunDir), 0.0), 220.0);
-        col += vec3(1.0, 0.8, 0.5) * g * 2.0;
+        col += vec3(1.0, 0.8, 0.5) * g * 2.0 * (1.0 - uNight * 0.9);
         float foam = smoothstep(178.0, 181.0, vWorldPos.z)
           * (0.5 + 0.5 * sin(vWorldPos.x * 0.8 + uTime * 1.5));
         col = mix(col, vec3(0.9, 0.95, 0.9), foam * 0.35);
+        // Night water: dark steel blue, the sunset reflection gone.
+        col = mix(col, vec3(0.02, 0.05, 0.10), uNight * 0.75);
         gl_FragColor = vec4(col, 0.92);
       }
     `,

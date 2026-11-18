@@ -25,6 +25,7 @@
   #stars { margin-top:2px; font-size:19px; letter-spacing:3px; color:#ffd60a;
     text-shadow:0 0 8px rgba(255,214,10,.7); }
   #day-time { font-size:11px; font-weight:700; color:#ffd9a0; letter-spacing:1px; margin-top:4px; }
+  #district { font-size:11px; font-weight:800; color:#8affc1; letter-spacing:2px; margin-top:2px; }
 
   /* ---------- Round 4: police roster, weapon slots, radio, dialogue ---------- */
   #roster { position:absolute; left:14px; top:152px; width:236px; padding:8px 10px; }
@@ -113,6 +114,59 @@
   #end-title.wasted { color:#ff5964; }
   #end-title.busted { color:#4cc9f0; }
   .kbd-note { margin-top:18px; font-size:12px; color:rgba(255,255,255,.55); }
+
+  /* ---------- Round 5: heat meter, shop, garage, mission select ---------- */
+  #heat-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+  #heat-bar { flex:1; height:8px; background:rgba(255,255,255,.18); border-radius:4px; overflow:hidden; }
+  #heat-fill { height:100%; width:0%; background:linear-gradient(90deg,#ff5400,#ff2222); }
+  #heat-num { font-weight:700; font-size:12px; min-width:26px; text-align:right; color:#ffb3ab; }
+  #heat-hint { font-size:11px; color:#ffd9a0; margin-top:3px; min-height:13px; }
+  #shop-panel { position:absolute; right:16px; top:200px; width:340px; padding:12px; pointer-events:auto; }
+  #shop-title, #garage-title { font-size:13px; font-weight:800; letter-spacing:2px; color:#8affc1; }
+  #shop-cash { font-size:12px; color:#ffd9a0; margin-top:4px; font-weight:700; }
+  .shop-row { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:13px; }
+  .shop-name { font-weight:800; min-width:86px; }
+  .shop-desc { color:#bcd6e6; font-size:11.5px; flex:1; }
+  .shop-price { font-weight:800; color:#8affc1; min-width:44px; text-align:right; }
+  .shop-buy { min-width:0; margin-top:0; padding:6px 12px; font-size:13px; }
+  .shop-buy:disabled { opacity:.4; }
+  #garage-panel { position:absolute; right:16px; top:200px; width:380px; padding:12px; pointer-events:auto; max-height:60vh; overflow-y:auto; }
+  .garage-card { border:1px solid rgba(255,217,160,.35); border-radius:8px; padding:8px 10px; margin-top:8px; }
+  .garage-title { font-size:13px; font-weight:800; }
+  .garage-cond { font-size:12px; color:#bcd6e6; margin-top:2px; }
+  .garage-spawn { min-width:0; margin-top:6px; padding:7px 14px; font-size:13px; }
+  .garage-up { min-width:0; margin:6px 4px 0 0; padding:6px 10px; font-size:12px; }
+  .garage-up:disabled { opacity:.4; }
+  .garage-empty { font-size:13px; color:#bcd6e6; margin-top:8px; line-height:1.5; }
+  #mission-select, #run-stats { z-index:12; overflow-y:auto; justify-content:flex-start; padding:28px 0; }
+  #mission-list { width:min(560px,92vw); margin-top:14px; text-align:left; }
+  .job-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 14px; margin-top:8px;
+    background:var(--panel); border:1px solid rgba(255,170,80,.28); border-radius:8px; cursor:pointer; }
+  .job-flavor { font-size:12px; color:#bcd6e6; flex-basis:100%; margin-top:2px; }
+  .job-section { margin-top:16px; font-size:12px; font-weight:800; letter-spacing:2px; color:#ffd9a0; }
+  .extra-row { display:flex; align-items:center; gap:10px; padding:8px 14px; margin-top:6px;
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,217,160,.16); border-radius:8px; }
+  .extra-row.done { opacity:.55; }
+  #respect-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+  #respect-bar { flex:1; height:8px; background:rgba(255,255,255,.18); border-radius:4px; overflow:hidden; }
+  #respect-fill { height:100%; width:0%; background:linear-gradient(90deg,#ffd60a,#ff9e00); }
+  #respect-num { font-weight:700; font-size:12px; min-width:26px; text-align:right; color:#ffd9a0; }
+  #respect-rank { font-size:11px; font-weight:800; letter-spacing:1px; color:#ffd60a; }
+  #cutscene { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; background:linear-gradient(180deg,rgba(10,14,34,0) 55%,rgba(10,14,34,.72)); }
+  #cutscene-card { font-size:44px; font-weight:800; letter-spacing:8px; color:#fff; text-shadow:0 4px 30px rgba(255,140,0,.45); text-align:center; }
+  #cutscene-sub { margin-top:10px; font-size:16px; color:#e8f1f8; text-shadow:0 2px 12px rgba(0,0,0,.6); }
+  #cutscene-card.card-in { animation:cardIn .8s ease-out; }
+  @keyframes cardIn { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  .job-row.locked { opacity:.45; cursor:default; }
+  .job-row.next { border-color:var(--amber); }
+  .job-title { font-weight:800; font-size:14px; flex:1; }
+  .job-pay { color:#8affc1; font-weight:700; font-size:13px; }
+  .job-badge { font-size:11px; font-weight:800; letter-spacing:1px; color:#ffd9a0; }
+  .job-note { margin-top:10px; font-size:12px; color:#bcd6e6; }
+  .stat-row { display:flex; gap:20px; justify-content:space-between; width:min(420px,90vw);
+    padding:5px 0; font-size:14px; border-bottom:1px solid rgba(255,255,255,.08); }
+  .stat-key { color:#bcd6e6; }
+  .stat-val { font-weight:800; }
 </style>
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.min.js" } }
@@ -126,7 +180,11 @@
     <div id="health-row"><span>♥</span><div id="health-bar"><div id="health-fill"></div></div><span id="health-num">100</span></div>
     <div id="cash">$120</div>
     <div id="stars">☆☆☆☆☆</div>
+    <div id="heat-row"><span>🔥</span><div id="heat-bar"><div id="heat-fill"></div></div><span id="heat-num">0</span></div>
+    <div id="heat-hint"></div>
+    <div id="respect-row"><span>👑</span><div id="respect-bar"><div id="respect-fill"></div></div><span id="respect-num">0</span><span id="respect-rank">WHEELMAN</span></div>
     <div id="day-time">DAY 1 · 18:30</div>
+    <div id="district">DOWNTOWN</div>
   </div>
   <div id="roster" class="panel hidden">
     <div id="roster-title">SOLMAR BAY PD — RESPONSE</div>
@@ -149,8 +207,19 @@
     <div id="dlg-body"><div id="dlg-name"></div><div id="dlg-text"></div><div id="dlg-hint">CLICK / E — CONTINUE</div></div>
   </div>
   <div id="crosshair" class="hidden"></div>
+  <div id="shop-panel" class="panel hidden">
+    <div id="shop-title">24/7 MART</div>
+    <div id="shop-cash"></div>
+    <div id="shop-items"></div>
+    <button class="btn ghost shop-buy" id="shop-close">CLOSE (F)</button>
+  </div>
+  <div id="garage-panel" class="panel hidden">
+    <div id="garage-title">BAYLINE GARAGE — YOUR CARS</div>
+    <div id="garage-list"></div>
+    <button class="btn ghost garage-up" id="garage-close">CLOSE (G)</button>
+  </div>
   <div id="toast" class="panel"></div>
-  <div id="hint">WASD move &nbsp;·&nbsp; SHIFT run &nbsp;·&nbsp; E enter / steal car &nbsp;·&nbsp; CLICK shoot &nbsp;·&nbsp; R reload &nbsp;·&nbsp; 1-4 weapons &nbsp;·&nbsp; Q radio &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M mute</div>
+  <div id="hint">WASD move &nbsp;·&nbsp; SHIFT run &nbsp;·&nbsp; E enter / steal car &nbsp;·&nbsp; CLICK shoot &nbsp;·&nbsp; R reload &nbsp;·&nbsp; 1-4 weapons &nbsp;·&nbsp; Q radio &nbsp;·&nbsp; F shop &nbsp;·&nbsp; G garage &nbsp;·&nbsp; H rest &nbsp;·&nbsp; T race &nbsp;·&nbsp; Y taxi &nbsp;·&nbsp; V fence &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M mute</div>
 </div>
 <div id="damage-flash"></div>
 
@@ -158,9 +227,10 @@
   <h1>SOLMAR BAY</h1>
   <h2>AN OPEN-WORLD CRIME STORY</h2>
   <p class="story">Marco Solis is back in Solmar Bay with $120 in his pocket and a debt on his
-  name. Lena Cruz runs the Bayline garage — and she has work for a driver who
-  asks no questions. Steal cars, outrun the Bayline PD, and pull the jobs that
-  pay off the debt.</p>
+  name. Lena Cruz runs the Bayline garage — and she has ten jobs for a driver who
+  asks no questions, from moving wheels at the pier to stealing a PD interceptor
+  in daylight. Steal cars, outrun the Bayline PD, race the ring road, drive a cab,
+  and pull the jobs that pay off the debt.</p>
   <button class="btn" id="btn-new">▶ &nbsp;NEW GAME</button>
   <button class="btn ghost" id="btn-continue">CONTINUE — <span id="continue-label"></span></button>
   <div id="title-save-info"></div>
@@ -177,6 +247,8 @@
   <h1 style="font-size:52px">PAUSED</h1>
   <div id="pause-stats"></div>
   <button class="btn" id="btn-resume">RESUME</button>
+  <button class="btn ghost" id="btn-missions">📋 JOBS</button>
+  <button class="btn ghost" id="btn-stats">📊 RUN STATS</button>
   <button class="btn ghost" id="btn-save">💾 SAVE GAME</button>
   <button class="btn ghost" id="btn-restart">↺ RESTART FROM SAVE</button>
   <button class="btn ghost" id="btn-mute">🔊 SOUND: ON</button>
@@ -186,6 +258,22 @@
   <h1 id="end-title" class="wasted">WASTED</h1>
   <div id="end-text"></div>
   <button class="btn" id="btn-retry">TRY AGAIN</button>
+</div>
+
+<div id="cutscene" class="hidden"><div id="cutscene-card"></div><div id="cutscene-sub"></div></div>
+<div id="mission-select" class="screen hidden">
+  <h1 style="font-size:44px">JOBS</h1>
+  <h2>TEN STORY MISSIONS — PICK YOUR NEXT ONE</h2>
+  <div id="mission-list"></div>
+  <div class="job-note">Click a finished job to replay it at half pay. The next job starts at the garage.</div>
+  <button class="btn ghost" id="btn-close-jobs">CLOSE</button>
+</div>
+
+<div id="run-stats" class="screen hidden">
+  <h1 style="font-size:44px">RUN STATS</h1>
+  <h2>HOW THE BAY IS TREATING YOU</h2>
+  <div style="margin-top:16px" id="run-stats-list"></div>
+  <button class="btn ghost" id="btn-close-stats">CLOSE</button>
 </div>
 
 <div id="err"></div>

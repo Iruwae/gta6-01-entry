@@ -12,7 +12,7 @@
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-game.ts';
+import { buildDossier, dossierNote } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
@@ -26,6 +26,7 @@ if (existsSync(join(here, 'screenshots'))) {
 
 // Caps mirror the sealed gate (reference/gate.json): at most 4 screenshots of
 // 256 KiB, game/ at most 993 entries and 48 MiB, and the dossier text cap.
+console.log(dossierNote('solmar-bay', 'round-5'));
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {

@@ -50,6 +50,13 @@ export class HUD {
     this.elRadioStation = $('radio-station');
     this.elRadioTrack = $('radio-track');
     this.elDayTime = $('day-time');
+    this.elDistrict = $('district');
+    this.elHeatFill = $('heat-fill');
+    this.elHeatNum = $('heat-num');
+    this.elHeatHint = $('heat-hint');
+    this.elRespectFill = $('respect-fill');
+    this.elRespectNum = $('respect-num');
+    this.elRespectRank = $('respect-rank');
     this.elSpeedNum = $('speed-num');
     this.elSpeedGear = $('speed-gear');
     this.elSpeedCar = $('speed-car');
@@ -235,13 +242,16 @@ export class HUD {
     // Cash — thousands separators, champion style ($38,420).
     this._setText(this.elCash, '$' + Math.floor(S.cash || 0).toLocaleString('en-US'));
 
-    // In-game clock: day 1 starts 18:30 (sunset); 1 game hour = 120 s.
+    // In-game clock: day 1 starts 18:30 (sunset); 1 game hour = 60 s
+    // (CFG.DAY) — the same clock drives the day/night cycle, so the HUD
+    // time and the sky always agree. The phase tag names the light.
     if (this.elDayTime) {
-      const hours = 18.5 + (S.time || 0) / 120;
+      const hours = 18.5 + (S.time || 0) / 60;
       const day = 1 + Math.floor(hours / 24);
       const hh = Math.floor(hours % 24);
       const mm = Math.floor((hours % 1) * 60);
-      this.elDayTime.textContent = 'DAY ' + day + ' · ' + String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+      const phase = (S.dayNight && S.dayNight.phase) || 'SUNSET';
+      this.elDayTime.textContent = 'DAY ' + day + ' · ' + String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + ' · ' + phase;
     }
 
     // Wanted stars — filled gold, empty dim; red tint at 3+ stars.
@@ -250,6 +260,33 @@ export class HUD {
       this.elStars.textContent = '★'.repeat(wanted) + '☆'.repeat(5 - wanted);
       this.elStars.style.color = wanted >= 3 ? '#ff5252' : wanted > 0 ? '#ffd54f' : '#546e7a';
     }
+
+    // Heat meter: raw 0..100 heat under the stars, with a lay-low hint
+    // from the heat director (nearest ready hideout / triple drain).
+    const heat = Math.max(0, Math.min(100, S.heat || 0));
+    if (this.elHeatFill) this.elHeatFill.style.width = heat + '%';
+    this._setText(this.elHeatNum, String(Math.round(heat)));
+    if (this.elHeatHint) {
+      let hint = '';
+      if (wanted > 0) {
+        const hd = S.heatDirector;
+        if (hd && hd.layLow) hint = 'Laying low — heat draining 3×.';
+        else if (hd && S.player && typeof hd.nearestHideout === 'function') {
+          const near = hd.nearestHideout(S.player.pos.x, S.player.pos.z);
+          hint = near ? 'Hideout ' + Math.round(near.dist) + 'm away — hold 3s to shed a star.' : 'Lay low to cool off — slow down, hide out.';
+        } else hint = 'Lay low to cool off — slow down, hide out.';
+      }
+      this.elHeatHint.textContent = hint;
+    }
+    // District name under the clock: where in the city Marco stands.
+    this._setText(this.elDistrict, S.districtName || 'DOWNTOWN');
+
+    // Respect meter: the name Marco earns, with the rank title.
+    const respect = (S.respectDirector && S.respectDirector.points) || S.respect || 0;
+    const rank = S.respectDirector ? S.respectDirector.rank : null;
+    if (this.elRespectFill) this.elRespectFill.style.width = Math.min(100, (respect / 1000) * 100) + '%';
+    this._setText(this.elRespectNum, String(Math.round(respect)));
+    this._setText(this.elRespectRank, rank ? rank.title : 'WHEELMAN');
 
     // Speedometer (racing-feel: number + gear + vehicle + condition):
     // big km/h, gear from speed band, vehicle name, condition bar.
@@ -275,12 +312,23 @@ export class HUD {
     }
 
     // Radio: station + track (track rotates every 45 s, deterministic).
-    const stations = (CFG && CFG.RADIO) || [];
-    if (stations.length > 0 && this.elRadioStation) {
-      const stn = stations[(S.radioStation || 0) % stations.length];
-      this._setText(this.elRadioStation, '♪ ' + stn.name + ' · ' + stn.genre);
-      const track = stn.tracks[Math.floor((S.time || 0) / 45) % stn.tracks.length];
-      this._setText(this.elRadioTrack, track);
+    // The merged six-station dial (radio2.js) wins when it exists; the
+    // original three stations are its first three, indices never move.
+    const rd = S.radioDirector;
+    if (rd && typeof rd.stationAt === 'function' && this.elRadioStation) {
+      const stn = rd.stationAt(S.radioStation || 0);
+      if (stn) {
+        this._setText(this.elRadioStation, '♪ ' + stn.name + ' · ' + stn.genre);
+        this._setText(this.elRadioTrack, rd.trackAt(S.radioStation || 0, S.time || 0));
+      }
+    } else {
+      const stations = (CFG && CFG.RADIO) || [];
+      if (stations.length > 0 && this.elRadioStation) {
+        const stn = stations[(S.radioStation || 0) % stations.length];
+        this._setText(this.elRadioStation, '♪ ' + stn.name + ' · ' + stn.genre);
+        const track = stn.tracks[Math.floor((S.time || 0) / 45) % stn.tracks.length];
+        this._setText(this.elRadioTrack, track);
+      }
     }
 
     // Police roster (4 Hz) + weapon slots (every frame, cheap).
@@ -291,12 +339,19 @@ export class HUD {
     }
     this._updateWeaponSlots();
 
-    // Objective + mission title.
-    if (S.missions) {
+    // Objective + mission title. A live side job (race / taxi) owns the
+    // objective line while it runs; otherwise the story mission does.
+    const sideLine = (S.sideActivities && typeof S.sideActivities.objectiveLine === 'function')
+      ? S.sideActivities.objectiveLine()
+      : null;
+    if (sideLine) {
+      this._setText(this.elObjective, sideLine);
+      this._setText(this.elMissionTitle, 'SIDE HUSTLE');
+    } else if (S.missions) {
       this._setText(this.elObjective, S.missions.objectiveText());
       const title = S.missions.current
         ? S.missions.current.title
-        : (S.missionIndex >= 4 ? 'SOLMAR BAY' : 'FREE ROAM');
+        : (S.missionIndex >= 10 ? 'SOLMAR BAY' : 'FREE ROAM');
       this._setText(this.elMissionTitle, title);
     }
 
@@ -370,6 +425,19 @@ export class HUD {
       if (world.garage) landmark(world.garage.x, world.garage.z, 'G', '#2ecc71');
       if (world.bank) landmark(world.bank.x, world.bank.z, '$', '#ffd54f');
       if (world.harbor) landmark(world.harbor.x, world.harbor.z, 'H', '#4fc3f7');
+      // Round 5 commerce: shop M (green) and safehouse S (teal).
+      if (world.shop) landmark(world.shop.x, world.shop.z, 'M', '#8affc1');
+      if (world.safehouse) landmark(world.safehouse.x, world.safehouse.z, 'S', '#2ec4b6');
+      // Vic's fence V (gold) at the harbor yard.
+      if (S && S.fenceDirector) landmark(S.fenceDirector.pos.x, S.fenceDirector.pos.z, 'V', '#f2c200');
+    }
+    // District name along the bottom of the minimap.
+    if (S && S.districtName) {
+      ctx.fillStyle = '#ffd9a0';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(S.districtName, cx, H - 4);
     }
 
     // Wanted search zone (enemy-perception: last-known position + stale
@@ -522,6 +590,11 @@ export class HUD {
 
   showPause(show) {
     this._show(this.elPause, !!show);
+    // Pausing also closes the job list / stats screens (menu.js) so the
+    // pause menu never stacks on top of them.
+    if (show && S && S.menuDirector && typeof S.menuDirector.close === 'function') {
+      S.menuDirector.close();
+    }
     if (show && this.elPauseStats && S) {
       const st = S.stats || {};
       this.elPauseStats.textContent =

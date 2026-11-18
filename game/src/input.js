@@ -10,6 +10,7 @@ export class Input {
     this.mouseDown = false;
     this.aimDown = false; // right mouse held: aim (over-the-shoulder)
     this._clicked = false;
+    this._justPressed = new Set(); // key codes pressed since last consumeKey
     this._lastX = 0;
     this._lastY = 0;
     this._dragging = false;
@@ -23,6 +24,7 @@ export class Input {
         e.preventDefault();
       }
       this.keys.add(e.code);
+      this._justPressed.add(e.code);
     });
 
     window.addEventListener('keyup', (e) => {
@@ -88,6 +90,13 @@ export class Input {
     const c = this._clicked;
     this._clicked = false;
     return c;
+  }
+
+  // True once per key press; consumes the flag (for toggles, not holds).
+  consumeKey(code) {
+    const hit = this._justPressed.has(code);
+    if (hit) this._justPressed.delete(code);
+    return hit;
   }
 
   // Request pointer lock. Must be called from a user gesture (click).

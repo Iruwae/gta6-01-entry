@@ -55,6 +55,7 @@ const COMPOSITE_FRAG = /* glsl */ `
   uniform float uBloom;
   uniform float uVig;
   uniform float uGrain;
+  uniform float uHeat;
   varying vec2 vUv;
   void main() {
     vec3 c = texture2D(tScene, vUv).rgb;
@@ -68,6 +69,9 @@ const COMPOSITE_FRAG = /* glsl */ `
     // Vignette.
     vec2 dv = vUv - 0.5;
     c *= 1.0 - dot(dv, dv) * uVig;
+    // Heat pulse: at high wanted the frame edges burn red (uHeat 0..1).
+    float edge = smoothstep(0.25, 0.75, length(dv));
+    c = mix(c, vec3(0.9, 0.08, 0.05), edge * uHeat * 0.35);
     // Fine grain (time-driven hash, one frame = one still).
     float g = fract(sin(dot(vUv * (uTime + 13.0), vec2(12.9898, 78.233))) * 43758.5453);
     c += (g - 0.5) * uGrain;
@@ -131,6 +135,7 @@ export class PostFX {
         uBloom: { value: 0.55 },
         uVig: { value: 0.85 },
         uGrain: { value: 0.035 },
+        uHeat: { value: 0 },
       },
       vertexShader: QUAD_VERT,
       fragmentShader: COMPOSITE_FRAG,
@@ -144,9 +149,16 @@ export class PostFX {
     this.setSize();
   }
 
+  // Heat pulse: at high wanted the grade pushes a red edge vignette
+  // (the post pass is the only place a fullscreen red pulse is cheap).
+  setHeatPulse(v) {
+    if (this.compMat && this.compMat.uniforms.uHeat) {
+      this.compMat.uniforms.uHeat.value = Math.max(0, Math.min(1, v));
+    }
+  }
+
   setSize() {
-    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    const w = Math.max(2, size.x);
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());    const w = Math.max(2, size.x);
     const h = Math.max(2, size.y);
     const hw = Math.max(2, w >> 1);
     const hh = Math.max(2, h >> 1);
