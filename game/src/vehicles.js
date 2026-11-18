@@ -419,13 +419,18 @@ export function makeParkedCars(scene, world) {
   const g = (world && world.garage) || { x: 0, z: 0 };
   const h = (world && world.harbor) || { x: 60, z: 60 };
   const b = (world && world.bank) || { x: -60, z: -60 };
+  // Parked cars sit OUTSIDE every building collider. Garage footprint is
+  // x -105..-75, z -100..-80; bank footprint is x 17..43, z 17..43 — so the
+  // garage cars park on the forecourt strip south of the garage (z = -66,
+  // the garage-door road edge) and the bank cars on the forecourt south of
+  // the bank (z = 52), both clear of the walls and stealable from the road.
   const spots = [
-    { x: g.x + 8, z: g.z + 2, kind: 'sedan', color: 0xaa4444 },
-    { x: g.x + 8, z: g.z + 8, kind: 'sport', color: 0x2244aa },
+    { x: g.x + 12, z: -66, kind: 'sedan', color: 0xaa4444 },
+    { x: g.x - 12, z: -66, kind: 'sport', color: 0x2244aa },
     { x: h.x - 8, z: h.z + 4, kind: 'taxi', color: 0xf7c948 },
     { x: h.x - 8, z: h.z + 10, kind: 'van', color: 0xdddddd },
-    { x: b.x + 6, z: b.z - 6, kind: 'sedan', color: 0x226622 },
-    { x: b.x + 12, z: b.z - 6, kind: 'police', color: 0xf2f2f2 },
+    { x: b.x - 6, z: 52, kind: 'sedan', color: 0x226622 },
+    { x: b.x + 6, z: 52, kind: 'police', color: 0xf2f2f2 },
   ];
   const out = [];
   for (const s of spots) {
