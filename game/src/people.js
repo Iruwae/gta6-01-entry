@@ -20,26 +20,65 @@ const NAMES = [
 function rand(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
+const HAIR_COLORS = [0x1a1210, 0x3a2a18, 0x111111, 0x6a4a28, 0x888888];
+
+// Returns { group, legL, legR, armL, armR } — legs and arms hang from
+// shoulder/hip pivots so the walk cycle can swing them (game-feel).
 function buildPersonMesh(shirt, skin, withCap) {
   const body = new THREE.Group();
   const shirtMat = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.85 });
   const pantsMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.9 });
   const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.7 });
-  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.72, 0.28), pantsMat);
-  legs.position.y = 0.36;
-  body.add(legs);
+  const shoeMat = new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.6 });
+  // Two legs on hip pivots, each with a shoe at the foot.
+  const legGeo = new THREE.BoxGeometry(0.2, 0.72, 0.26);
+  const shoeGeo = new THREE.BoxGeometry(0.2, 0.1, 0.36);
+  const legs = {};
+  for (const [key, sx] of [['legL', -1], ['legR', 1]]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(sx * 0.12, 0.72, 0);
+    const leg = new THREE.Mesh(legGeo, pantsMat);
+    leg.position.y = -0.36;
+    pivot.add(leg);
+    const shoe = new THREE.Mesh(shoeGeo, shoeMat);
+    shoe.position.set(0, -0.68, 0.05);
+    pivot.add(shoe);
+    body.add(pivot);
+    legs[key] = pivot;
+  }
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.68, 0.34), shirtMat);
   torso.position.y = 1.06;
   body.add(torso);
+  // Arms on shoulder pivots, skin hands at the ends.
   const armGeo = new THREE.BoxGeometry(0.14, 0.62, 0.16);
-  for (const sx of [-1, 1]) {
+  const handGeo = new THREE.BoxGeometry(0.13, 0.1, 0.15);
+  const arms = {};
+  for (const [key, sx] of [['armL', -1], ['armR', 1]]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(sx * 0.39, 1.38, 0);
     const arm = new THREE.Mesh(armGeo, shirtMat);
-    arm.position.set(sx * 0.39, 1.06, 0);
-    body.add(arm);
+    arm.position.y = -0.31;
+    pivot.add(arm);
+    const hand = new THREE.Mesh(handGeo, skinMat);
+    hand.position.y = -0.64;
+    pivot.add(hand);
+    body.add(pivot);
+    arms[key] = pivot;
   }
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 12, 10), skinMat);
   head.position.y = 1.62;
   body.add(head);
+  // Half of the crowd gets hair (a dark half-sphere cap on the head).
+  if (Math.random() < 0.5) {
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.24, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshStandardMaterial({
+        color: pick(HAIR_COLORS), roughness: 0.9,
+      }),
+    );
+    hair.position.y = 1.66;
+    body.add(hair);
+  }
   if (withCap) {
     const cap = new THREE.Mesh(
       new THREE.BoxGeometry(0.5, 0.1, 0.5),
@@ -52,7 +91,7 @@ function buildPersonMesh(shirt, skin, withCap) {
     brim.position.set(0, 1.78, 0.3);
     body.add(brim);
   }
-  return body;
+  return { group: body, ...legs, ...arms };
 }
 
 export class Ped {
@@ -79,7 +118,9 @@ export class Ped {
     this._bobT = rand(0, 6);
 
     const mesh = new THREE.Group();
-    this.body = buildPersonMesh(this.shirt, pick(SKINS), false);
+    const built = buildPersonMesh(this.shirt, pick(SKINS), false);
+    this.body = built.group;
+    this.limbs = built;
     mesh.add(this.body);
     mesh.position.set(opts.x || 0, 0, opts.z || 0);
     mesh.rotation.y = this.heading;
@@ -164,6 +205,7 @@ export class Ped {
   _wander(dt) {
     if (this.pauseT > 0) {
       this.pauseT -= dt;
+      this._setLimbs(0);
       return;
     }
     if (!this.target) {
@@ -206,10 +248,21 @@ export class Ped {
     }
   }
 
+  _setLimbs(swing) {
+    const L = this.limbs;
+    if (!L) return;
+    L.legL.rotation.x = swing;
+    L.legR.rotation.x = -swing;
+    L.armL.rotation.x = -swing * 0.7;
+    L.armR.rotation.x = swing * 0.7;
+  }
+
   _clampAndBob(dt, speed) {
     if (this.world && this.world.clampPos) this.world.clampPos(this.pos);
     this._bobT += dt * speed * 3.2;
     this.body.position.y = Math.abs(Math.sin(this._bobT)) * 0.05;
+    // Walk cycle: legs and arms swing opposite, arms at 70% amplitude.
+    this._setLimbs(Math.sin(this._bobT) * 0.55);
   }
 
   damage(amount) {
@@ -247,6 +300,20 @@ export class Cop extends Ped {
     this.chaseSpeed = 4.5;
     this.punchCooldown = 0;
     // Dark-blue uniform: swap the torso/arms to navy (built navy via shirt).
+    // Navy peaked cap + gold badge so a cop reads at a glance.
+    const capMat = new THREE.MeshStandardMaterial({ color: 0x141c33, roughness: 0.8 });
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.5), capMat);
+    cap.position.y = 1.82;
+    this.body.add(cap);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.22), capMat);
+    brim.position.set(0, 1.78, 0.3);
+    this.body.add(brim);
+    const badge = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.12, 0.03),
+      new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.3, metalness: 0.8 }),
+    );
+    badge.position.set(-0.15, 1.15, 0.18);
+    this.body.add(badge);
     this.mesh.userData.ref = this;
   }
 

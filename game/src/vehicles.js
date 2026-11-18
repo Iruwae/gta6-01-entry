@@ -34,6 +34,23 @@ const TRAFFIC_COLORS = [
 const ROAD_LINES = [-120, -60, 0, 60, 120];
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+// Shared headlight-beam geometry/material (one pair per car mesh).
+let _headConeGeo = null;
+let _headConeMat = null;
+function headConeGeo() {
+  if (!_headConeGeo) _headConeGeo = new THREE.ConeGeometry(1.1, 7, 12, 1, true);
+  return _headConeGeo;
+}
+function headConeMat() {
+  if (!_headConeMat) {
+    _headConeMat = new THREE.MeshBasicMaterial({
+      color: 0xffe9a0, transparent: true, opacity: 0.07,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+  }
+  return _headConeMat;
+}
 function angleLerp(a, b, t) {
   let d = b - a;
   while (d > Math.PI) d -= Math.PI * 2;
@@ -56,6 +73,7 @@ export class Car {
     this.stolen = false;
     this.parked = false;
     this.smokeT = 0;
+    this.exhaustT = 0;
     this.steerAngle = 0;
     this.aiAxis = Math.random() < 0.5 ? 'x' : 'z';
     this.aiDir = Math.random() < 0.5 ? 1 : -1;
@@ -69,9 +87,15 @@ export class Car {
     const k = kindCfg(this.kind);
     const paint = this.kind === 'police' ? 0xf2f2f2
       : this.kind === 'taxi' ? 0xf7c948 : this.color;
-    const bodyMat = new THREE.MeshStandardMaterial({ color: paint, roughness: 0.45, metalness: 0.35 });
+    // Sunset-ready paint: clearcoat-smooth with a strong env reflection;
+    // glass is dark, near-mirror, and picks up the orange sky.
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: paint, roughness: 0.28, metalness: 0.55, envMapIntensity: 1.2,
+    });
     const darkMat = new THREE.MeshStandardMaterial({ color: 0x181c22, roughness: 0.8, metalness: 0.2 });
-    const glassMat = new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.15, metalness: 0.7 });
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x223344, roughness: 0.06, metalness: 0.9, envMapIntensity: 1.5,
+    });
 
     const mesh = new THREE.Group();
     const bodyH = k.bodyH;
@@ -84,6 +108,31 @@ export class Car {
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(k.wid * 0.86, k.cabinH, cabLen), glassMat);
     cabin.position.set(0, bodyY + bodyH / 2 + k.cabinH / 2 - 0.04, this.kind === 'van' ? -0.2 : -0.15);
     mesh.add(cabin);
+    // Painted roof panel over the glass cabin + front grille + bumpers +
+    // side mirrors: the silhouettes that read as "car" from a distance.
+    const roofPanel = new THREE.Mesh(
+      new THREE.BoxGeometry(k.wid * 0.8, 0.06, cabLen * 0.9), bodyMat,
+    );
+    roofPanel.position.set(0, bodyY + bodyH / 2 + k.cabinH - 0.02, cabin.position.z);
+    mesh.add(roofPanel);
+    const grille = new THREE.Mesh(new THREE.BoxGeometry(k.wid * 0.5, 0.14, 0.06), darkMat);
+    grille.position.set(0, bodyY - 0.1, k.len / 2 + 0.01);
+    mesh.add(grille);
+    for (const bz of [1, -1]) {
+      const bumper = new THREE.Mesh(new THREE.BoxGeometry(k.wid + 0.06, 0.16, 0.18), darkMat);
+      bumper.position.set(0, 0.32, bz * (k.len / 2 + 0.02));
+      mesh.add(bumper);
+    }
+    for (const sx of [-1, 1]) {
+      const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.2), darkMat);
+      mirror.position.set(sx * (k.wid / 2 + 0.08), bodyY + bodyH / 2 + 0.12, 0.55);
+      mesh.add(mirror);
+    }
+    if (this.kind === 'sport') {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(k.wid * 0.9, 0.06, 0.4), darkMat);
+      wing.position.set(0, bodyY + bodyH + 0.12, -k.len / 2 + 0.35);
+      mesh.add(wing);
+    }
     // Police cars get a black hood/trunk band via a thin dark box on the body.
     if (this.kind === 'police') {
       const band = new THREE.Mesh(new THREE.BoxGeometry(k.wid + 0.02, 0.08, k.len * 0.34), darkMat);
@@ -113,6 +162,7 @@ export class Car {
     // Headlights (front = +Z local) and taillights.
     const headMat = new THREE.MeshStandardMaterial({ color: 0xfff6cc, emissive: 0xffee99, emissiveIntensity: 1.4 });
     const tailMat = new THREE.MeshStandardMaterial({ color: 0xaa1111, emissive: 0xff1111, emissiveIntensity: 0.9 });
+    this.tailMat = tailMat;
     for (const sx of [-1, 1]) {
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.08), headMat);
       head.position.set(sx * (k.wid / 2 - 0.3), bodyY, k.len / 2 + 0.01);
@@ -120,11 +170,19 @@ export class Car {
       const tail = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.08), tailMat);
       tail.position.set(sx * (k.wid / 2 - 0.3), bodyY, -k.len / 2 - 0.01);
       mesh.add(tail);
+      // Volumetric-looking headlight beam: a wide additive cone, apex at
+      // the lamp, widening forward. Cheap, no shadow cost.
+      const cone = new THREE.Mesh(headConeGeo(), headConeMat());
+      cone.rotation.x = -Math.PI / 2;
+      cone.position.set(sx * (k.wid / 2 - 0.3), bodyY, k.len / 2 + 3.5);
+      mesh.add(cone);
     }
     // 4 wheels: pivot group per wheel so spin about the axle (X) is visible
     // via a spoke bar inside the tyre cylinder.
     const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
     const spokeGeo = new THREE.BoxGeometry(0.32, 0.62, 0.06);
+    const rimGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.34, 10);
+    const rimMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.25, metalness: 0.9 });
     for (const [wx, wz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
       const pivot = new THREE.Group();
       pivot.position.set(wx * (k.wid / 2 - 0.05), 0.38, wz * (k.len / 2 - 0.7));
@@ -133,6 +191,10 @@ export class Car {
       pivot.add(tyre);
       const spoke = new THREE.Mesh(spokeGeo, new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.4, metalness: 0.6 }));
       pivot.add(spoke);
+      // Bright rim disc, slightly proud of the tyre on both faces.
+      const rim = new THREE.Mesh(rimGeo, rimMat);
+      rim.rotation.z = Math.PI / 2;
+      pivot.add(rim);
       mesh.add(pivot);
       this.wheels.push(pivot);
     }
@@ -168,6 +230,8 @@ export class Car {
       if (Math.abs(this.speed) < 0.05) this.speed = 0;
     }
     this.speed = clamp(this.speed, -10, k.maxSpeed);
+    // Brake lights flare while braking.
+    if (this.tailMat) this.tailMat.emissiveIntensity = (back && this.speed > 0.5) ? 3.2 : 0.9;
 
     // Steering: A = left (+1), D = right (-1); authority falls with speed
     // (physics-tuning: no twitchy steering at top speed).
@@ -185,6 +249,18 @@ export class Car {
     this._flashLights(dt);
     this.crashCooldown = Math.max(0, this.crashCooldown - dt);
     this._maybeSmoke(dt);
+    // Exhaust puffs from the tailpipe while moving.
+    if (Math.abs(this.speed) > 10 && S.fx && S.fx.exhaust) {
+      this.exhaustT -= dt;
+      if (this.exhaustT <= 0) {
+        this.exhaustT = 0.14;
+        S.fx.exhaust({
+          x: this.pos.x - Math.sin(this.heading) * (k.len / 2 + 0.3),
+          y: 0.35,
+          z: this.pos.z - Math.cos(this.heading) * (k.len / 2 + 0.3),
+        });
+      }
+    }
     if (world) {
       this._collideWorld(world);
       this._collideCars();

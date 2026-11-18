@@ -11,6 +11,11 @@
 import * as THREE from 'three';
 import { CFG } from './config.js';
 import { mulberry32, rand, randInt, pick, chance } from './random.js';
+import {
+  makeGlowTexture,
+  makeNoiseTexture,
+  makeWaterMaterial,
+} from './sky.js';
 
 const ROAD_LINES = [-120, -60, 0, 60, 120];
 const BLOCK_CENTRES = [-90, -30, 30, 90];
@@ -26,10 +31,33 @@ function makeRoadTexture() {
   c.width = 64;
   c.height = 256;
   const g = c.getContext('2d');
-  g.fillStyle = '#3a3f46';
+  // Wet-look asphalt: dark base with patch variation.
+  g.fillStyle = '#33373d';
   g.fillRect(0, 0, 64, 256);
-  // Edge lines.
-  g.fillStyle = '#c8c8c8';
+  // Local seeded speckle — never touches the city rng stream.
+  let a = 555 >>> 0;
+  const next = () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let i = 0; i < 900; i++) {
+    g.fillStyle = next() < 0.5 ? '#2b2f34' : '#454a51';
+    g.globalAlpha = 0.08 + next() * 0.14;
+    g.fillRect(next() * 64, next() * 256, 1 + next() * 2, 1 + next() * 2);
+  }
+  g.globalAlpha = 1;
+  // Repaired patches.
+  for (let i = 0; i < 3; i++) {
+    g.fillStyle = '#2e3237';
+    g.globalAlpha = 0.5;
+    g.fillRect(6 + next() * 40, next() * 220, 10 + next() * 14, 8 + next() * 16);
+  }
+  g.globalAlpha = 1;
+  // Edge lines, slightly warm from the sunset.
+  g.fillStyle = '#d8cbb0';
   g.fillRect(2, 0, 3, 256);
   g.fillRect(59, 0, 3, 256);
   // Dashed centre line.
@@ -45,6 +73,10 @@ function makeRoadTexture() {
 }
 
 // Facade with a lit-window grid. One texture per base colour, cached.
+// The lit windows are recorded in the same loop that draws them, then an
+// emissive map is painted from the same flags — at dusk the lit windows
+// glow warm while dark windows stay dead. (No extra rng calls: the city
+// layout stream is untouched.)
 const facadeCache = new Map();
 function facadeMaterial(baseHex, rng) {
   const key = baseHex.toString(16);
@@ -63,16 +95,42 @@ function facadeMaterial(baseHex, rng) {
   g.fillStyle = grad;
   g.fillRect(0, 0, 128, 256);
   // Window grid: 4 columns x 10 rows, some lit warm.
+  const lit = [];
   for (let row = 0; row < 10; row++) {
     for (let col = 0; col < 4; col++) {
-      const lit = rng() < 0.35;
-      g.fillStyle = lit ? '#ffe9a8' : '#2a3542';
+      const isLit = rng() < 0.35;
+      lit.push(isLit);
+      g.fillStyle = isLit ? '#ffe9a8' : '#2a3542';
       g.fillRect(12 + col * 28, 14 + row * 24, 18, 14);
     }
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.MeshLambertMaterial({ map: tex });
+  // Emissive map: only the lit windows glow.
+  const ec = document.createElement('canvas');
+  ec.width = 128;
+  ec.height = 256;
+  const eg = ec.getContext('2d');
+  eg.fillStyle = '#000000';
+  eg.fillRect(0, 0, 128, 256);
+  let i = 0;
+  for (let row = 0; row < 10; row++) {
+    for (let col = 0; col < 4; col++) {
+      if (lit[i]) {
+        eg.fillStyle = '#ffb347';
+        eg.fillRect(12 + col * 28, 14 + row * 24, 18, 14);
+      }
+      i++;
+    }
+  }
+  const emissiveTex = new THREE.CanvasTexture(ec);
+  emissiveTex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.MeshLambertMaterial({
+    map: tex,
+    emissive: 0xffc46b,
+    emissiveMap: emissiveTex,
+    emissiveIntensity: 0.85,
+  });
   facadeCache.set(key, mat);
   return mat;
 }
@@ -122,19 +180,26 @@ export function buildCity(scene) {
   const colliders = [];
   const B = CFG.CITY.bounds;
 
-  const groundMat = new THREE.MeshLambertMaterial({ color: 0x9a9a8c });
+  const groundTex = makeNoiseTexture('#8f8f80', '#7a7a6e', '#a5a596', 4242);
+  groundTex.repeat.set(24, 24);
+  const groundMat = new THREE.MeshStandardMaterial({
+    map: groundTex, color: 0xffffff, roughness: 0.95, metalness: 0.0,
+  });
   const sidewalkMat = new THREE.MeshLambertMaterial({ color: CFG.COLORS.sidewalk });
-  const sandMat = new THREE.MeshLambertMaterial({ color: CFG.COLORS.sand });
-  const waterMat = new THREE.MeshLambertMaterial({
-    color: CFG.COLORS.water,
-    transparent: true,
-    opacity: 0.9,
+  const sandTex = makeNoiseTexture('#d9b06a', '#c49a52', '#ecd09a', 777);
+  sandTex.repeat.set(18, 2);
+  const sandMat = new THREE.MeshStandardMaterial({
+    map: sandTex, color: 0xffffff, roughness: 1.0, metalness: 0.0,
   });
   const roofMat = new THREE.MeshLambertMaterial({ color: 0x5a5a58 });
   const darkMat = new THREE.MeshLambertMaterial({ color: 0x2c2f33 });
   const woodMat = new THREE.MeshLambertMaterial({ color: 0x8a6a42 });
   const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6a4a28 });
-  const leafMat = new THREE.MeshLambertMaterial({ color: 0x3f8f4f });
+  const leafMats = [
+    new THREE.MeshLambertMaterial({ color: 0x3f8f4f }),
+    new THREE.MeshLambertMaterial({ color: 0x4f9a3a }),
+    new THREE.MeshLambertMaterial({ color: 0x2f7a4a }),
+  ];
   const palmLeafMat = new THREE.MeshLambertMaterial({ color: 0x2f9e5f });
   const lampMat = new THREE.MeshLambertMaterial({ color: 0x30343a });
   const lampGlowMat = new THREE.MeshLambertMaterial({
@@ -146,26 +211,41 @@ export function buildCity(scene) {
   const crateMat2 = new THREE.MeshLambertMaterial({ color: 0x3f7a8c });
   const tealMat = new THREE.MeshLambertMaterial({ color: 0x1e9e8c });
   const stoneMat = new THREE.MeshLambertMaterial({ color: 0xcfc4a8 });
+  // Dedicated stream for NEW decoration only — the main rng stream (and
+  // therefore the whole city layout) is never disturbed.
+  const rng2 = mulberry32(31337);
 
   // --- Ground: city slab, then beach strip south of it, then water. ---
   flatPlane(300, 300, groundMat, 0, 0, 0, scene);
   flatPlane(300, 30, sandMat, 0, 0.01, 165, scene);          // beach z 150..180
-  const water = flatPlane(320, 140, waterMat, 0, 0.05, 250, scene); // water z > 180
+  // Water: segmented plane driven by the animated shader (waves + fresnel
+  // + sun glitter + shoreline foam). Kept in `water` for the main loop.
+  const waterGeo = new THREE.PlaneGeometry(320, 140, 48, 20);
+  const water = new THREE.Mesh(waterGeo, makeWaterMaterial());
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(0, 0.05, 250);
+  scene.add(water); // water z > 180
 
   // --- Roads: planes with a dashed-centre-line texture, both directions. ---
+  // Standard material with a low roughness so the env map gives the
+  // asphalt a damp sunset sheen.
   const roadTex = makeRoadTexture();
   for (const rx of ROAD_LINES) {
     const tex = roadTex.clone();
     tex.needsUpdate = true;
     tex.repeat.set(1, 12);
-    const mat = new THREE.MeshLambertMaterial({ map: tex });
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex, roughness: 0.45, metalness: 0.08, envMapIntensity: 0.7,
+    });
     flatPlane(12, 300, mat, rx, 0.02, 0, scene);
   }
   for (const rz of ROAD_LINES) {
     const tex = roadTex.clone();
     tex.needsUpdate = true;
     tex.repeat.set(1, 12);
-    const mat = new THREE.MeshLambertMaterial({ map: tex });
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex, roughness: 0.45, metalness: 0.08, envMapIntensity: 0.7,
+    });
     const m = flatPlane(300, 12, mat, 0, 0.02, rz, scene);
     m.rotation.z = Math.PI / 2; // texture runs along the road, not across it
   }
@@ -338,6 +418,8 @@ export function buildCity(scene) {
   }
 
   // --- Street props (decoration only — never colliders). ---
+  // Lamp glow positions, batched into one additive Points draw call.
+  const lampPositions = [];
   function addLamp(x, z) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 5, 6), lampMat);
     pole.position.set(x, 2.5, z);
@@ -345,12 +427,17 @@ export function buildCity(scene) {
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), lampGlowMat);
     head.position.set(x, 5.1, z);
     scene.add(head);
+    lampPositions.push(x, 5.1, z);
   }
   function addTree(x, z) {
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 2.4, 6), trunkMat);
     trunk.position.set(x, 1.2, z);
     scene.add(trunk);
-    const crown = new THREE.Mesh(new THREE.SphereGeometry(1.8, 8, 6), leafMat);
+    // Varied leaf colour from the decoration stream (layout stream safe).
+    const crown = new THREE.Mesh(
+      new THREE.SphereGeometry(1.8, 8, 6),
+      leafMats[Math.floor(rng2() * leafMats.length)],
+    );
     crown.position.set(x, 3.4, z);
     scene.add(crown);
   }
@@ -389,6 +476,25 @@ export function buildCity(scene) {
       addLamp(rx - ROAD_HALF - 2.2, z + (chance(rng, 0.5) ? 4 : -4));
       addLamp(rx + ROAD_HALF + 2.2, z + (chance(rng, 0.5) ? 4 : -4));
     }
+  }
+  // One batched glow sprite per lamp head — warm halos without a draw
+  // call per lamp.
+  {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(lampPositions), 3));
+    const glowMat = new THREE.PointsMaterial({
+      size: 7,
+      map: makeGlowTexture(),
+      color: 0xffc46b,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    });
+    const glows = new THREE.Points(geo, glowMat);
+    glows.frustumCulled = false;
+    scene.add(glows);
   }
   // Trees and benches scattered on sidewalks / block corners (off-road).
   for (let i = 0; i < 40; i++) {
@@ -442,6 +548,40 @@ export function buildCity(scene) {
     scene.add(post);
   }
   addBench(68, 30.6, Math.PI / 2);
+
+  // --- Distant skyline: dusk silhouettes ringing the city so the horizon
+  // --- never reads as empty flat land. Own seeded stream; a few towers
+  // --- carry a red beacon that blooms in the post pass. ---
+  {
+    const skyRng = mulberry32(90210);
+    const skyMats = [
+      new THREE.MeshLambertMaterial({ color: 0x241f33 }),
+      new THREE.MeshLambertMaterial({ color: 0x2e2438 }),
+      new THREE.MeshLambertMaterial({ color: 0x1d1a2e }),
+    ];
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+    for (let i = 0; i < 26; i++) {
+      const a = (i / 26) * Math.PI * 2 + (skyRng() - 0.5) * 0.18;
+      const r = 195 + skyRng() * 55;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      if (z > 150) continue; // keep the sea horizon open
+      const w = 12 + skyRng() * 14;
+      const d = 12 + skyRng() * 14;
+      const h = 25 + skyRng() * 45;
+      const tower = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        skyMats[Math.floor(skyRng() * skyMats.length)],
+      );
+      tower.position.set(x, h / 2, z);
+      scene.add(tower);
+      if (skyRng() < 0.4) {
+        const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.9, 6, 6), beaconMat);
+        beacon.position.set(x, h + 1.2, z);
+        scene.add(beacon);
+      }
+    }
+  }
 
   // -------------------------------------------------------------------------
   // World interface for the rest of the game.

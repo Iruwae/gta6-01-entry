@@ -39,28 +39,68 @@ export class Player {
     this.walkBob = 0;
     this._prev = new Set(); // previous-frame key states for justPressed
 
-    // Distinct look: white shirt, dark pants, red cap.
+    // Distinct look: burgundy open jacket over a white shirt, dark jeans,
+    // red cap, pistol in the right hand.
     const mesh = new THREE.Group();
     const body = new THREE.Group();
     const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x222633, roughness: 0.9 });
+    const jacket = new THREE.MeshStandardMaterial({ color: 0x7a1f2b, roughness: 0.85 });
+    const jeans = new THREE.MeshStandardMaterial({ color: 0x2a3a55, roughness: 0.9 });
+    const shoeMat = new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.6 });
     const skin = new THREE.MeshStandardMaterial({ color: 0xe8b98a, roughness: 0.7 });
     const red = new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.8 });
-    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.72, 0.3), dark);
-    legs.position.y = 0.36;
-    body.add(legs);
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.7, 0.36), white);
+    const gunmetal = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.4, metalness: 0.7 });
+    // Two legs on hip pivots (walk swing) with shoes.
+    const legGeo = new THREE.BoxGeometry(0.2, 0.72, 0.28);
+    const shoeGeo = new THREE.BoxGeometry(0.2, 0.1, 0.36);
+    for (const [key, sx] of [['legL', -1], ['legR', 1]]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(sx * 0.12, 0.72, 0);
+      const leg = new THREE.Mesh(legGeo, jeans);
+      leg.position.y = -0.36;
+      pivot.add(leg);
+      const shoe = new THREE.Mesh(shoeGeo, shoeMat);
+      shoe.position.set(0, -0.68, 0.05);
+      pivot.add(shoe);
+      body.add(pivot);
+      this[key] = pivot;
+    }
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.7, 0.36), jacket);
     torso.position.y = 1.07;
     body.add(torso);
+    // White shirt showing through the open jacket.
+    const shirtStrip = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.6, 0.05), white);
+    shirtStrip.position.set(0, 1.07, 0.17);
+    body.add(shirtStrip);
     const armGeo = new THREE.BoxGeometry(0.15, 0.64, 0.17);
-    for (const sx of [-1, 1]) {
-      const arm = new THREE.Mesh(armGeo, white);
-      arm.position.set(sx * 0.4, 1.07, 0);
-      body.add(arm);
+    const handGeo = new THREE.BoxGeometry(0.14, 0.1, 0.16);
+    for (const [key, sx] of [['armL', -1], ['armR', 1]]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(sx * 0.4, 1.38, 0);
+      const arm = new THREE.Mesh(armGeo, jacket);
+      arm.position.y = -0.31;
+      pivot.add(arm);
+      const hand = new THREE.Mesh(handGeo, skin);
+      hand.position.y = -0.64;
+      pivot.add(hand);
+      if (key === 'armR') {
+        // Pistol held in the right hand, pointing forward.
+        const gun = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.1, 0.34), gunmetal);
+        gun.position.set(0, -0.68, 0.12);
+        pivot.add(gun);
+      }
+      body.add(pivot);
+      this[key] = pivot;
     }
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), skin);
     head.position.y = 1.64;
     body.add(head);
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.25, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 }),
+    );
+    hair.position.y = 1.68;
+    body.add(hair);
     const cap = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.1, 0.52), red);
     cap.position.y = 1.84;
     body.add(cap);
@@ -161,15 +201,24 @@ export class Player {
       this.heading = angleLerp(this.heading, targetHeading, Math.min(1, dt * 12));
       this.mesh.rotation.y = this.heading;
       // Walk bob + squash & stretch (game-feel): bob the inner body group,
-      // never the collision position.
+      // never the collision position. Legs swing with the bob phase.
       this.walkBob += dt * speed * 1.6;
       this.body.position.y = Math.abs(Math.sin(this.walkBob)) * 0.07;
       const squash = 1 + Math.sin(this.walkBob * 2) * 0.02;
       const inv = 1 / Math.sqrt(squash);
       this.body.scale.set(inv, squash, inv);
+      const swing = Math.sin(this.walkBob) * 0.5;
+      if (this.legL) {
+        this.legL.rotation.x = swing;
+        this.legR.rotation.x = -swing;
+      }
     } else {
       this.body.position.y = 0;
       this.body.scale.set(1, 1, 1);
+      if (this.legL) {
+        this.legL.rotation.x = 0;
+        this.legR.rotation.x = 0;
+      }
     }
 
     this._collideWorld();
@@ -362,13 +411,14 @@ export class Player {
     // Gunfire scares nearby pedestrians away from the shooter.
     if (S) S.lastDanger = { x: this.pos.x, z: this.pos.z };
     // Muzzle flash at the gun tip (player pos + forward, chest height).
-    if (S.fx && S.fx.burst) {
+    if (S.fx) {
       const tip = new THREE.Vector3(
         this.pos.x + Math.sin(this.heading) * 0.8,
         this.pos.y + 1.35,
         this.pos.z + Math.cos(this.heading) * 0.8,
       );
-      S.fx.burst(tip, 0xffee66, 6, 4, 0.25);
+      if (S.fx.muzzle) S.fx.muzzle(tip);
+      else if (S.fx.burst) S.fx.burst(tip, 0xffee66, 6, 4, 0.25);
       if (S.fx.hitStop) S.fx.hitStop(0.03); // 30 ms freeze — small tier
       if (S.fx.addShake) S.fx.addShake(0.15);
     }

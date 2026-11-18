@@ -13,6 +13,8 @@ import { FX } from './juice.js';
 import { Missions } from './missions.js';
 import { HUD } from './hud.js';
 import { AudioEngine } from './audio.js';
+import { makeSkyDome, makeClouds, makeEnvironment, SUN_DIR } from './sky.js';
+import { PostFX } from './postfx.js';
 
 const canvas = document.getElementById('game-canvas');
 const errBox = document.getElementById('err');
@@ -22,34 +24,55 @@ window.addEventListener('error', (e) => {
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Headless SwiftShader pays full price for every fullscreen pass; cap the
+// ratio there so screenshots and smoke tests stay usable. Real browsers
+// keep the sharper cap.
+const headless = typeof navigator !== 'undefined' && !!navigator.webdriver;
+renderer.setPixelRatio(headless ? 1 : Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Golden-hour grade: ACES filmic + a warm exposure lift.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87bfe8);
-scene.fog = new THREE.Fog(0x9fc8e8, 120, 420);
+// Sunset sky dome replaces the flat background colour; warm haze fog.
+scene.add(makeSkyDome());
+makeClouds(scene);
+scene.fog = new THREE.Fog(0xe08a5e, 150, 520);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
 camera.position.set(0, 30, 60);
 S.camera = camera;
 
-const sun = new THREE.DirectionalLight(0xfff2d8, 2.6);
-sun.position.set(120, 180, 60);
+const sun = new THREE.DirectionalLight(0xffa04d, 3.0);
+sun.position.copy(SUN_DIR).multiplyScalar(220);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -170; sun.shadow.camera.right = 170;
 sun.shadow.camera.top = 170; sun.shadow.camera.bottom = -170;
-sun.shadow.camera.far = 500;
+sun.shadow.camera.far = 520;
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.6;
 scene.add(sun);
-scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x8a7a5a, 1.1));
+scene.add(sun.target);
+// Warm sky bounce + cool violet ground bounce.
+scene.add(new THREE.HemisphereLight(0xffd9a0, 0x4a3a30, 0.75));
 
 // ---------- world ----------
 const world = buildCity(scene);
 S.world = world;
 S.fx = new FX(scene);
+// Sunset environment map for paint / glass reflections (PMREM from a tiny
+// gradient scene — no external HDR). Failure must never block the game.
+try {
+  scene.environment = makeEnvironment(renderer);
+} catch (e) {
+  console.warn('env map skipped:', e && e.message);
+}
+const postfx = new PostFX(renderer, scene, camera, headless);
 S.audio = new AudioEngine();
 S.input = new Input(canvas);
 S.missions = new Missions();
@@ -429,16 +452,21 @@ function animate() {
   if (S.mode === 'wasted') endRun('wasted');
 
   S.fx.update(rawDt);
-  if (world.water) world.water.position.y = 0.05 + Math.sin(S.time * 0.7) * 0.03;
+  if (world.water) {
+    world.water.position.y = 0.05 + Math.sin(S.time * 0.7) * 0.03;
+    const wm = world.water.material;
+    if (wm && wm.uniforms && wm.uniforms.uTime) wm.uniforms.uTime.value = S.time;
+  }
   updateCamera(rawDt);
   S.hud.update(rawDt);
-  renderer.render(scene, camera);
+  postfx.render(S.time);
 }
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  postfx.setSize();
 });
 
 // Title screen first; the world idles behind it.

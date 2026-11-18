@@ -14,6 +14,7 @@
 // the camera and heavy hits punch.
 
 import * as THREE from 'three';
+import { makeGlowTexture } from './sky.js';
 
 const POOL = 300;
 
@@ -38,6 +39,8 @@ export class FX {
     const mat = new THREE.PointsMaterial({
       size: 0.35, vertexColors: true, transparent: true,
       opacity: 0.95, depthWrite: false, sizeAttenuation: true,
+      // Soft round sprites instead of hard squares (game-feel).
+      map: makeGlowTexture(), alphaTest: 0.01,
     });
     this.points = new THREE.Points(geo, mat);
     this.points.frustumCulled = false;
@@ -75,6 +78,18 @@ export class FX {
   smoke(pos) {
     // Grey, slow, rising — a damaged car smoulders rather than pops.
     this.burst(pos, 0x888888, 6, 1.0, 1.4, 1, 2.5);
+  }
+
+  exhaust(pos) {
+    // Tailpipe puff: grey, slow, drifting up — a car that is moving
+    // breathes a little.
+    this.burst(pos, 0x8a8a8a, 3, 0.9, 1.3, 1, 2.2);
+  }
+
+  muzzle(pos) {
+    // Gun flash: bright yellow core + orange halo, very short life.
+    this.burst(pos, 0xffee66, 10, 6, 0.18, 1, 1);
+    this.burst(pos, 0xff9944, 5, 3, 0.3, 1, 1);
   }
 
   damageNumber(pos, text, color = '#ffffff') {

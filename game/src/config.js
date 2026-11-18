@@ -38,13 +38,13 @@ export const CFG = {
   MISSIONS: [500, 800, 1200, 2500],
 
   COLORS: {
-    sky: 0x87ceeb,
-    sun: 0xfff2c0,
-    asphalt: 0x3a3f46,
-    sidewalk: 0xb8b2a4,
-    sand: 0xe8d29a,
-    water: 0x2e7fa8,
-    // Sun-bleached pastel building facades.
+    sky: 0x2a2350, // deep dusk indigo (sky dome covers the background)
+    sun: 0xffa04d,
+    asphalt: 0x33373d,
+    sidewalk: 0x8a8578,
+    sand: 0xd9b06a,
+    water: 0x14455e,
+    // Sun-bleached pastel building facades (warm sunset light does the rest).
     buildings: [
       0xf2c9a0, 0xf7e6c4, 0xd9a08c, 0xa8c8d8, 0xf0d060,
       0xc9b8d8, 0x9ac8a8, 0xe8a8b0, 0xd8d0c0, 0x88b8c8,

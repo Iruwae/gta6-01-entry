@@ -158,28 +158,28 @@ export class HUD {
     const px = (x) => cx + x * scale;
     const py = (z) => cy + z * scale;
 
-    // Dark ground.
+    // Dusk ground (deep violet), water strip along the south edge.
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#0d1b12';
+    ctx.fillStyle = '#16232b';
     ctx.fillRect(0, 0, W, H);
 
     // Water strip along the south edge (harbor side, high +z).
-    ctx.fillStyle = '#0e4a6e';
+    ctx.fillStyle = '#155e7d';
     ctx.fillRect(0, py(132), W, H - py(132));
-    ctx.fillStyle = '#c2a878';
+    ctx.fillStyle = '#c8b98a';
     ctx.fillRect(0, py(132) - 2, W, 2);
 
     const world = S ? S.world : null;
     if (world) {
-      // Roads as grey bands.
-      ctx.fillStyle = '#3a3f44';
+      // Roads as warm grey bands.
+      ctx.fillStyle = '#55555e';
       const half = (world.roadHalf || 6) * scale;
       const roadXs = Array.isArray(world.roadXs) ? world.roadXs : [];
       const roadZs = Array.isArray(world.roadZs) ? world.roadZs : [];
       for (const x of roadXs) ctx.fillRect(px(x) - half, 0, half * 2, H);
       for (const z of roadZs) ctx.fillRect(0, py(z) - half, W, half * 2);
-      // Centre dashes.
-      ctx.strokeStyle = '#8a9299';
+      // Centre dashes, warm amber.
+      ctx.strokeStyle = '#c8b98a';
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 6]);
       ctx.beginPath();
