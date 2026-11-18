@@ -117,10 +117,17 @@ export class Ped {
         this.pos.x += px * this.strafeDir * 1.0 * dt;
         this.pos.z += pz * this.strafeDir * 1.0 * dt;
         if (this.shootT <= 0 && dist < 35) {
-          this.shootT = 1.2;
-          if (S.player && S.player.damage) S.player.damage(6);
-          if (S.fx && S.fx.burst) {
-            S.fx.burst(playerPos, 0xffee88, 4, 3, 0.3);
+          this.shootT = 1.5;
+          // Fair fight: rivals MISS sometimes, more often at range — a
+          // guaranteed hit every 1.2 s for 6 from all four at once was
+          // ~20 dps and unwinnable up close. Now 5 dmg, 1.5 s cadence,
+          // 70% hit up close falling to 30% at 35 m.
+          const hitChance = Math.max(0.3, Math.min(0.7, 0.7 - dist / 100));
+          if (Math.random() < hitChance) {
+            if (S.player && S.player.damage) S.player.damage(5);
+            if (S.fx && S.fx.burst) {
+              S.fx.burst(playerPos, 0xffee88, 4, 3, 0.3);
+            }
           }
           if (S.audio && S.audio.shot) S.audio.shot(0.4); // quiet distant shot
         }
