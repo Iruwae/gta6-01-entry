@@ -221,7 +221,9 @@ function resetRunState(fromSave) {
     if (sv) {
       S.cash = sv.cash ?? 120;
       S.missionIndex = sv.missionIndex ?? 0;
-      S.health = sv.health ?? 100;
+      // A save written by endRun carries health 0 — retrying from it must
+      // not resurrect the player at 0 HP. Restore full health instead.
+      S.health = (typeof sv.health === 'number' && sv.health > 0) ? sv.health : 100;
       S.stats = { ...S.stats, ...(sv.stats || {}) };
       const sp = sv.player || {};
       player.reset(sp.x ?? world.spawn.x, sp.z ?? world.spawn.z, sp.heading ?? 0);
@@ -412,6 +414,13 @@ function animate() {
     autoSaveT += rawDt;
     if (autoSaveT > 60) { autoSaveT = 0; saveGame(); }
   }
+
+  // Death can flip the mode after player.update (police ram and cop
+  // punches run later in the frame): catch it here, outside the playing
+  // block, so the end screen shows even when the mode flips outside the
+  // main loop body — otherwise the next frame skips the block and the
+  // game sits in 'wasted' with no screen and no retry.
+  if (S.mode === 'wasted') endRun('wasted');
 
   S.fx.update(rawDt);
   if (world.water) world.water.position.y = 0.05 + Math.sin(S.time * 0.7) * 0.03;
