@@ -142,9 +142,6 @@ export class Car {
     scene.add(mesh);
     this.mesh = mesh;
     this.pos = mesh.position; // pos IS mesh.position (contract)
-    mesh.userData.ref = this; // raycast hit resolution: shoot() walks up
-    // from the hit child mesh looking for userData.ref — without this,
-    // cars could never take pistol damage (peds set it; cars did not).
   }
 
   // ---- player driving (arcade) ----
@@ -419,18 +416,13 @@ export function makeParkedCars(scene, world) {
   const g = (world && world.garage) || { x: 0, z: 0 };
   const h = (world && world.harbor) || { x: 60, z: 60 };
   const b = (world && world.bank) || { x: -60, z: -60 };
-  // Spots sit on open ground, never inside a building: the old garage
-  // spots (-82,-88) / (-82,-82) were inside the garage (x -105..-75,
-  // z -100..-80) and the old bank spots (36,24) / (42,24) inside the bank
-  // (x/z 17..43). Garage cars now park on the forecourt by the garage
-  // door; bank cars on the forecourt in front of the porch.
   const spots = [
-    { x: g.x + 12, z: g.z + 24, kind: 'sedan', color: 0xaa4444 },
-    { x: g.x - 12, z: g.z + 24, kind: 'sport', color: 0x2244aa },
+    { x: g.x + 8, z: g.z + 2, kind: 'sedan', color: 0xaa4444 },
+    { x: g.x + 8, z: g.z + 8, kind: 'sport', color: 0x2244aa },
     { x: h.x - 8, z: h.z + 4, kind: 'taxi', color: 0xf7c948 },
     { x: h.x - 8, z: h.z + 10, kind: 'van', color: 0xdddddd },
-    { x: b.x - 6, z: b.z + 22, kind: 'sedan', color: 0x226622 },
-    { x: b.x + 6, z: b.z + 22, kind: 'police', color: 0xf2f2f2 },
+    { x: b.x + 6, z: b.z - 6, kind: 'sedan', color: 0x226622 },
+    { x: b.x + 12, z: b.z - 6, kind: 'police', color: 0xf2f2f2 },
   ];
   const out = [];
   for (const s of spots) {

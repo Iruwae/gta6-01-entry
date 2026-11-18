@@ -81,13 +81,11 @@ export class HUD {
     if (el) el.textContent = text;
   }
 
-  // Show/hide by toggling the .hidden class (display:none !important).
-  // NEVER set style.display here: an inline display:none survives a
-  // classList.remove('hidden') elsewhere and the element stays hidden
-  // forever (that was the HUD/pause/end bug — showTitle hid #hud with an
-  // inline style at boot and startGame's class removal could not undo it).
   _show(el, show) {
     if (!el) return;
+    // Visibility is class-driven: .hidden carries `display:none !important`,
+    // which beats any inline style.display, so toggle the class and clear
+    // any stale inline display left by the old inline-style approach.
     el.classList.toggle('hidden', !show);
     el.style.display = '';
   }
@@ -133,13 +131,12 @@ export class HUD {
       this._setText(this.elMissionTitle, title);
     }
 
-    // Crosshair only when armed and on foot. Toggle the .hidden class,
-    // not style.display: the element starts with class="hidden" and an
-    // inline display cannot beat display:none !important.
+    // Crosshair only when armed and on foot. Class-driven: the element
+    // starts with .hidden (display:none !important), so inline style
+    // alone can never reveal it.
     if (this.elCrosshair) {
       const show = !!(S.player && S.player.armed && S.player.onFoot && S.mode === 'playing');
-      this.elCrosshair.classList.toggle('hidden', !show);
-      this.elCrosshair.style.display = '';
+      this._show(this.elCrosshair, show);
     }
 
     this.drawMinimap();

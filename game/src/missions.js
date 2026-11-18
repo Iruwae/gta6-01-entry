@@ -47,7 +47,7 @@ export class Missions {
         stages: [
           { type: 'goto', target: { x: -90, z: -66, r: 8 }, text: 'Go to the Bayline garage' },
           { type: 'enter', spawn: 'sport', target: { x: -90, z: -66, r: 12 }, text: 'Get in the sport car' },
-          { type: 'drive', target: { x: 30, z: 52, r: 10 }, text: 'Drive the sport car to the Solmar Bank' },
+          { type: 'drive', target: { x: 30, z: 30, r: 10 }, text: 'Drive the sport car to the Solmar Bank' },
         ],
       },
       {
@@ -75,8 +75,8 @@ export class Missions {
         title: 'The Big Score',
         briefing: 'Lena: "One last job, Marco. The bank van. Take it, and the whole city will be on you — bring it to my garage and we\'re square. All of it."',
         stages: [
-          { type: 'goto', target: { x: 30, z: 52, r: 10 }, text: 'Go to the Solmar Bank' },
-          { type: 'enter', spawn: 'van', target: { x: 30, z: 52, r: 12 }, text: 'Get in the getaway van' },
+          { type: 'goto', target: { x: 30, z: 30, r: 10 }, text: 'Go to the Solmar Bank' },
+          { type: 'enter', spawn: 'van', target: { x: 30, z: 30, r: 12 }, text: 'Get in the getaway van' },
           { type: 'escape', target: { x: -90, z: -66, r: 10 }, text: 'Escape! Bring the van to the Bayline garage' },
         ],
       },
@@ -143,10 +143,7 @@ export class Missions {
     const scene = this._scene();
     if (!scene) return null;
     if (this.targetVan && !this.targetVan.dead) return this.targetVan;
-    // Parked in front of the bank porch (30, 52): the old spot (30, 30)
-    // was the bank building's centre, inside its collider, so the van
-    // could never be reached or entered.
-    const van = new Car(scene, { x: 30, z: 52, heading: -Math.PI / 2, color: 0x95a5a6, kind: 'van' });
+    const van = new Car(scene, { x: 30, z: 30, heading: -Math.PI / 2, color: 0x95a5a6, kind: 'van' });
     van.parked = true; // stays put until the player takes it
     if (S && Array.isArray(S.cars)) S.cars.push(van);
     this.targetVan = van;

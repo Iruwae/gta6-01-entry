@@ -183,10 +183,8 @@ function updatePolice(dt) {
       car.heading += 0.6;
     }
     world.clampPos(car.pos);
-    // Ram the player. Range must exceed the 4.0 m car-to-car separation
-    // (vehicles.js _collideCars) — at 3.4 m the ram could never trigger
-    // against a driven car, because the cars are always pushed 4.0 m apart.
-    if (dist < 4.6 && policeRamCooldown <= 0) {
+    // Ram the player.
+    if (dist < 3.4 && policeRamCooldown <= 0) {
       policeRamCooldown = 0.9;
       player.damage(9, 'police');
       S.fx.addShake(0.45);
@@ -221,9 +219,7 @@ function resetRunState(fromSave) {
     if (sv) {
       S.cash = sv.cash ?? 120;
       S.missionIndex = sv.missionIndex ?? 0;
-      // A save written by endRun carries health 0 — retrying from it must
-      // not resurrect the player at 0 HP. Restore full health instead.
-      S.health = (typeof sv.health === 'number' && sv.health > 0) ? sv.health : 100;
+      S.health = sv.health ?? 100;
       S.stats = { ...S.stats, ...(sv.stats || {}) };
       const sp = sv.player || {};
       player.reset(sp.x ?? world.spawn.x, sp.z ?? world.spawn.z, sp.heading ?? 0);
@@ -304,17 +300,13 @@ function updateCamera(dt) {
   camPitch = THREE.MathUtils.clamp(camPitch + m.dy * 0.0022, -0.05, 0.85);
   S.camYaw = camYaw;
   const target = player.onFoot ? player.pos : (S.car ? S.car.pos : player.pos);
-  // Shoulder-aim framing on foot while armed: a closer, lower camera
-  // looking further out at chest height, so the crosshair stays near
-  // targets instead of diving at the ground a few metres ahead.
-  const aiming = player.onFoot && player.armed;
-  const dist = player.onFoot ? (aiming ? 5.5 : 7.5) : 11;
-  const height = player.onFoot ? (aiming ? 2.4 : 3.1) : 4.2;
+  const dist = player.onFoot ? 7.5 : 11;
+  const height = player.onFoot ? 3.1 : 4.2;
   const back = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
   const speed01 = S.car ? Math.min(Math.abs(S.car.speed) / CFG.CAR.maxSpeed, 1) : 0;
   const want = new THREE.Vector3(
     target.x + back.x * dist,
-    target.y + height + camPitch * (aiming ? 1.0 : 4),
+    target.y + height + camPitch * 4,
     target.z + back.z * dist,
   );
   const k = 1 - Math.exp(-7 * dt);
@@ -323,12 +315,10 @@ function updateCamera(dt) {
   if (world.isInBuilding(camPos.x, camPos.z, 0.5)) camPos.y = Math.max(camPos.y, 14);
   const shake = S.fx.shakeOffset(dt);
   camera.position.set(camPos.x + shake.x, camPos.y + shake.y, camPos.z);
-  const lookDist = aiming ? 12 : 2.5;
-  const lookY = aiming ? 1.3 : 1.6;
   const look = new THREE.Vector3(
-    target.x + back.x * -lookDist,
-    target.y + lookY,
-    target.z + back.z * -lookDist,
+    target.x + back.x * -2.5,
+    target.y + 1.6,
+    target.z + back.z * -2.5,
   );
   camera.lookAt(look);
   const wantFov = 62 + speed01 * 13;
@@ -415,11 +405,11 @@ function animate() {
     if (autoSaveT > 60) { autoSaveT = 0; saveGame(); }
   }
 
-  // Death can flip the mode after player.update (police ram and cop
-  // punches run later in the frame): catch it here, outside the playing
-  // block, so the end screen shows even when the mode flips outside the
-  // main loop body — otherwise the next frame skips the block and the
-  // game sits in 'wasted' with no screen and no retry.
+  // Death flips S.mode to 'wasted' inside player.damage(), which can fire
+  // between frames — once mode has flipped, the playing block above is
+  // skipped, so the in-block check never runs. Catch it here so the end
+  // screen always shows. endRun() is guarded by runEnded, so this is safe
+  // to evaluate every frame.
   if (S.mode === 'wasted') endRun('wasted');
 
   S.fx.update(rawDt);
