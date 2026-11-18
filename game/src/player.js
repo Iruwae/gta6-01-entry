@@ -2,7 +2,7 @@
 // Original open-world crime game for make.fun gta6-01. All code written
 // from scratch in this session. No Rockstar / GTA assets, no network use.
 // On-foot movement (camera-relative), car enter/exit + stealing, pistol
-// shooting via raycast from the camera through the crosshair.
+// shooting via a shoulder-origin raycast toward the crosshair aim point.
 //
 // Camera convention: S.camYaw is owned by the main loop. At yaw 0 the
 // camera looks down -Z, so W moves along (-sin yaw, 0, -cos yaw).
@@ -278,23 +278,51 @@ export class Player {
     this.shootCooldown = 0.25;
     if (S.stats) S.stats.shotsFired = (S.stats.shotsFired || 0) + 1;
 
-    // Ray from the camera through the crosshair (fallback: player heading).
-    const ray = new THREE.Raycaster();
-    ray.far = 60;
-    if (S.camera) {
-      const dir = new THREE.Vector3();
-      S.camera.getWorldDirection(dir);
-      ray.set(S.camera.position, dir);
-    } else {
-      ray.set(
-        new THREE.Vector3(this.pos.x, this.pos.y + 1.5, this.pos.z),
-        new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading)),
-      );
-    }
     const targets = [];
     for (const p of (S.peds || [])) if (p.alive) targets.push(p.mesh);
     for (const c of (S.cops || [])) if (c.alive) targets.push(c.mesh);
     for (const car of (S.cars || [])) if (!car.dead) targets.push(car.mesh);
+    // Shoulder-origin ray, two steps (third-person shooter standard):
+    // 1. cast from the camera along the crosshair ray and take the first
+    //    hit point — the shot then lands exactly where the crosshair is;
+    // 2. fire from the player's right shoulder toward that point.
+    // If nothing is under the crosshair, fall back to a gently descending
+    // ray toward where the camera faces horizontally: a far point on the
+    // raw camera ray would send the shot underground within ~10 m (the
+    // camera looks down at a near point), while this keeps cars and peds
+    // on the facing line hittable out to ~35 m.
+    const shoulder = new THREE.Vector3(
+      this.pos.x - Math.cos(this.heading) * 0.45,
+      this.pos.y + 1.45,
+      this.pos.z + Math.sin(this.heading) * 0.45,
+    );
+    const aimPoint = new THREE.Vector3();
+    if (S.camera) {
+      const camRay = new THREE.Raycaster();
+      camRay.far = 60;
+      const camDir = new THREE.Vector3();
+      S.camera.getWorldDirection(camDir);
+      camRay.set(S.camera.position, camDir);
+      const camHits = camRay.intersectObjects(targets, true);
+      if (camHits.length > 0) {
+        aimPoint.copy(camHits[0].point);
+      } else {
+        const flat = new THREE.Vector3(camDir.x, 0, camDir.z);
+        if (flat.lengthSq() < 0.0001) flat.set(0, 0, -1);
+        flat.normalize();
+        aimPoint.copy(S.camera.position).addScaledVector(flat, 40);
+        aimPoint.y = shoulder.y - 1.0;
+      }
+    } else {
+      aimPoint.set(
+        this.pos.x + Math.sin(this.heading) * 40,
+        this.pos.y + 1.5,
+        this.pos.z + Math.cos(this.heading) * 40,
+      );
+    }
+    const ray = new THREE.Raycaster();
+    ray.far = 60;
+    ray.set(shoulder, aimPoint.sub(shoulder).normalize());
     const hits = ray.intersectObjects(targets, true);
     let hitPoint = null;
     if (hits.length > 0) {

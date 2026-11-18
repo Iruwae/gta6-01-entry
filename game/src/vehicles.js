@@ -141,6 +141,9 @@ export class Car {
     mesh.rotation.y = this.heading;
     scene.add(mesh);
     this.mesh = mesh;
+    // Raycast hits walk up parents for userData.ref (player.js shoot):
+    // without this, shots pass through cars with no owner to damage.
+    mesh.userData.ref = this;
     this.pos = mesh.position; // pos IS mesh.position (contract)
   }
 

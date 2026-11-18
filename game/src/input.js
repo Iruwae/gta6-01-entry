@@ -8,6 +8,7 @@ export class Input {
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.mouseDown = false;
+    this.aimDown = false; // right mouse held: aim (over-the-shoulder)
     this._clicked = false;
     this._lastX = 0;
     this._lastY = 0;
@@ -32,19 +33,25 @@ export class Input {
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.mouseDown = false;
+      this.aimDown = false;
       this._dragging = false;
     });
 
+    // Left button fires, right button aims; drag-look works on either.
     canvas.addEventListener('mousedown', (e) => {
-      this.mouseDown = true;
+      if (e.button === 0) this.mouseDown = true;
+      if (e.button === 2) this.aimDown = true;
       this._clicked = true;
       this._dragging = true;
       this._lastX = e.clientX;
       this._lastY = e.clientY;
     });
+    // Never let the browser menu steal a right-click aim.
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    window.addEventListener('mouseup', () => {
-      this.mouseDown = false;
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.mouseDown = false;
+      if (e.button === 2) this.aimDown = false;
       this._dragging = false;
     });
 

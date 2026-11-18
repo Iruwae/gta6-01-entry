@@ -299,15 +299,31 @@ function updateCamera(dt) {
   camYaw -= m.dx * 0.0032;
   camPitch = THREE.MathUtils.clamp(camPitch + m.dy * 0.0022, -0.05, 0.85);
   S.camYaw = camYaw;
+  // Aiming: right mouse held, on foot, armed. Over-the-shoulder framing —
+  // the camera closes in, drops to shoulder height and slides to the
+  // player's right, so the crosshair lines up with the shoulder-origin
+  // shot ray (player.js) instead of the wide third-person orbit.
+  const aiming = player.onFoot && player.armed && S.input.aimDown;
+  S.aiming = aiming;
+  if (aiming) {
+    // Face where the camera points so the shot leaves the body straight.
+    const wantHeading = camYaw + Math.PI;
+    let dh = wantHeading - player.heading;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    player.heading += dh * Math.min(1, dt * 14);
+    player.mesh.rotation.y = player.heading;
+  }
   const target = player.onFoot ? player.pos : (S.car ? S.car.pos : player.pos);
-  const dist = player.onFoot ? 7.5 : 11;
-  const height = player.onFoot ? 3.1 : 4.2;
+  const dist = aiming ? 3.4 : (player.onFoot ? 7.5 : 11);
+  const height = aiming ? 1.95 : (player.onFoot ? 3.1 : 4.2);
   const back = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
+  const right = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
   const speed01 = S.car ? Math.min(Math.abs(S.car.speed) / CFG.CAR.maxSpeed, 1) : 0;
   const want = new THREE.Vector3(
-    target.x + back.x * dist,
-    target.y + height + camPitch * 4,
-    target.z + back.z * dist,
+    target.x + back.x * dist + (aiming ? right.x * 0.95 : 0),
+    target.y + height + camPitch * (aiming ? 1.2 : 4),
+    target.z + back.z * dist + (aiming ? right.z * 0.95 : 0),
   );
   const k = 1 - Math.exp(-7 * dt);
   camPos.lerp(want, k);
@@ -316,12 +332,12 @@ function updateCamera(dt) {
   const shake = S.fx.shakeOffset(dt);
   camera.position.set(camPos.x + shake.x, camPos.y + shake.y, camPos.z);
   const look = new THREE.Vector3(
-    target.x + back.x * -2.5,
-    target.y + 1.6,
-    target.z + back.z * -2.5,
+    target.x + back.x * (aiming ? -10 : -2.5),
+    target.y + (aiming ? 1.5 : 1.6),
+    target.z + back.z * (aiming ? -10 : -2.5),
   );
   camera.lookAt(look);
-  const wantFov = 62 + speed01 * 13;
+  const wantFov = aiming ? 50 : 62 + speed01 * 13;
   camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 3);
   camera.updateProjectionMatrix();
 }
