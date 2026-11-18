@@ -37,6 +37,24 @@ export const CFG = {
   // Cash paid out when each story mission is completed, in order.
   MISSIONS: [500, 800, 1200, 2500],
 
+  // Radio stations: name + genre + a deterministic track rotation.
+  // The track index is floor(S.time / 45) % tracks.length — no network,
+  // no audio change, the display (and Q to switch) is the feature.
+  RADIO: [
+    {
+      name: 'SOLMAR FM 88.1', genre: 'Neon Drive',
+      tracks: ['Midnight Overdrive — The Palms', 'Sunset Strip — Vega Lights', "Cruisin' 101 — Gold Coast"],
+    },
+    {
+      name: 'BAYLINE 102.5', genre: 'Harbor Nights',
+      tracks: ['Dockside Blues — Marina Ray', 'Foghorn — The Tides', 'Night Shift — Crane Kings'],
+    },
+    {
+      name: 'WAVE 95.3', genre: 'Sunset Cruise',
+      tracks: ['Golden Hour — Sol Mar', 'Boardwalk — Summer Static', 'Flamingo Nights — DJ Rosa'],
+    },
+  ],
+
   COLORS: {
     sky: 0x2a2350, // deep dusk indigo (sky dome covers the background)
     sun: 0xffa04d,

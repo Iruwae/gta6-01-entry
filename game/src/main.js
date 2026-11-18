@@ -15,6 +15,8 @@ import { HUD } from './hud.js';
 import { AudioEngine } from './audio.js';
 import { makeSkyDome, makeClouds, makeEnvironment, SUN_DIR } from './sky.js';
 import { PostFX } from './postfx.js';
+import { PoliceBrain, Helicopter, nextCallsign } from './police.js';
+import { Dialogue } from './dialogue.js';
 
 const canvas = document.getElementById('game-canvas');
 const errBox = document.getElementById('err');
@@ -76,6 +78,7 @@ const postfx = new PostFX(renderer, scene, camera, headless);
 S.audio = new AudioEngine();
 S.input = new Input(canvas);
 S.missions = new Missions();
+S.dialogue = new Dialogue();
 S.hud = new HUD({
   onNewGame: () => startGame(false),
   onContinue: () => startGame(true),
@@ -121,6 +124,10 @@ const policeCars = [];
 let policeRamCooldown = 0;
 let bustedTimer = 0;
 let copSpawnCooldown = 0;
+let heli = null;
+// Previous player position for the velocity the police brain leads with.
+let prevPX = 0;
+let prevPZ = 0;
 
 function wantedFromHeat(heat) {
   if (heat >= 90) return 5;
@@ -141,6 +148,12 @@ function spawnPoliceCar() {
   const car = new Car(scene, { x, z, heading: 0, color: 0x111418, kind: 'police' });
   car.aiPolice = true;
   car.ramCooldown = 0;
+  car.callsign = nextCallsign();
+  car.brain = new PoliceBrain(car);
+  // The chase starts knowing where the crime happened: seed the
+  // last-known position so the search zone + SEARCH state have evidence
+  // from the first frame (not only after a unit closes to 45 m).
+  if (!S.lastKnown) S.lastKnown = { x: player.pos.x, z: player.pos.z, seenAt: S.time };
   S.cars.push(car);
   policeCars.push(car);
   return car;
@@ -179,20 +192,45 @@ function updatePolice(dt) {
   }
   S.audio.siren(want > 0);
 
-  // Police cars chase: steer toward the player, ram gently (~10 dps on contact).
+  // Player velocity for the police brain (lead the target, roadblock math).
+  const pvx = dt > 0 ? THREE.MathUtils.clamp((player.pos.x - prevPX) / dt, -40, 40) : 0;
+  const pvz = dt > 0 ? THREE.MathUtils.clamp((player.pos.z - prevPZ) / dt, -40, 40) : 0;
+  prevPX = player.pos.x;
+  prevPZ = player.pos.z;
+  const playerSpeed = S.car ? S.car.speed : Math.hypot(pvx, pvz);
+
+  // Perception: last-known position refreshes while any unit is close
+  // (enemy-perception). After 4 s unseen it goes stale and units SEARCH.
+  if (want > 0) {
+    let nearest = Infinity;
+    for (const c of policeCars) {
+      nearest = Math.min(nearest, Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z));
+    }
+    if (nearest < 45) {
+      S.lastKnown = { x: player.pos.x, z: player.pos.z, seenAt: S.time };
+    }
+  }
+
+  // Police cars: the brain decides the tactic at 5 Hz, movement runs
+  // every frame (ai-behavior-trees-utility-ai: decision cadence vs motion).
   policeRamCooldown -= dt;
   for (const car of policeCars) {
     if (car.dead) continue;
-    const dx = player.pos.x - car.pos.x;
-    const dz = player.pos.z - car.pos.z;
+    const intent = car.brain
+      ? car.brain.decide(dt, player.pos, { x: pvx, z: pvz }, player.heading, playerSpeed)
+      : { tx: player.pos.x, tz: player.pos.z, targetSpeed: 26, steerRate: 1.6 };
+    const dx = intent.tx - car.pos.x;
+    const dz = intent.tz - car.pos.z;
     const dist = Math.hypot(dx, dz);
-    const targetHeading = Math.atan2(dx, dz);
+    // ROADBLOCK hold: face across the road instead of the target point.
+    const targetHeading = intent.holdHeading !== undefined
+      ? intent.holdHeading
+      : (dist > 0.5 ? Math.atan2(dx, dz) : car.heading);
     let dh = targetHeading - car.heading;
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
-    car.heading += THREE.MathUtils.clamp(dh, -1.6 * dt, 1.6 * dt);
-    const targetSpeed = dist > 6 ? 26 : 14;
-    car.speed += THREE.MathUtils.clamp(targetSpeed - car.speed, -20 * dt, 12 * dt);
+    car.heading += THREE.MathUtils.clamp(dh, -intent.steerRate * dt, intent.steerRate * dt);
+    car.speed += THREE.MathUtils.clamp(intent.targetSpeed - car.speed, -20 * dt, 12 * dt);
     car.pos.x += Math.sin(car.heading) * car.speed * dt;
     car.pos.z += Math.cos(car.heading) * car.speed * dt;
     car.mesh.position.copy(car.pos);
@@ -206,8 +244,10 @@ function updatePolice(dt) {
       car.heading += 0.6;
     }
     world.clampPos(car.pos);
-    // Ram the player.
-    if (dist < 4.6 && policeRamCooldown <= 0) {
+    // Ram the player (RAMMING just arrives faster; the contact rule is
+    // the same gentle ~9 HP shove as before).
+    const pDist = Math.hypot(player.pos.x - car.pos.x, player.pos.z - car.pos.z);
+    if (pDist < 4.6 && policeRamCooldown <= 0) {
       policeRamCooldown = 0.9;
       player.damage(9, 'police');
       S.fx.addShake(0.45);
@@ -215,6 +255,16 @@ function updatePolice(dt) {
       if (!player.onFoot && S.car) S.car.damage(6);
     }
   }
+  // Helicopter at 3+ stars — one heli, circling with its searchlight.
+  if (want >= 3 && !heli) {
+    heli = new Helicopter(scene);
+    S.heli = heli;
+  } else if (want < 3 && heli) {
+    heli.remove();
+    heli = null;
+    S.heli = null;
+  }
+  if (heli) heli.update(dt, player.pos);
   // Busted: a foot cop standing on the player for 2s while wanted.
   if (want > 0 && player.onFoot) {
     let near = false;
@@ -259,6 +309,8 @@ function resetRunState(fromSave) {
   // Clear police.
   for (const c of [...policeCars]) removePoliceCar(c);
   for (const c of [...S.cops]) { c.remove(); S.cops.splice(S.cops.indexOf(c), 1); }
+  if (heli) { heli.remove(); heli = null; S.heli = null; }
+  S.lastKnown = null;
   S.missions.reset();
   if (S.missionIndex < 4) S.missions.start(S.missionIndex);
 }
@@ -291,6 +343,7 @@ function endRun(kind) {
   document.exitPointerLock?.();
   S.audio.siren(false);
   S.audio.setEngine(false, 0);
+  if (heli) { heli.remove(); heli = null; S.heli = null; }
   if (kind === 'busted') {
     const fine = Math.min(S.cash, 100);
     S.cash -= fine;
@@ -313,6 +366,16 @@ window.addEventListener('keydown', (e) => {
     setPaused(S.mode === 'playing');
   }
   if (e.code === 'KeyM') toggleMute();
+  if (e.code === 'KeyQ' && S.mode === 'playing') {
+    // Radio station cycle (Q): display-only + blip, music unchanged.
+    const stations = (CFG && CFG.RADIO) || [];
+    if (stations.length > 0) {
+      S.radioStation = ((S.radioStation || 0) + 1) % stations.length;
+      const stn = stations[S.radioStation];
+      S.hud.toast('RADIO: ' + stn.name + ' — ' + stn.genre);
+      if (S.audio && S.audio.blip) S.audio.blip();
+    }
+  }
   if (e.code === 'Enter' && S.mode === 'title') startGame(!!loadGame());
 });
 
@@ -425,6 +488,7 @@ function animate() {
     }
     S.missions.update(dt);
     updatePolice(dt);
+    if (S.dialogue) S.dialogue.update(dt);
 
     // Engine sound follows the driven car.
     S.audio.setEngine(!!S.car, S.car ? Math.abs(S.car.speed) / CFG.CAR.maxSpeed : 0);
@@ -475,4 +539,4 @@ S.hud.setMuted(S.muted);
 animate();
 
 // QA / automation hook (harmless in normal play).
-window.__solmar = { S, world, player, startGame, setPaused, THREE };
+window.__solmar = { S, world, player, startGame, setPaused, THREE, get heli() { return heli; } };

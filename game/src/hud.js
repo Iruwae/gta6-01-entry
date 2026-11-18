@@ -10,6 +10,10 @@
 // vitals bottom-right — nothing covers the crosshair or the road ahead.
 
 import { S } from './state.js';
+import { CFG } from './config.js';
+import { WEAPONS, CAR_NAMES } from './weapons.js';
+import { SPEAKERS, drawPortrait } from './dialogue.js';
+import { TACTICS } from './police.js';
 
 function $(id) {
   const el = document.getElementById(id);
@@ -36,6 +40,33 @@ export class HUD {
     this.elCrosshair = $('crosshair');
     this.elDamageFlash = $('damage-flash');
     this.elHint = $('hint');
+
+    // Round 4: police roster, weapon slots, radio, speedo details, dialogue.
+    this.elRoster = $('roster');
+    this.elRosterCode = $('roster-code');
+    this.elRosterRows = $('roster-rows');
+    this.elWeapons = $('weapons');
+    this.elRadio = $('radio');
+    this.elRadioStation = $('radio-station');
+    this.elRadioTrack = $('radio-track');
+    this.elDayTime = $('day-time');
+    this.elSpeedNum = $('speed-num');
+    this.elSpeedGear = $('speed-gear');
+    this.elSpeedCar = $('speed-car');
+    this.elSpeedCondFill = $('speed-cond-fill');
+    this.elDialogue = $('dialogue');
+    this.elDlgPortrait = $('dlg-portrait');
+    this.elDlgName = $('dlg-name');
+    this.elDlgText = $('dlg-text');
+    this._rosterT = 0;
+    this._slotEls = [];
+    this._buildWeaponSlots();
+    // Dialogue box: click advances the line (visual-novel page-click).
+    if (this.elDialogue) {
+      this.elDialogue.addEventListener('click', () => {
+        if (S && S.dialogue) S.dialogue.advance();
+      });
+    }
 
     // Title screen
     this.elTitle = $('title-screen');
@@ -90,6 +121,104 @@ export class HUD {
     el.style.display = '';
   }
 
+  // ---- round 4 widgets ---------------------------------------------------
+
+  _buildWeaponSlots() {
+    if (!this.elWeapons) return;
+    this.elWeapons.innerHTML = '';
+    this._slotEls = [];
+    for (let i = 0; i < WEAPONS.length; i++) {
+      const w = WEAPONS[i];
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+      const key = document.createElement('span');
+      key.className = 'slot-key';
+      key.textContent = String(i + 1);
+      const name = document.createElement('span');
+      name.className = 'slot-name';
+      name.textContent = w.name;
+      const ammo = document.createElement('span');
+      ammo.className = 'slot-ammo';
+      slot.appendChild(key);
+      slot.appendChild(name);
+      slot.appendChild(ammo);
+      this.elWeapons.appendChild(slot);
+      this._slotEls.push(slot);
+    }
+  }
+
+  // Police roster (refreshed at 4 Hz): callsign, distance, tactic badge.
+  _updateRoster() {
+    if (!this.elRoster) return;
+    const want = S ? (S.wanted || 0) : 0;
+    const cops = (S && Array.isArray(S.cars))
+      ? S.cars.filter((c) => c && c.aiPolice && !c.dead)
+      : [];
+    this._show(this.elRoster, want > 0 && cops.length > 0);
+    if (want === 0 || cops.length === 0) return;
+    this._setText(this.elRosterCode, 'CODE ' + want + ' · ' + cops.length + ' UNIT' + (cops.length > 1 ? 'S' : ''));
+    this.elRosterRows.innerHTML = '';
+    const px = S.player ? S.player.pos.x : 0;
+    const pz = S.player ? S.player.pos.z : 0;
+    for (const c of cops) {
+      const d = Math.round(Math.hypot(c.pos.x - px, c.pos.z - pz));
+      const tac = (c.brain && c.brain.tactic) || 'PURSUIT';
+      const t = TACTICS[tac] || TACTICS.PURSUIT;
+      const row = document.createElement('div');
+      row.className = 'roster-row';
+      const name = document.createElement('span');
+      name.className = 'roster-name';
+      name.textContent = c.callsign || 'PD-??';
+      const dist = document.createElement('span');
+      dist.className = 'roster-dist';
+      dist.textContent = d + 'm';
+      const badge = document.createElement('span');
+      badge.className = 'tactic';
+      badge.style.color = t.color;
+      badge.style.borderColor = t.color;
+      badge.textContent = t.label;
+      row.appendChild(name);
+      row.appendChild(dist);
+      row.appendChild(badge);
+      this.elRosterRows.appendChild(row);
+    }
+  }
+
+  _updateWeaponSlots() {
+    if (!this._slotEls || !S.player || !S.player.loadout) return;
+    const loadout = S.player.loadout;
+    const done = S.missionIndex || 0;
+    for (let i = 0; i < this._slotEls.length; i++) {
+      const el = this._slotEls[i];
+      const slot = loadout.slots[i];
+      const unlocked = loadout.unlocked(i, done);
+      el.classList.toggle('active', i === loadout.equipped);
+      el.classList.toggle('locked', !unlocked);
+      const ammoEl = el.querySelector('.slot-ammo');
+      if (ammoEl) {
+        ammoEl.textContent = unlocked
+          ? slot.ammo + ' / ∞'
+          : WEAPONS[i].unlockText;
+      }
+    }
+  }
+
+  // ---- dialogue ----------------------------------------------------------
+
+  showDialogueLine(who, expr, text) {
+    if (!this.elDialogue) return;
+    const sp = SPEAKERS[who] || { name: String(who).toUpperCase(), color: '#ffffff' };
+    this._setText(this.elDlgName, sp.name);
+    if (this.elDlgName) this.elDlgName.style.color = sp.color;
+    this._setText(this.elDlgText, text);
+    drawPortrait(this.elDlgPortrait, who, expr);
+    this._show(this.elDialogue, true);
+  }
+
+  hideDialogue() {
+    this._show(this.elDialogue, false);
+  }
+
   // ---- per-frame ---------------------------------------------------------
 
   update(dt) {
@@ -103,8 +232,17 @@ export class HUD {
     }
     this._setText(this.elHealthNum, String(Math.round(hp)));
 
-    // Cash.
-    this._setText(this.elCash, '$' + Math.floor(S.cash || 0));
+    // Cash — thousands separators, champion style ($38,420).
+    this._setText(this.elCash, '$' + Math.floor(S.cash || 0).toLocaleString('en-US'));
+
+    // In-game clock: day 1 starts 18:30 (sunset); 1 game hour = 120 s.
+    if (this.elDayTime) {
+      const hours = 18.5 + (S.time || 0) / 120;
+      const day = 1 + Math.floor(hours / 24);
+      const hh = Math.floor(hours % 24);
+      const mm = Math.floor((hours % 1) * 60);
+      this.elDayTime.textContent = 'DAY ' + day + ' · ' + String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+    }
 
     // Wanted stars — filled gold, empty dim; red tint at 3+ stars.
     const wanted = Math.max(0, Math.min(5, S.wanted || 0));
@@ -113,14 +251,45 @@ export class HUD {
       this.elStars.style.color = wanted >= 3 ? '#ff5252' : wanted > 0 ? '#ffd54f' : '#546e7a';
     }
 
-    // Speed — km/h from car speed (m/s), on foot from player speed if present.
+    // Speedometer (racing-feel: number + gear + vehicle + condition):
+    // big km/h, gear from speed band, vehicle name, condition bar.
     let kmh = 0;
+    let gear = 'N';
+    let carName = 'ON FOOT';
+    let cond = null;
     if (S.car && typeof S.car.speed === 'number') {
       kmh = Math.abs(S.car.speed) * 3.6;
+      const sp = S.car.speed;
+      gear = sp < -0.5 ? 'R' : sp < 1 ? 'N' : String(Math.min(5, 1 + Math.floor(Math.abs(sp) / 7)));
+      carName = CAR_NAMES[S.car.kind] || 'CAR';
+      cond = Math.max(0, Math.min(100, S.car.health || 0));
     } else if (S.player && typeof S.player.speed === 'number') {
       kmh = Math.abs(S.player.speed) * 3.6;
     }
-    this._setText(this.elSpeed, Math.round(kmh) + ' km/h');
+    this._setText(this.elSpeedNum, String(Math.round(kmh)));
+    this._setText(this.elSpeedGear, gear);
+    this._setText(this.elSpeedCar, carName);
+    if (this.elSpeedCondFill) {
+      this.elSpeedCondFill.style.width = (cond === null ? 100 : cond) + '%';
+      this.elSpeedCondFill.style.background = cond === null ? '#2ecc71' : cond > 50 ? '#2ecc71' : cond > 25 ? '#f39c12' : '#e74c3c';
+    }
+
+    // Radio: station + track (track rotates every 45 s, deterministic).
+    const stations = (CFG && CFG.RADIO) || [];
+    if (stations.length > 0 && this.elRadioStation) {
+      const stn = stations[(S.radioStation || 0) % stations.length];
+      this._setText(this.elRadioStation, '♪ ' + stn.name + ' · ' + stn.genre);
+      const track = stn.tracks[Math.floor((S.time || 0) / 45) % stn.tracks.length];
+      this._setText(this.elRadioTrack, track);
+    }
+
+    // Police roster (4 Hz) + weapon slots (every frame, cheap).
+    this._rosterT -= dt;
+    if (this._rosterT <= 0) {
+      this._rosterT = 0.25;
+      this._updateRoster();
+    }
+    this._updateWeaponSlots();
 
     // Objective + mission title.
     if (S.missions) {
@@ -201,6 +370,33 @@ export class HUD {
       if (world.garage) landmark(world.garage.x, world.garage.z, 'G', '#2ecc71');
       if (world.bank) landmark(world.bank.x, world.bank.z, '$', '#ffd54f');
       if (world.harbor) landmark(world.harbor.x, world.harbor.z, 'H', '#4fc3f7');
+    }
+
+    // Wanted search zone (enemy-perception: last-known position + stale
+    // growth). Red translucent disk + dashed ring at the LKP.
+    if (S && (S.wanted || 0) > 0 && S.lastKnown) {
+      const lk = S.lastKnown;
+      const staleFor = Math.max(0, (S.time || 0) - lk.seenAt);
+      const radius = Math.min(70, 25 + (staleFor > 4 ? (staleFor - 4) * 4 : 0));
+      ctx.fillStyle = 'rgba(255,60,60,0.13)';
+      ctx.beginPath();
+      ctx.arc(px(lk.x), py(lk.z), radius * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,80,80,0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.arc(px(lk.x), py(lk.z), radius * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // Helicopter blip (yellow H).
+    if (S && S.heli && S.heli.pos) {
+      ctx.fillStyle = '#ffd60a';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('H', px(S.heli.pos.x), py(S.heli.pos.z));
     }
 
     // Traffic dots.
@@ -306,14 +502,14 @@ export class HUD {
     this._show(this.elBtnContinue, !!hasSave);
     if (this.elContinueLabel && hasSave && S) {
       this.elContinueLabel.textContent =
-        'Cash $' + Math.floor(S.cash || 0) +
+        'Cash $' + Math.floor(S.cash || 0).toLocaleString('en-US') +
         ' · Jobs done: ' + (S.stats ? (S.stats.missionsDone || 0) : 0);
     }
     if (this.elTitleSaveInfo) {
       if (hasSave && S) {
         const jobs = S.stats ? (S.stats.missionsDone || 0) : 0;
         this.elTitleSaveInfo.textContent =
-          'Saved game — Cash $' + Math.floor(S.cash || 0) +
+          'Saved game — Cash $' + Math.floor(S.cash || 0).toLocaleString('en-US') +
           ' · Jobs done: ' + jobs +
           ' · Health: ' + Math.round(S.health || 0);
         this.elTitleSaveInfo.style.display = '';
@@ -329,7 +525,7 @@ export class HUD {
     if (show && this.elPauseStats && S) {
       const st = S.stats || {};
       this.elPauseStats.textContent =
-        'Cash: $' + Math.floor(S.cash || 0) +
+        'Cash: $' + Math.floor(S.cash || 0).toLocaleString('en-US') +
         '  ·  Jobs done: ' + (st.missionsDone || 0) +
         '  ·  Kills: ' + (st.kills || 0) +
         '  ·  Cars stolen: ' + (st.carsStolen || 0) +

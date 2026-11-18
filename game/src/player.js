@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { CFG } from './config.js';
 import { S } from './state.js';
 import { Car } from './vehicles.js';
+import { Loadout } from './weapons.js';
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 function angleLerp(a, b, t) {
@@ -31,7 +32,10 @@ export class Player {
     this.onFoot = true;
     this.car = null;
     this.armed = true;
-    this.ammo = 12;
+    // Weapon loadout: 4 slots, magazine per slot (weapons.js contract).
+    // this.ammo always mirrors the equipped slot's magazine.
+    this.loadout = new Loadout();
+    this.ammo = this.loadout.current().ammo;
     this.reloadT = 0;
     this.reloading = false;
     this.shootCooldown = 0;
@@ -126,7 +130,8 @@ export class Player {
     if (S) S.health = 100;
     this.onFoot = true;
     this.car = null;
-    this.ammo = 12;
+    this.loadout.reset();
+    this.ammo = this.loadout.current().ammo;
     this.reloadT = 0;
     this.reloading = false;
     this.shootCooldown = 0;
@@ -151,11 +156,19 @@ export class Player {
       this.reloadT -= dt;
       if (this.reloadT <= 0) {
         this.reloading = false;
-        this.ammo = 12;
+        // Atomic reload commit (ammo-reload contract): the magazine is
+        // refilled exactly once, at the end of the reload — never during.
+        const slot = this.loadout.current();
+        slot.ammo = slot.def.mag;
+        this.ammo = slot.ammo;
       }
     }
     const pressedE = this._pressed('KeyE', input);
     const pressedR = this._pressed('KeyR', input);
+    // Weapon switch (keys 1-4) works on foot and in the car.
+    for (let i = 0; i < 4; i++) {
+      if (this._pressed('Digit' + (i + 1), input)) this.switchWeapon(i);
+    }
 
     if (!this.onFoot) {
       if (this.car) {
@@ -224,13 +237,18 @@ export class Player {
     this._collideWorld();
     if (this.world && this.world.clampPos) this.world.clampPos(this.pos);
 
-    // Enter the nearest car.
+    // Enter the nearest car — unless a dialogue line is showing, in which
+    // case E advances the dialogue instead (visual-novel advance action).
     if (pressedE) {
-      const car = this._nearestCar(3.5);
-      if (car) this.enterCar(car);
+      if (S && S.dialogue && S.dialogue.active) {
+        S.dialogue.advance();
+      } else {
+        const car = this._nearestCar(3.5);
+        if (car) this.enterCar(car);
+      }
     }
     // Reload.
-    if (pressedR && this.ammo < 12 && !this.reloading) this._startReload();
+    if (pressedR && this.ammo < this.loadout.current().def.mag && !this.reloading) this._startReload();
     // Fire: hold mouse or Space.
     if (input.mouseDown || input.down('Space')) this.shoot();
     if (S) S.health = this.health;
@@ -320,11 +338,35 @@ export class Player {
     if (S.audio && S.audio.reload) S.audio.reload();
   }
 
+  // Weapon swap (weapon-swap contract: instant-holster, commits at once).
+  // The equipped slot's magazine is preserved across swaps; switching
+  // cancels a reload in progress (no ammo is created or destroyed).
+  switchWeapon(i) {
+    if (this.reloading) {
+      this.reloading = false;
+      this.reloadT = 0;
+    }
+    const done = (S && typeof S.missionIndex === 'number') ? S.missionIndex : 0;
+    const res = this.loadout.switchTo(i, done);
+    if (!res.ok) {
+      if (S && S.hud && typeof S.hud.toast === 'function') S.hud.toast(res.reason);
+      return;
+    }
+    if (res.already) return;
+    this.ammo = this.loadout.current().ammo;
+    const w = this.loadout.current().def;
+    if (S && S.hud && typeof S.hud.toast === 'function') S.hud.toast(w.name + ' equipped');
+    if (S.audio && S.audio.blip) S.audio.blip();
+  }
+
   shoot() {
     if (!this.onFoot || !this.armed || this.ammo <= 0
       || this.shootCooldown > 0 || this.reloading) return;
+    // One round consumed at the fire event (ammo-reload contract).
+    const def = this.loadout.current().def;
     this.ammo -= 1;
-    this.shootCooldown = 0.25;
+    this.loadout.current().ammo = this.ammo;
+    this.shootCooldown = def.cooldown;
     if (S.stats) S.stats.shotsFired = (S.stats.shotsFired || 0) + 1;
 
     const targets = [];
@@ -369,41 +411,55 @@ export class Player {
         this.pos.z + Math.cos(this.heading) * 40,
       );
     }
-    const ray = new THREE.Raycaster();
-    ray.far = 60;
-    ray.set(shoulder, aimPoint.sub(shoulder).normalize());
-    const hits = ray.intersectObjects(targets, true);
-    let hitPoint = null;
-    if (hits.length > 0) {
+    // Fire def.pellets rays from the shoulder toward the aim point, with
+    // the weapon's spread on each pellet (shotgun = 5-pellet cone).
+    const baseDir = aimPoint.sub(shoulder).normalize();
+    for (let p = 0; p < def.pellets; p++) {
+      const dir = baseDir.clone();
+      if (def.spread > 0) {
+        const yaw = (Math.random() - 0.5) * def.spread * 2;
+        const cos = Math.cos(yaw);
+        const sin = Math.sin(yaw);
+        const nx = dir.x * cos - dir.z * sin;
+        const nz = dir.x * sin + dir.z * cos;
+        dir.x = nx;
+        dir.z = nz;
+        dir.y += (Math.random() - 0.5) * def.spread;
+        dir.normalize();
+      }
+      const ray = new THREE.Raycaster();
+      ray.far = 60;
+      ray.set(shoulder, dir);
+      const hits = ray.intersectObjects(targets, true);
+      if (hits.length === 0) continue;
       const hit = hits[0];
-      hitPoint = hit.point;
+      const hitPoint = hit.point;
       let node = hit.object;
       let owner = null;
       while (node) {
         if (node.userData && node.userData.ref) { owner = node.userData.ref; break; }
         node = node.parent;
       }
-      if (owner) {
-        if (owner instanceof Car) {
-          owner.damage(12);
-          if (S.fx && S.fx.burst) S.fx.burst(hitPoint, 0xffdd88, 8, 5, 0.4);
-          if (S.fx && S.fx.damageNumber) {
-            S.fx.damageNumber({ x: hitPoint.x, y: hitPoint.y + 0.4, z: hitPoint.z }, '-12', '#ffdd88');
+      if (!owner) continue;
+      if (owner instanceof Car) {
+        owner.damage(def.damage);
+        if (S.fx && S.fx.burst) S.fx.burst(hitPoint, 0xffdd88, 8, 5, 0.4);
+        if (S.fx && S.fx.damageNumber) {
+          S.fx.damageNumber({ x: hitPoint.x, y: hitPoint.y + 0.4, z: hitPoint.z }, '-' + def.damage, '#ffdd88');
+        }
+      } else {
+        // Ped or Cop.
+        const died = owner.damage(def.damage);
+        if (S.fx && S.fx.burst) S.fx.burst(hitPoint, 0xcc2222, 10, 4, 0.5);
+        if (died) {
+          if (S.stats) S.stats.kills = (S.stats.kills || 0) + 1;
+          if (S) S.heat = (S.heat || 0) + 30;
+          // Mission crews track their own casualties.
+          if (S.missions && typeof S.missions.registerKill === 'function') {
+            S.missions.registerKill(owner);
           }
         } else {
-          // Ped or Cop.
-          const died = owner.damage(34);
-          if (S.fx && S.fx.burst) S.fx.burst(hitPoint, 0xcc2222, 10, 4, 0.5);
-          if (died) {
-            if (S.stats) S.stats.kills = (S.stats.kills || 0) + 1;
-            if (S) S.heat = (S.heat || 0) + 30;
-            // Mission crews track their own casualties.
-            if (S.missions && typeof S.missions.registerKill === 'function') {
-              S.missions.registerKill(owner);
-            }
-          } else {
-            if (S) S.heat = (S.heat || 0) + 20;
-          }
+          if (S) S.heat = (S.heat || 0) + 20;
         }
       }
     }

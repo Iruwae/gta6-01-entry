@@ -13,6 +13,10 @@ export const S = {
   cars: [],             // traffic / parked cars in the world
   peds: [],             // pedestrians
   cops: [],             // pursuing police cars
+  heli: null,           // PD helicopter (3+ stars) or null
+  lastKnown: null,      // police last-known position {x, z, seenAt} or null
+  radioStation: 0,      // index into CFG.RADIO
+  dialogue: null,       // dialogue runner (set by main.js)
   world: null,          // city.js world object
   fx: null,             // effects system (particles, flashes)
   audio: null,          // audio system

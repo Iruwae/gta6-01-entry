@@ -15,6 +15,7 @@ import { S, saveGame } from './state.js';
 import { CFG } from './config.js';
 import { Car } from './vehicles.js';
 import { Ped } from './people.js';
+import { DIALOGUE } from './dialogue.js';
 
 const FALLBACK_REWARDS = [500, 800, 1200, 2500];
 const RIVAL_SHIRTS = [0xc0392b, 0x8e44ad, 0xd35400, 0x2c3e50];
@@ -199,6 +200,12 @@ export class Missions {
     this.timer = 0;
     this._enterStage();
     this._toast(this.current.briefing);
+    // Mission briefing as a dialogue box with Lena's portrait — the toast
+    // stays as the stage text, the dialogue carries the story.
+    if (S && S.dialogue && typeof S.dialogue.play === 'function') {
+      const lines = DIALOGUE[this.current.id + '_brief'];
+      if (lines) S.dialogue.play(lines);
+    }
     this._jingle();
   }
 
@@ -266,6 +273,10 @@ export class Missions {
     }
     this._jingle();
     this._toast('Job done! +$' + reward);
+    if (S && S.dialogue && typeof S.dialogue.play === 'function') {
+      const lines = DIALOGUE[this.current.id + '_done'];
+      if (lines) S.dialogue.play(lines);
+    }
     if (S && S.audio && typeof S.audio.siren === 'function') S.audio.siren(false);
     if (typeof saveGame === 'function') {
       try { saveGame(); } catch (e) { /* save is best-effort mid-game */ }

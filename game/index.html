@@ -24,9 +24,47 @@
   #cash { margin-top:6px; font-size:20px; font-weight:800; color:#8affc1; letter-spacing:.5px; }
   #stars { margin-top:2px; font-size:19px; letter-spacing:3px; color:#ffd60a;
     text-shadow:0 0 8px rgba(255,214,10,.7); }
-  #speed { position:absolute; right:16px; bottom:16px; padding:8px 14px; font-size:26px;
-    font-weight:800; text-align:right; text-shadow:0 2px 8px rgba(0,0,0,.6); }
-  #speed small { display:block; font-size:11px; font-weight:600; color:#ffd9a0; letter-spacing:1px; }
+  #day-time { font-size:11px; font-weight:700; color:#ffd9a0; letter-spacing:1px; margin-top:4px; }
+
+  /* ---------- Round 4: police roster, weapon slots, radio, dialogue ---------- */
+  #roster { position:absolute; left:14px; top:152px; width:236px; padding:8px 10px; }
+  #roster-title { font-size:11px; font-weight:800; letter-spacing:2px; color:#ff8a80; }
+  #roster-code { font-size:12px; font-weight:700; color:#ffd54f; margin-top:2px; }
+  .roster-row { display:flex; align-items:center; gap:6px; margin-top:5px; font-size:12.5px; }
+  .roster-name { font-weight:800; min-width:48px; }
+  .roster-dist { color:#bcd6e6; min-width:38px; }
+  .tactic { margin-left:auto; font-size:10px; font-weight:800; letter-spacing:1px;
+    border:1px solid; border-radius:4px; padding:1px 5px; white-space:nowrap; }
+  #weapons { position:absolute; top:14px; right:14px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+  .slot { display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:6px;
+    background:rgba(255,255,255,.06); border:1px solid transparent; font-size:12.5px; min-width:180px; }
+  .slot.active { border-color:var(--amber); background:rgba(255,183,3,.16); }
+  .slot.locked { opacity:.45; }
+  .slot-key { font-weight:800; color:var(--amber); border:1px solid rgba(255,183,3,.5);
+    border-radius:4px; padding:0 5px; font-size:11px; }
+  .slot-name { font-weight:800; letter-spacing:1px; }
+  .slot-ammo { margin-left:auto; color:#8affc1; font-weight:700; }
+  .slot.locked .slot-ammo { color:#9aa0a6; font-size:11px; }
+  #radio { position:absolute; right:16px; bottom:100px; padding:7px 12px; text-align:right; }
+  #radio-station { font-size:12px; font-weight:800; color:#ffd9a0; letter-spacing:1px; }
+  #radio-track { font-size:12px; color:#e8f1f8; margin-top:2px; }
+  #speed { position:absolute; right:16px; bottom:16px; padding:8px 14px; text-align:right; min-width:160px;
+    text-shadow:0 2px 8px rgba(0,0,0,.6); }
+  #speed-num { font-size:30px; font-weight:800; line-height:1; }
+  #speed-unit { font-size:12px; font-weight:700; color:#ffd9a0; margin-left:4px; }
+  #speed-gear { display:inline-block; margin-left:8px; font-size:13px; font-weight:800;
+    border:1px solid rgba(255,217,160,.6); border-radius:4px; padding:1px 6px; color:#ffd9a0; }
+  #speed-car { font-size:11px; font-weight:700; color:#ffd9a0; letter-spacing:1px; margin-top:3px; }
+  #speed-cond { height:5px; background:rgba(255,255,255,.18); border-radius:3px; overflow:hidden; margin-top:4px; }
+  #speed-cond-fill { height:100%; width:100%; background:#2ecc71; }
+  #dialogue { position:absolute; left:50%; bottom:64px; transform:translateX(-50%);
+    display:flex; gap:12px; align-items:flex-start; padding:10px 14px; max-width:600px;
+    width:calc(100% - 420px); min-width:420px; cursor:pointer; pointer-events:auto; }
+  #dlg-portrait { width:72px; height:72px; border-radius:8px; border:2px solid rgba(255,183,3,.5); flex:none; }
+  #dlg-body { flex:1; min-width:0; }
+  #dlg-name { font-size:12px; font-weight:800; letter-spacing:2px; }
+  #dlg-text { font-size:15px; line-height:1.45; margin-top:3px; }
+  #dlg-hint { font-size:10.5px; color:rgba(255,255,255,.55); margin-top:5px; letter-spacing:1px; }
   #objective-box { position:absolute; top:14px; left:50%; transform:translateX(-50%);
     padding:8px 16px; text-align:center; max-width:520px; border-left:4px solid var(--amber); }
   #mission-title { font-size:12px; font-weight:800; letter-spacing:2px; color:var(--amber); }
@@ -40,7 +78,7 @@
     box-shadow:0 0 4px #000; }
   #crosshair::before { left:10px; top:0; width:2px; height:22px; }
   #crosshair::after { left:0; top:10px; width:22px; height:2px; }
-  #toast { position:absolute; left:50%; bottom:110px; transform:translateX(-50%);
+  #toast { position:absolute; left:50%; bottom:204px; transform:translateX(-50%);
     padding:10px 18px; font-size:16px; font-weight:700; opacity:0; transition:opacity .3s;
     white-space:nowrap; }
   #hint { position:absolute; left:50%; bottom:16px; transform:translateX(-50%);
@@ -88,16 +126,31 @@
     <div id="health-row"><span>♥</span><div id="health-bar"><div id="health-fill"></div></div><span id="health-num">100</span></div>
     <div id="cash">$120</div>
     <div id="stars">☆☆☆☆☆</div>
+    <div id="day-time">DAY 1 · 18:30</div>
+  </div>
+  <div id="roster" class="panel hidden">
+    <div id="roster-title">SOLMAR BAY PD — RESPONSE</div>
+    <div id="roster-code"></div>
+    <div id="roster-rows"></div>
+  </div>
+  <div id="weapons" class="panel"></div>
+  <div id="radio" class="panel">
+    <div id="radio-station"></div>
+    <div id="radio-track"></div>
   </div>
   <div id="objective-box" class="panel">
     <div id="mission-title">SOLMAR BAY</div>
     <div id="objective">Visit the Bayline garage to start your first job.</div>
   </div>
   <canvas id="minimap" width="180" height="180"></canvas>
-  <div id="speed" class="panel">0<small>KM/H</small></div>
+  <div id="speed" class="panel"><span id="speed-num">0</span><span id="speed-unit">KM/H</span><span id="speed-gear">N</span><div id="speed-car">ON FOOT</div><div id="speed-cond"><div id="speed-cond-fill"></div></div></div>
+  <div id="dialogue" class="panel hidden">
+    <canvas id="dlg-portrait" width="96" height="96"></canvas>
+    <div id="dlg-body"><div id="dlg-name"></div><div id="dlg-text"></div><div id="dlg-hint">CLICK / E — CONTINUE</div></div>
+  </div>
   <div id="crosshair" class="hidden"></div>
   <div id="toast" class="panel"></div>
-  <div id="hint">WASD move &nbsp;·&nbsp; SHIFT run &nbsp;·&nbsp; E enter / steal car &nbsp;·&nbsp; CLICK shoot &nbsp;·&nbsp; R reload &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M mute</div>
+  <div id="hint">WASD move &nbsp;·&nbsp; SHIFT run &nbsp;·&nbsp; E enter / steal car &nbsp;·&nbsp; CLICK shoot &nbsp;·&nbsp; R reload &nbsp;·&nbsp; 1-4 weapons &nbsp;·&nbsp; Q radio &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M mute</div>
 </div>
 <div id="damage-flash"></div>
 
@@ -113,7 +166,8 @@
   <div id="title-save-info"></div>
   <div class="controls">
     <b>W A S D</b> move / drive &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Click</b> shoot<br>
-    <b>E</b> enter &amp; steal cars &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>R</b> reload &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute
+    <b>E</b> enter &amp; steal cars &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>R</b> reload<br>
+    <b>1-4</b> weapons &nbsp;·&nbsp; <b>Q</b> radio &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute
   </div>
   <div class="kbd-note">An original game. No Rockstar content — city, characters and story are all our own.</div>
   <button class="btn ghost" id="btn-mute-title">🔊 SOUND: ON</button>
