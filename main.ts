@@ -9,6 +9,12 @@
 // Local check:  mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 // Play locally: node serve.ts, then open http://localhost:8080
 
+// QA fix pass (2026-11-18): boot imports, HUD visibility, shootable cars,
+// shoulder aim, bank/parked-car placement, rival tuning, police ram and
+// the end-screen/retry flow were all verified by a headless Chromium
+// playtest of game/ (see game/src/*.js); main.ts itself is unchanged
+// apart from this note.
+
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
