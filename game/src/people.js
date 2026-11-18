@@ -101,8 +101,6 @@ export class Ped {
     this.scaredT = Math.max(0, this.scaredT - dt);
 
     // Fight: hostile peds face the player and shoot every ~1.5 s inside 40 m.
-    // Shots can miss: ~70% hit up close, ~30% at 35 m — four rivals at full
-    // accuracy dealt ~20 dps, which ended a run in seconds.
     if (this.hostile && playerPos) {
       const dx = playerPos.x - this.pos.x;
       const dz = playerPos.z - this.pos.z;
@@ -120,7 +118,7 @@ export class Ped {
         this.pos.z += pz * this.strafeDir * 1.0 * dt;
         if (this.shootT <= 0 && dist < 35) {
           this.shootT = 1.5;
-          // Hit chance falls with range: ~70% up close, ~30% at 35 m.
+          // Range falloff: ~70% hit chance up close, ~30% at 35 m.
           const hitP = Math.max(0.3, 0.7 - 0.4 * (dist / 35));
           if (Math.random() < hitP) {
             if (S.player && S.player.damage) S.player.damage(5);

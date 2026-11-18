@@ -183,8 +183,7 @@ function updatePolice(dt) {
       car.heading += 0.6;
     }
     world.clampPos(car.pos);
-    // Ram the player. Range 4.6 m: cars hold ~4.0 m separation in a chase,
-    // so a 3.4 m ram could almost never connect.
+    // Ram the player.
     if (dist < 4.6 && policeRamCooldown <= 0) {
       policeRamCooldown = 0.9;
       player.damage(9, 'police');
