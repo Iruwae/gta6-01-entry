@@ -183,8 +183,10 @@ function updatePolice(dt) {
       car.heading += 0.6;
     }
     world.clampPos(car.pos);
-    // Ram the player.
-    if (dist < 3.4 && policeRamCooldown <= 0) {
+    // Ram the player. Range must exceed the 4.0 m car-to-car separation
+    // (vehicles.js _collideCars) — at 3.4 m the ram could never trigger
+    // against a driven car, because the cars are always pushed 4.0 m apart.
+    if (dist < 4.6 && policeRamCooldown <= 0) {
       policeRamCooldown = 0.9;
       player.damage(9, 'police');
       S.fx.addShake(0.45);
