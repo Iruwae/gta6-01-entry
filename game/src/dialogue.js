@@ -1,168 +1,106 @@
-// dialogue.js — the conversation panel (round-5 rebuild, builder B2).
-// Owns #dialogue / #dlg-name / #dlg-text and paints a procedural
-// portrait for whoever is speaking: no image files, just canvas arcs
-// in each character's colours. Click the panel to advance; the last
-// click closes it.
+// dialogue.js — the conversation box at the bottom of the screen.
+// One job: show a speaker and a line, advance on click, hide when the
+// conversation is over. Missions drive it for briefings and wrap-ups;
+// banter stays on the toast, it never touches this box.
 //
-// NOTE (fix, second pass): the page ships #dlg-portrait as a DIV, not
-// a canvas, so the portrait must live on a canvas we create inside
-// that frame. Showing the panel never depends on the portrait — the
-// panel un-hides first, the drawing is best-effort behind try/catch.
+// A line is { speaker, text }. The portrait is a plain colour wash per
+// speaker — no assets, no network — so the box works offline.
 
-const PALETTES = {
-  'LENA CRUZ': { bg: '#123f4d', skin: '#e8b48c', hair: '#ff7a59', shirt: '#0e7490', lip: '#c2410c' },
-  'MARCO SOLIS': { bg: '#3d2b1f', skin: '#c98f5f', hair: '#241a12', shirt: '#78350f', lip: '#7c2d12' },
-  'VIC TORRES': { bg: '#1d2733', skin: '#d9a066', hair: '#9aa0a6', shirt: '#334155', lip: '#57534e' },
+// One wash per voice in the story. Unknown speakers fall back to amber.
+const PORTRAIT_WASH = {
+  'LENA CRUZ': 'linear-gradient(135deg, #0e7490, #22d3ee)',
+  'VIC TORRES': 'linear-gradient(135deg, #7a2a8a, #c026d3)',
+  'MARCO SOLIS': 'linear-gradient(135deg, #166534, #4ade80)',
+  'DISPATCH': 'linear-gradient(135deg, #1e3a8a, #60a5fa)',
+  'NARRATOR': 'linear-gradient(135deg, #78350f, #f59e0b)',
 };
 
-function paletteFor(speaker) {
-  return PALETTES[speaker] || { bg: '#27272a', skin: '#d9a066', hair: '#3f3f46', shirt: '#52525b', lip: '#44403c' };
-}
+const FALLBACK_WASH = 'linear-gradient(135deg, #ff7a3c, #7a2a8a)';
 
-function drawPortrait(canvas, speaker) {
-  try {
-    if (!canvas || typeof canvas.getContext !== 'function') return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const p = paletteFor(speaker);
-    const w = canvas.width;
-    const h = canvas.height;
-    const cx = w / 2;
-    ctx.clearRect(0, 0, w, h);
-    // Backdrop disc.
-    ctx.fillStyle = p.bg;
-    ctx.beginPath();
-    ctx.arc(cx, h / 2, w / 2 - 2, 0, Math.PI * 2);
-    ctx.fill();
-    // Shoulders / shirt.
-    ctx.fillStyle = p.shirt;
-    ctx.beginPath();
-    ctx.moveTo(cx - 30, h + 4);
-    ctx.quadraticCurveTo(cx - 28, h - 26, cx, h - 26);
-    ctx.quadraticCurveTo(cx + 28, h - 26, cx + 30, h + 4);
-    ctx.closePath();
-    ctx.fill();
-    // Neck.
-    ctx.fillStyle = p.skin;
-    ctx.fillRect(cx - 7, h - 40, 14, 16);
-    // Face.
-    ctx.beginPath();
-    ctx.arc(cx, h - 48, 19, 0, Math.PI * 2);
-    ctx.fill();
-    // Hair: a cap over the top of the face, shaped per character.
-    ctx.fillStyle = p.hair;
-    ctx.beginPath();
-    ctx.arc(cx, h - 52, 19, Math.PI, Math.PI * 2);
-    ctx.closePath();
-    ctx.fill();
-    if (speaker === 'LENA CRUZ') {
-      // Long side hair falling past the jaw.
-      ctx.fillRect(cx - 21, h - 54, 6, 26);
-      ctx.fillRect(cx + 15, h - 54, 6, 26);
-    } else if (speaker === 'VIC TORRES') {
-      // Silver side part + a neat moustache.
-      ctx.fillRect(cx - 19, h - 56, 12, 5);
-      ctx.fillStyle = p.hair;
-      ctx.fillRect(cx - 8, h - 38, 16, 4);
-    } else {
-      // Marco: short crop with a gold chain glint.
-      ctx.fillStyle = '#f4d35e';
-      ctx.fillRect(cx - 12, h - 28, 24, 2);
-    }
-    // Eyes.
-    ctx.fillStyle = '#1c1917';
-    ctx.beginPath();
-    ctx.arc(cx - 7, h - 50, 2.2, 0, Math.PI * 2);
-    ctx.arc(cx + 7, h - 50, 2.2, 0, Math.PI * 2);
-    ctx.fill();
-    // Smile.
-    ctx.strokeStyle = p.lip;
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    ctx.arc(cx, h - 42, 6, Math.PI * 0.15, Math.PI * 0.85);
-    ctx.stroke();
-  } catch (e) { /* portrait is decoration; never block the dialogue */ }
+function washFor(speaker) {
+  return PORTRAIT_WASH[speaker] || FALLBACK_WASH;
 }
 
 export function init(S) {
-  const panel = document.getElementById('dialogue');
+  const box = document.getElementById('dialogue');
+  const portrait = document.getElementById('dlg-portrait');
   const nameEl = document.getElementById('dlg-name');
   const textEl = document.getElementById('dlg-text');
 
-  // Portrait surface: reuse the page's canvas if it really is one;
-  // otherwise paint on a fresh canvas nested inside the portrait
-  // frame (the page's #dlg-portrait is a DIV, so this is the path
-  // that actually runs). Never touch a node we cannot draw on.
-  let portrait = null;
-  const frame = document.getElementById('dlg-portrait');
-  if (frame && frame.tagName === 'CANVAS' && typeof frame.getContext === 'function') {
-    portrait = frame;
-  } else {
-    portrait = document.createElement('canvas');
-    portrait.width = 84;
-    portrait.height = 84;
-    portrait.style.cssText = 'width:100%;height:100%;border-radius:50%;display:block;';
-    if (frame) frame.appendChild(portrait);
-    else if (panel) panel.insertBefore(portrait, panel.firstChild);
-  }
-
+  // The conversation the box is showing right now. menu.js reads
+  // `visible` + `lines` to decide whether to bring the box back after
+  // a pause, so both stay truthful at all times.
   const dialogue = {
+    visible: false,
     lines: [],
     index: 0,
-    visible: false,
+    speaker: '',
+    text: '',
 
-    show(lines) {
-      if (!lines || !lines.length) return;
-      dialogue.lines = lines.slice();
+    // Open the box on a fresh set of lines. Accepts plain strings
+    // (spoken by the previous speaker) as well as { speaker, text }.
+    show(rawLines) {
+      const clean = (Array.isArray(rawLines) ? rawLines : []).map((line) => {
+        if (typeof line === 'string') return { speaker: dialogue.speaker || 'NARRATOR', text: line };
+        return { speaker: line.speaker || line.name || 'NARRATOR', text: line.text || '' };
+      }).filter((line) => line.text.length > 0);
+      if (clean.length === 0) return;
+      dialogue.lines = clean;
       dialogue.index = 0;
       dialogue.visible = true;
-      // Un-hide FIRST: a portrait failure must never swallow a line.
-      if (panel) panel.classList.remove('hidden');
-      try { dialogue.render(); } catch (e) { /* portrait is best-effort */ }
+      renderLine();
+      if (box) box.classList.remove('hidden');
     },
 
-    render() {
-      const line = dialogue.lines[dialogue.index];
-      if (!line) return;
-      if (nameEl) nameEl.textContent = line.speaker;
-      if (textEl) textEl.textContent = line.text;
-      drawPortrait(portrait, line.speaker);
-    },
-
-    next() {
+    // Move to the next line, or close the box when the last one is done.
+    // Returns true while a line is still showing.
+    advance() {
+      if (!dialogue.visible || dialogue.lines.length === 0) return false;
       dialogue.index += 1;
       if (dialogue.index >= dialogue.lines.length) {
         dialogue.hide();
-        return;
+        return false;
       }
-      dialogue.render();
+      renderLine();
+      return true;
     },
 
     hide() {
+      dialogue.visible = false;
       dialogue.lines = [];
       dialogue.index = 0;
-      dialogue.visible = false;
-      if (panel) panel.classList.add('hidden');
+      dialogue.speaker = '';
+      dialogue.text = '';
+      if (box) box.classList.add('hidden');
+    },
+
+    // The line currently on screen, or null when the box is closed.
+    current() {
+      if (!dialogue.visible || dialogue.lines.length === 0) return null;
+      return dialogue.lines[dialogue.index] || null;
     },
   };
 
+  function renderLine() {
+    const line = dialogue.lines[dialogue.index];
+    if (!line) return;
+    dialogue.speaker = line.speaker;
+    dialogue.text = line.text;
+    if (nameEl) nameEl.textContent = line.speaker;
+    if (textEl) textEl.textContent = line.text;
+    if (portrait) portrait.style.background = washFor(line.speaker);
+  }
+
+  // Clicking the box itself is the only way to advance: no key is
+  // stolen, so driving keys keep working while a briefing is open.
+  if (box) {
+    box.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dialogue.advance();
+    });
+  }
+
   S.dialogue = dialogue;
-
-  // Adopt a briefing that missions.js painted before we were ready.
-  if (Array.isArray(S._dlgLines) && S._dlgLines.length) {
-    dialogue.lines = S._dlgLines.slice();
-    dialogue.index = S._dlgIndex || 0;
-    dialogue.visible = true;
-    if (panel) panel.classList.remove('hidden');
-    try { dialogue.render(); } catch (e) { /* portrait is best-effort */ }
-    delete S._dlgLines;
-    delete S._dlgIndex;
-  }
-
-  if (panel) {
-    panel.addEventListener('click', () => dialogue.next());
-  }
-
   return dialogue;
 }
 
