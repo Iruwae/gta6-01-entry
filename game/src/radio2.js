@@ -1,60 +1,115 @@
-// radio2.js — six stations on the dial (round-5 rebuild, builder B2).
-// S.radioStation cycles 0..5 on KeyQ; station 1 is BAYLINE. The HUD
-// shows the station name in #radio-station and the current track in
-// #radio-track, and the synth plays a little jingle on every switch.
+// SOLMAR BAY — radio (round 7 rebuild, builder D).
+// Six invented stations, no licensed music, no audio files: the HUD
+// shows the station name and the current track. Q cycles to the next
+// station. S.radioStation is the station index (0–5); the first station
+// is the sunset station, SUNSET FM.
 
 const STATIONS = [
-  { name: 'SUNSET FM', tracks: ['Golden Hour Drive', 'Palm Shadows', 'Last Light Avenue'] },
-  { name: 'BAYLINE', tracks: ['Harbor Nights', 'Neon Tide', 'Ferry Lights'] },
-  { name: 'NEON NIGHTS', tracks: ['Midnight Chrome', 'Laser Rain', 'After Dark'] },
-  { name: 'STREET SOUNDS', tracks: ['Block Party', 'Corner Hustle', 'Bassline Alley'] },
-  { name: 'CLASSIC CRUISE', tracks: ['Vinyl Sunset', 'Old Town Radio', 'Chrome Bumper'] },
-  { name: 'TALK BAY', tracks: ['The Morning Bay', 'Sports Desk Live', 'Night Callers'] },
+  {
+    name: 'SUNSET FM',
+    tag: 'the sunset station',
+    tracks: ['Golden Hour Drive', 'Amber Skyline', 'Last Light Lovers'],
+  },
+  {
+    name: 'BAYLINE FM',
+    tag: 'harbor talk and tides',
+    tracks: ['Harbor Lights', 'Tidewater Blues', 'Ferry Song'],
+  },
+  {
+    name: 'PALM SHADE RADIO',
+    tag: 'slow songs for hot days',
+    tracks: ['Shade Tree Shuffle', 'Coconut Radio', 'Slow Palm Sunday'],
+  },
+  {
+    name: 'SOLMAR SOUL',
+    tag: 'smooth bay soul',
+    tracks: ['Bayfront Groove', 'Velvet Dusk', 'Marina Nights'],
+  },
+  {
+    name: 'TROPICANA 88',
+    tag: 'island rhythms',
+    tracks: ['Mango Tango', 'Island Static', 'Sunset Salsa'],
+  },
+  {
+    name: 'NIGHT DRIVE FM',
+    tag: 'after-dark cruising',
+    tracks: ['Coastline After Dark', 'Headlights Home', 'Midnight Marina'],
+  },
 ];
 
-export function init(S) {
-  if (typeof S.radioStation !== 'number') S.radioStation = 0;
-  if (!S.radio2state) S.radio2state = { track: 0 };
+const TRACK_SECONDS = 40;
 
-  function current() {
-    const i = ((S.radioStation % STATIONS.length) + STATIONS.length) % STATIONS.length;
-    return STATIONS[i];
+export function init(ctx) {
+  const S = ctx.state;
+  const pick = (id) => (ctx.dom && ctx.dom[id]) || document.getElementById(id);
+  let trackIndex = 0;
+  let trackTimer = 0;
+
+  if (typeof S.radioStation !== 'number' || S.radioStation < 0 || S.radioStation > 5) {
+    S.radioStation = 0;
   }
 
-  function refresh() {
-    const st = current();
-    const track = st.tracks[S.radio2state.track % st.tracks.length];
-    const nameEl = document.getElementById('radio-station');
-    const trackEl = document.getElementById('radio-track');
-    if (nameEl) nameEl.textContent = st.name;
-    if (trackEl) trackEl.textContent = track;
+  function currentStation() {
+    return STATIONS[S.radioStation] || STATIONS[0];
+  }
+
+  function currentTrack() {
+    const station = currentStation();
+    return station.tracks[trackIndex % station.tracks.length];
+  }
+
+  function paintHud() {
+    try {
+      const stationEl = pick('radio-station');
+      if (stationEl) stationEl.textContent = currentStation().name;
+      const trackEl = pick('radio-track');
+      if (trackEl) trackEl.textContent = currentTrack();
+    } catch (e) { /* the HUD module repaints these too */ }
   }
 
   function nextStation() {
     S.radioStation = (S.radioStation + 1) % STATIONS.length;
-    const st = current();
-    S.radio2state.track = (S.radio2state.track + 1) % st.tracks.length;
-    refresh();
-    if (S.audio && typeof S.audio.jingle === 'function') {
-      try { S.audio.jingle(S.radioStation); } catch (e) {}
-    }
+    trackIndex = 0;
+    trackTimer = 0;
+    paintHud();
+    try { if (ctx.api.audio && ctx.api.audio.click) ctx.api.audio.click(); } catch (e) { /* silent */ }
+    return S.radioStation;
   }
 
-  S.radio = { stations: STATIONS, current, next: nextStation, refresh };
+  function setStation(i) {
+    const n = ((Math.floor(i) % STATIONS.length) + STATIONS.length) % STATIONS.length;
+    S.radioStation = n;
+    trackIndex = 0;
+    trackTimer = 0;
+    paintHud();
+    return S.radioStation;
+  }
+
+  ctx.api.radioStations = STATIONS;
+  ctx.api.nextStation = nextStation;
+  ctx.api.setStation = setStation;
+  ctx.api.currentStation = currentStation;
+  ctx.api.stationName = () => currentStation().name;
+  ctx.api.currentTrack = currentTrack;
+
+  paintHud();
 
   window.addEventListener('keydown', (e) => {
-    if (e.code !== 'KeyQ' || e.repeat) return;
-    if (S.mode === 'paused') return;
+    if (e.repeat || e.code !== 'KeyQ') return;
+    if (S.mode !== 'playing') return;
     nextStation();
   });
 
-  refresh();
-  setInterval(() => {
-    try { refresh(); } catch (e) { /* never break the page */ }
-  }, 500);
-  if (Array.isArray(S._moduleTicks)) S._moduleTicks.push(() => refresh());
-
-  return S.radio;
+  // Tracks roll on while driving; the HUD always shows the current one.
+  ctx.updates.push((dt) => {
+    try {
+      trackTimer += dt || 0;
+      if (trackTimer >= TRACK_SECONDS) {
+        trackTimer = 0;
+        const station = currentStation();
+        trackIndex = (trackIndex + 1) % station.tracks.length;
+        paintHud();
+      }
+    } catch (e) { /* radio must never break the loop */ }
+  });
 }
-
-export default init;

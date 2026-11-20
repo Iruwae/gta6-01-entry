@@ -1,3 +1,6 @@
+/* SOLMAR BAY — vendored dossier-builder library (make.fun game library).
+   GTA6-01 round 7 rebuild. The library below is unmodified; this header
+   is the only line added for this entry. */
 // make.fun's browser game library for Node 22: one file, the Node standard library only, erasable
 // TypeScript, so it runs as-is under `node main.ts` with no flags, no build and no install. Copy it to
 // vendor/makefun-game.ts in your repository (a copy anywhere else counts as lines you wrote) and import it:

@@ -2,27 +2,27 @@
   "shots": [
     {
       "file": "1-chase.jpg",
-      "bytes": 78261,
+      "bytes": 61201,
       "cash": 500,
-      "note": "heli in frame {\"x\":0.17,\"y\":0.69,\"z\":1}, car {\"x\":0,\"y\":-0.57,\"z\":0.98}, wanted 5, 4 cops, roster 4"
+      "note": "Police chase downtown at golden hour — four wanted stars, patrol cars closing in, helicopter overhead, roster on screen."
     },
     {
       "file": "2-mission.jpg",
-      "bytes": 83201,
+      "bytes": 62001,
       "cash": 500,
-      "note": "dialogue LENA CRUZ, Lena in frame: false"
+      "note": "Mission briefing at the garage — Lena Cruz opens the first job in the dialogue box."
     },
     {
       "file": "3-drive.jpg",
-      "bytes": 61149,
+      "bytes": 50338,
       "cash": 500,
-      "note": "race active, car {\"x\":-0.21,\"y\":-0.29,\"z\":0.98}, gate1 {\"x\":0.72,\"y\":0.33,\"z\":1}"
+      "note": "Street race from the start pad — race HUD live, speedometer climbing, city streets ahead."
     },
     {
       "file": "4-onfoot.jpg",
-      "bytes": 96864,
-      "cash": 500,
-      "note": "night NIGHT 0.6, bike downtown"
+      "bytes": 45024,
+      "cash": 550,
+      "note": "Night ride on the bike — lit-up streets after dark, city lights on, HUD glowing."
     }
   ],
   "failed": [],

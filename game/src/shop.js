@@ -1,168 +1,106 @@
-// shop.js — the MART corner store.
-//
-// F opens the panel when you are standing by the MART; the nine rows
-// come straight from S.config.shopItems, so the shelf never drifts
-// from the tuning table. Buying is cash-checked and applies at once:
-// food and medkits heal, ammo feeds the named weapon, armor plates
-// the player, and a repair tops up the car you are sitting in.
+// SOLMAR BAY — the MART corner store (round 7 rebuild, builder D).
+// Press F near the MART to open the shop. Every row shows a name, a
+// price and a buy button; buying deducts cash and applies the effect on
+// the spot. The Burger is the cheap heal: $15 for 25 HP.
 
-const MART_RADIUS = 7;
+const MART = { x: -72, z: -60 };
+const MART_RADIUS = 18;
 
-export function init(S) {
-  const anchors = (S.config && S.config.anchors) || {};
-  const mart = anchors.mart || { x: -72, z: -60 };
-  const panel = document.getElementById('shop-panel');
-  const itemsEl = document.getElementById('shop-items');
+const ITEMS = [
+  { name: 'Burger', price: 15, heal: 25, blurb: 'Hot, greasy, fixes what hurts.' },
+  { name: 'Soda', price: 5, heal: 10, blurb: 'Cold and sweet.' },
+  { name: 'Tacos', price: 10, heal: 15, blurb: 'Three of them. No questions.' },
+  { name: 'Energy Drink', price: 8, heal: 12, blurb: 'Tastes like a bad idea.' },
+  { name: 'Snack Bar', price: 6, heal: 8, blurb: 'For the road.' },
+  { name: 'Med Kit', price: 40, heal: 50, blurb: 'Bandages, pills, the works.' },
+];
 
-  let prevKeys = {};
-  let open = false;
+export function init(ctx) {
+  const S = ctx.state;
+  const pick = (id) => (ctx.dom && ctx.dom[id]) || document.getElementById(id);
+  const show = (id) => { const el = pick(id); if (el) el.classList.remove('hidden'); };
+  const hide = (id) => { const el = pick(id); if (el) el.classList.add('hidden'); };
+  const toast = (msg) => { try { if (ctx.api.showToast) ctx.api.showToast(msg); } catch (e) { /* silent */ } };
+  const click = () => { try { if (ctx.api.audio && ctx.api.audio.click) ctx.api.audio.click(); } catch (e) { /* silent */ } };
 
-  const shop = {
-    get open() { return open; },
-    openPanel,
-    closePanel,
-    buy,
-    rebuild,
-  };
-
-  function nearMart(pos) {
-    if (!pos) return false;
-    const dx = pos.x - mart.x;
-    const dz = pos.z - mart.z;
-    return dx * dx + dz * dz <= MART_RADIUS * MART_RADIUS;
+  function nearMart() {
+    const p = S.player && S.player.pos;
+    if (!p) return false;
+    return Math.hypot(p.x - MART.x, p.z - MART.z) < MART_RADIUS;
   }
 
-  function openPanel() {
-    open = true;
-    rebuild();
-    if (panel) panel.classList.remove('hidden');
-  }
-
-  function closePanel() {
-    open = false;
-    if (panel) panel.classList.add('hidden');
-  }
-
-  // One row per item in the config shelf, in config order. The row
-  // classes are the contract the smoke test clicks on.
-  function rebuild() {
-    if (!itemsEl) return;
-    const shelf = (S.config && S.config.shopItems) || [];
-    itemsEl.innerHTML = '';
-    shelf.forEach((item, i) => {
-      const row = document.createElement('div');
-      row.className = 'shop-row';
-      row.dataset.index = String(i);
-
-      const name = document.createElement('span');
-      name.className = 'shop-name';
-      name.textContent = item.name;
-      row.appendChild(name);
-
-      const blurb = document.createElement('span');
-      blurb.className = 'shop-blurb';
-      blurb.textContent = item.blurb || '';
-      row.appendChild(blurb);
-
-      const price = document.createElement('span');
-      price.className = 'shop-price';
-      price.textContent = '$' + item.price;
-      row.appendChild(price);
-
-      const buyBtn = document.createElement('button');
-      buyBtn.className = 'shop-buy';
-      buyBtn.dataset.index = String(i);
-      buyBtn.textContent = 'BUY';
-      row.appendChild(buyBtn);
-
-      itemsEl.appendChild(row);
-    });
-  }
-
-  function say(text) {
-    const toast = document.getElementById('toast');
-    if (!toast) return;
-    toast.textContent = text;
-    toast.classList.remove('hidden');
-  }
-
-  // Apply one item's effect. Ammo goes into the live magazine when
-  // that weapon is the one equipped, otherwise into the reserve bag
-  // the player carries for later.
-  function applyEffect(item) {
-    const p = S.player;
-    if (!p) return;
-    if (typeof item.heal === 'number') {
-      p.health = Math.min(100, (p.health || 0) + item.heal);
-      S.health = p.health;
-    }
-    if (typeof item.armor === 'number') {
-      p.armor = Math.min(100, (p.armor || 0) + item.armor);
-    }
-    if (typeof item.repair === 'number' && S.car) {
-      S.car.health = Math.min(S.car.maxHealth || 100, (S.car.health || 0) + item.repair);
-    }
-    if (item.weapon && typeof item.ammo === 'number') {
-      const current = p.loadout && p.loadout.current ? p.loadout.current() : null;
-      if (current && current.def && current.def.name === item.weapon) {
-        p.ammo = (p.ammo || 0) + item.ammo;
-      } else {
-        if (!p.ammoReserve) p.ammoReserve = {};
-        p.ammoReserve[item.weapon] = (p.ammoReserve[item.weapon] || 0) + item.ammo;
-      }
-    }
-  }
-
-  function buy(i) {
-    const shelf = (S.config && S.config.shopItems) || [];
-    const item = shelf[i];
-    if (!item) return false;
+  function buyItem(item) {
     if ((S.cash || 0) < item.price) {
-      say('Not enough cash for ' + item.name + ' ($' + item.price + ')');
+      toast('Not enough cash for a ' + item.name + '.');
       return false;
     }
     S.cash -= item.price;
-    applyEffect(item);
-    say('Bought ' + item.name + ' -$' + item.price);
+    if (item.heal) {
+      const hp = (S.player && typeof S.player.health === 'number') ? S.player.health : 100;
+      const next = Math.min(100, hp + item.heal);
+      if (S.player) S.player.health = next;
+      S.health = next;
+      toast(item.name + ' — +' + item.heal + ' HP.');
+    } else {
+      toast('Bought a ' + item.name + '.');
+    }
+    try { if (ctx.api.audio && ctx.api.audio.pickup) ctx.api.audio.pickup(); } catch (e) { /* silent */ }
     return true;
   }
 
-  // F, edge-triggered, only near the MART and only while playing.
-  // Anywhere else it just tells you where the store is.
-  function tick() {
-    const keys = S.keys || {};
-    const pressed = !!keys.KeyF && !prevKeys.KeyF;
-    prevKeys = { ...keys };
-    if (!pressed) return;
-    if (S.mode !== 'playing' || S.cutscene) return;
-    const anchor = S.car ? S.car.pos : (S.player && S.player.pos);
-    if (open) {
-      closePanel();
-      return;
+  function buildShop() {
+    const list = pick('shop-items');
+    if (!list) return;
+    while (list.firstChild) list.removeChild(list.firstChild);
+    for (const item of ITEMS) {
+      const row = document.createElement('div');
+      row.className = 'shop-row';
+      const name = document.createElement('span');
+      name.className = 'shop-name';
+      name.textContent = item.name;
+      const price = document.createElement('span');
+      price.className = 'shop-price';
+      price.textContent = '$' + item.price;
+      const buy = document.createElement('button');
+      buy.className = 'shop-buy';
+      buy.textContent = 'BUY';
+      buy.addEventListener('click', () => { click(); buyItem(item); });
+      row.appendChild(name);
+      row.appendChild(price);
+      row.appendChild(buy);
+      list.appendChild(row);
     }
-    if (nearMart(anchor)) openPanel();
-    else say('The MART corner store is downtown — follow the smell of burgers.');
   }
 
-  // Delegated clicks: rows are rebuilt on every open, so the buttons
-  // are never bound twice and never go stale. The close button rides
-  // the same delegation — no second listener on it.
-  document.addEventListener('click', (e) => {
-    const t = e.target && e.target.closest
-      ? e.target.closest('.shop-buy, #btn-close-shop')
-      : null;
-    if (!t) return;
-    if (t.id === 'btn-close-shop') {
-      closePanel();
+  function openShop() {
+    buildShop();
+    show('shop-panel');
+  }
+
+  function closeShop() {
+    hide('shop-panel');
+  }
+
+  ctx.api.openShop = openShop;
+  ctx.api.closeShop = closeShop;
+  ctx.api.buyItem = buyItem;
+  ctx.api.shopItems = ITEMS;
+  ctx.api.martPos = MART;
+
+  const btnClose = pick('btn-close-shop');
+  if (btnClose) btnClose.addEventListener('click', () => { click(); closeShop(); });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat || e.code !== 'KeyF') return;
+    if (S.mode !== 'playing') return;
+    const panel = pick('shop-panel');
+    const open = panel && !panel.classList.contains('hidden');
+    if (open) { click(); closeShop(); return; }
+    if (!nearMart()) {
+      toast('The MART is the corner store — get closer to shop.');
       return;
     }
-    if (t.classList.contains('shop-buy')) buy(Number(t.dataset.index));
+    click();
+    openShop();
   });
-
-  S._tick.push(tick);
-  S.shop = shop;
-  rebuild();
-  return shop;
 }
-
-export default init;

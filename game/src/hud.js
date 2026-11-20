@@ -1,313 +1,366 @@
-// hud.js — everything on the screen that is not a world object.
-//
-// This module owns the whole HUD: the top-left block (clock, district,
-// cash, respect), the minimap canvas, the speedometer, the four weapon
-// slots, the wanted stars, the PD roster, the toast line, the health
-// bar and the objective line (whose text comes from S.missions).
-// main.js drives it through S.hud.update(dt) once per frame.
-//
-// All writes are cached: a DOM node is only touched when its text
-// actually changes, so the headless loop stays cheap.
+// SOLMAR BAY — HUD refresh (round 7 rebuild, builder D).
+// Owns one frame of every on-screen readout: cash, district, clock,
+// respect, health, radio, wanted stars, the police roster, the minimap,
+// weapon slots, the speedometer and the current objective. Toast text is
+// NOT rewritten here — other modules write toasts through
+// ctx.api.showToast, and this module never clobbers them.
 
-const WORLD_EDGE = 185;
-const ROSTER_REFRESH = 0.25;
-const MINIMAP_REFRESH = 0.25;
-const TOAST_LINGER_MS = 6000;
+const DISTRICT_NAMES = {
+  harbor: 'HARBOR', beach: 'BEACH', uptown: 'UPTOWN', strip: 'THE STRIP',
+  downtown: 'DOWNTOWN', marina: 'MARINA', oldtown: 'OLD TOWN',
+};
 
-const GEAR_BANDS = [
-  { under: 8, gear: '1' },
-  { under: 15, gear: '2' },
-  { under: 22, gear: '3' },
-  { under: 30, gear: '4' },
+const MAP_SPOTS = [
+  { x: 120, z: 120, label: 'HARBOR' },
+  { x: 0, z: 165, label: 'BEACH' },
+  { x: 120, z: -90, label: 'UPTOWN' },
+  { x: 0, z: 135, label: 'STRIP' },
+  { x: 0, z: 0, label: 'DOWNTOWN' },
+  { x: -120, z: 60, label: 'MARINA' },
+  { x: 60, z: -120, label: 'OLD TOWN' },
 ];
 
-function clamp(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
+const MAP_MARKS = [
+  { x: -72, z: -60, label: 'M' },
+  { x: -90, z: -66, label: 'G' },
+  { x: 120, z: -120, label: 'H' },
+  { x: 68, z: 60, label: 'T' },
+  { x: -60, z: -60, label: 'R' },
+];
+
+const SLOT_FALLBACK = ['PISTOL', 'SMG', 'SHOTGUN', 'RIFLE'];
+const CLOCK_BASE_MINUTES = 18 * 60 + 28; // day 1 opens at sunset, 18:28
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
 }
 
-function gearFor(speed) {
-  if (Math.abs(speed) < 0.5) return 'N';
-  if (speed < 0) return 'R';
-  for (const band of GEAR_BANDS) {
-    if (speed < band.under) return band.gear;
-  }
-  return '5';
+function districtLabel(id) {
+  if (!id) return 'SOLMAR BAY';
+  const key = String(id).toLowerCase().replace(/[^a-z]/g, '');
+  if (DISTRICT_NAMES[key]) return DISTRICT_NAMES[key];
+  return String(id).toUpperCase();
 }
 
-export function init(S) {
-  const minimap = document.getElementById('minimap');
-  const ctx = minimap ? minimap.getContext('2d') : null;
-  const speedNum = document.getElementById('speed-num');
-  const speedGear = document.getElementById('speed-gear');
-  const speedCar = document.getElementById('speed-car');
-  const wantedEl = document.getElementById('wanted');
-  const roster = document.getElementById('roster');
-  const rosterCode = document.getElementById('roster-code');
-  const rosterRows = document.getElementById('roster-rows');
-  const toast = document.getElementById('toast');
-  const objective = document.getElementById('objective');
-  const healthFill = document.getElementById('health-fill');
-  const dayTimeEl = document.getElementById('day-time');
-  const districtEl = document.getElementById('district');
-  const cashEl = document.getElementById('cash');
-  const respectNumEl = document.getElementById('respect-num');
-  const respectRankEl = document.getElementById('respect-rank');
-  const slots = [...document.querySelectorAll('#weapons .slot')];
+export function init(ctx) {
+  const S = ctx.state;
+  const pick = (id) => (ctx.dom && ctx.dom[id]) || document.getElementById(id);
+  let mapCtx = null;
+  let lastRosterAt = -10;
+  let lastRosterKey = '';
+  let toastTimer = null;
 
-  // Last values written, so unchanged frames cost nothing.
-  const last = {
-    speed: '', gear: '', car: '', wanted: '', objective: '',
-    health: '', toastText: '', toastSince: 0,
-    dayTime: '', district: '', cash: '', respectNum: '', respectRank: '',
+  ctx.api.showToast = (msg, ms) => {
+    try {
+      const el = pick('toast');
+      if (!el) return;
+      el.textContent = String(msg);
+      el.classList.remove('hidden');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        try { el.textContent = ''; } catch (e) { /* ignore */ }
+      }, ms || 2800);
+    } catch (e) { /* never break the loop for a toast */ }
   };
-  let rosterTimer = 0;
-  let mapTimer = 0;
 
-  // --- minimap ---------------------------------------------------------
-  // World ±185 maps onto the 180x180 canvas. North is up.
-  function toMap(x, z) {
-    const px = ((x + WORLD_EDGE) / (WORLD_EDGE * 2)) * 180;
-    const py = ((z + WORLD_EDGE) / (WORLD_EDGE * 2)) * 180;
-    return [px, py];
+  function wantedLevel() {
+    if (typeof S.wanted === 'number') return Math.max(0, Math.min(5, Math.round(S.wanted)));
+    const heat = typeof S.heat === 'number' ? S.heat : 0;
+    return Math.max(0, Math.min(5, Math.floor(heat / 20)));
+  }
+
+  function policeList() {
+    try {
+      if (Array.isArray(S.cops) && S.cops.length) return S.cops;
+    } catch (e) { /* fall through */ }
+    try {
+      if (Array.isArray(S.cars)) return S.cars.filter((c) => c && c.aiPolice);
+    } catch (e) { /* fall through */ }
+    return [];
+  }
+
+  function vehicleSpeed() {
+    const car = S.car;
+    if (!car) return 0;
+    if (typeof car.speed === 'number') return car.speed;
+    if (car.vel && typeof car.vel.length === 'function') return car.vel.length();
+    if (car.velocity && typeof car.velocity.length === 'function') return car.velocity.length();
+    const vx = car.vx || 0;
+    const vz = car.vz || 0;
+    return Math.hypot(vx, vz);
+  }
+
+  function slotInfo(i) {
+    let name = SLOT_FALLBACK[i] || 'WEAPON';
+    let ammo = '';
+    try {
+      const lo = S.player && S.player.loadout;
+      const w = lo && lo.weapons && lo.weapons[i];
+      if (w) {
+        if (w.def && w.def.name) name = w.def.name;
+        else if (w.name) name = w.name;
+        if (typeof w.ammo === 'number') ammo = String(w.ammo);
+      } else if (lo && typeof lo.current === 'function' && i === lo.equipped) {
+        const cur = lo.current();
+        if (cur && cur.def && cur.def.name) name = cur.def.name;
+      }
+      if (ammo === '' && lo && i === lo.equipped && S.player && typeof S.player.ammo === 'number') {
+        ammo = String(S.player.ammo);
+      }
+    } catch (e) { /* keep the fallback */ }
+    return { name, ammo };
   }
 
   function drawMinimap() {
-    if (!ctx || !minimap) return;
-    ctx.clearRect(0, 0, 180, 180);
-    ctx.fillStyle = 'rgba(8, 16, 30, 0.92)';
-    ctx.fillRect(0, 0, 180, 180);
+    const canvas = pick('minimap');
+    if (!canvas || typeof canvas.getContext !== 'function') return;
+    if (!mapCtx) mapCtx = canvas.getContext('2d');
+    const g = mapCtx;
+    if (!g) return;
+    const W = canvas.width || 180;
+    const H = canvas.height || 180;
+    const px = (x) => ((x + 180) / 360) * W;
+    const py = (z) => ((z + 180) / 360) * H;
 
-    // Street grid, one line every 40 m, faint enough to sit behind dots.
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
-    ctx.lineWidth = 1;
-    for (let g = -160; g <= 160; g += 40) {
-      const [ax] = toMap(g, 0);
-      const [, bz] = toMap(0, g);
-      ctx.beginPath(); ctx.moveTo(ax, 0); ctx.lineTo(ax, 180); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, bz); ctx.lineTo(180, bz); ctx.stroke();
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = '#1d1230';
+    g.fillRect(0, 0, W, H);
+    // sea along the top edge
+    g.fillStyle = '#274b63';
+    g.fillRect(0, 0, W, H * 0.08);
+    // road grid
+    g.strokeStyle = 'rgba(255, 190, 120, 0.18)';
+    g.lineWidth = 1;
+    for (let v = -120; v <= 120; v += 60) {
+      g.beginPath(); g.moveTo(px(v), 0); g.lineTo(px(v), H); g.stroke();
+      g.beginPath(); g.moveTo(0, py(v)); g.lineTo(W, py(v)); g.stroke();
     }
-
-    // Active mission target: a gold diamond that is easy to spot.
-    const job = S.missions && S.missions.current;
-    if (job && job.target) {
-      const [tx, ty] = toMap(job.target.x, job.target.z);
-      ctx.fillStyle = '#ffd24a';
-      ctx.beginPath();
-      ctx.moveTo(tx, ty - 6); ctx.lineTo(tx + 5, ty);
-      ctx.lineTo(tx, ty + 6); ctx.lineTo(tx - 5, ty);
-      ctx.closePath(); ctx.fill();
+    // district dots + labels
+    g.font = '6px sans-serif';
+    g.textAlign = 'center';
+    for (const d of MAP_SPOTS) {
+      g.fillStyle = 'rgba(255, 190, 120, 0.55)';
+      g.beginPath(); g.arc(px(d.x), py(d.z), 2, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(255, 220, 170, 0.75)';
+      g.fillText(d.label, px(d.x), py(d.z) - 4);
     }
-
-    // Uncollected packages: small green ticks.
-    const side = S.sideActivities;
-    if (side && side.packages && Array.isArray(side.packages.spots)) {
-      ctx.fillStyle = '#4ade80';
-      for (const spot of side.packages.spots) {
-        if (spot.taken) continue;
-        const [px, py] = toMap(spot.x, spot.z);
-        ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
+    // place markers (mart, garage, safehouse, taxi, race)
+    g.font = 'bold 7px sans-serif';
+    for (const m of MAP_MARKS) {
+      g.fillStyle = '#ffd166';
+      g.fillText(m.label, px(m.x), py(m.z));
+    }
+    // search zone around the last known position
+    if (S.lastKnown && (S.heat || 0) > 0) {
+      g.strokeStyle = 'rgba(255, 80, 80, 0.8)';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(px(S.lastKnown.x || 0), py(S.lastKnown.z || 0), 13, 0, Math.PI * 2);
+      g.stroke();
+    }
+    // uncollected packages
+    try {
+      if (Array.isArray(S.packages)) {
+        g.fillStyle = '#ffe066';
+        for (const p of S.packages) {
+          if (p && !p.taken) {
+            g.fillRect(px(p.x) - 1.5, py(p.z) - 1.5, 3, 3);
+          }
+        }
       }
-    }
+    } catch (e) { /* minimap must not die on packages */ }
+    // traffic + police
+    try {
+      if (Array.isArray(S.cars)) {
+        for (const c of S.cars) {
+          if (!c || !c.pos) continue;
+          if (c.aiPolice) {
+            g.fillStyle = '#ff5252';
+            g.fillRect(px(c.pos.x) - 2, py(c.pos.z) - 2, 4, 4);
+          } else {
+            g.fillStyle = 'rgba(255, 255, 255, 0.75)';
+            g.beginPath(); g.arc(px(c.pos.x), py(c.pos.z), 1.6, 0, Math.PI * 2); g.fill();
+          }
+        }
+      }
+    } catch (e) { /* keep drawing */ }
+    // the player, always on top
+    try {
+      const p = S.player && S.player.pos;
+      if (p) {
+        g.fillStyle = '#ffb703';
+        g.beginPath(); g.arc(px(p.x), py(p.z), 3.5, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = '#fff3d6';
+        g.lineWidth = 1;
+        g.beginPath(); g.arc(px(p.x), py(p.z), 5.5, 0, Math.PI * 2); g.stroke();
+      }
+    } catch (e) { /* keep drawing */ }
+  }
 
-    // Police search zone: a dashed ring around the last known position.
-    if (S.wanted > 0 && S.lastKnown) {
-      const [lx, ly] = toMap(S.lastKnown.x, S.lastKnown.z);
-      ctx.strokeStyle = '#ff7a3c';
-      ctx.setLineDash([5, 4]);
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(lx, ly, 16, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // Police cars in red, other cars in grey, the crew in cyan.
-    for (const car of S.cars || []) {
-      if (!car || !car.pos) continue;
-      const [px, py] = toMap(car.pos.x, car.pos.z);
-      ctx.fillStyle = car.aiPolice ? '#ff4a4a' : '#9aa4b8';
-      ctx.beginPath(); ctx.arc(px, py, car.aiPolice ? 3.5 : 2.5, 0, Math.PI * 2); ctx.fill();
-    }
-    if (S.crew && S.crew.active && S.crew.mesh && S.crew.mesh.position) {
-      const [cx, cy] = toMap(S.crew.mesh.position.x, S.crew.mesh.position.z);
-      ctx.fillStyle = '#22d3ee';
-      ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
-    }
-
-    // The player: a white dot with a short heading tick, always on top.
-    const anchor = S.car ? S.car.pos : (S.player && S.player.pos);
-    if (anchor) {
-      const [px, py] = toMap(anchor.x, anchor.z);
-      const heading = S.car ? S.car.heading : (S.player ? S.player.heading : 0);
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(px, py);
-      ctx.lineTo(px + Math.sin(heading) * 8, py + Math.cos(heading) * 8);
-      ctx.stroke();
+  function refreshRoster(t) {
+    const rosterEl = pick('roster');
+    const rowsEl = pick('roster-rows');
+    const codeEl = pick('roster-code');
+    if (!rosterEl || !rowsEl) return;
+    const cops = policeList();
+    const w = wantedLevel();
+    const key = w + '|' + cops.map((c) => (c.callsign || '?') + ':' + ((c.brain && c.brain.tactic) || '')).join(',');
+    const visible = w > 0 || cops.length > 0;
+    rosterEl.classList.toggle('hidden', !visible);
+    if (!visible) return;
+    if (t - lastRosterAt < 0.25 && key === lastRosterKey) return;
+    lastRosterAt = t;
+    lastRosterKey = key;
+    if (codeEl) codeEl.textContent = 'CODE 10-90 — ' + cops.length + ' UNIT' + (cops.length === 1 ? '' : 'S') + ' RESPONDING';
+    const playerPos = S.player && S.player.pos;
+    while (rowsEl.firstChild) rowsEl.removeChild(rowsEl.firstChild);
+    for (const cop of cops) {
+      const row = document.createElement('div');
+      row.className = 'roster-row';
+      let dist = '?';
+      try {
+        if (cop.pos && playerPos) dist = Math.round(Math.hypot(cop.pos.x - playerPos.x, cop.pos.z - playerPos.z)) + 'm';
+      } catch (e) { /* keep ? */ }
+      const tactic = (cop.brain && (cop.brain.tactic || cop.brain.state)) || 'PURSUIT';
+      row.textContent = (cop.callsign || 'PD-??') + ' • ' + dist + ' • ' + tactic;
+      rowsEl.appendChild(row);
     }
   }
 
-  // --- police roster ---------------------------------------------------
-  function refreshRoster() {
-    const cops = (S.cars || []).filter((c) => c && c.aiPolice);
-    const wanted = S.wanted || 0;
-    if (wanted < 1 || cops.length === 0) {
-      if (roster) roster.classList.add('hidden');
-      return;
-    }
-    if (roster) roster.classList.remove('hidden');
-    if (rosterCode) {
-      rosterCode.textContent = 'CODE ' + wanted + ' — ' + cops.length + ' UNIT' + (cops.length === 1 ? '' : 'S');
-    }
-    if (rosterRows) {
-      const anchor = S.car ? S.car.pos : (S.player && S.player.pos);
-      rosterRows.innerHTML = '';
-      for (const cop of cops) {
-        const row = document.createElement('div');
-        row.className = 'roster-row';
-        const dx = anchor ? cop.pos.x - anchor.x : 0;
-        const dz = anchor ? cop.pos.z - anchor.z : 0;
-        const dist = Math.round(Math.sqrt(dx * dx + dz * dz));
-        const tactic = (cop.brain && cop.brain.tactic) || 'PURSUIT';
-        const state = (cop.brain && cop.brain.state) || tactic;
-        const left = document.createElement('span');
-        left.textContent = (cop.callsign || 'PD-??') + ' · ' + tactic;
-        const right = document.createElement('span');
-        right.textContent = state + ' · ' + dist + 'm';
-        row.appendChild(left);
-        row.appendChild(right);
-        rosterRows.appendChild(row);
+  function objectiveText() {
+    try {
+      const race = S.sideActivities && S.sideActivities.race;
+      if (race && race.active) {
+        const total = (race.gates && race.gates.length) || 4;
+        return 'STREET RACE — hit gate ' + ((race.gateIndex || 0) + 1) + ' of ' + total;
       }
+      const taxi = S.sideActivities && S.sideActivities.taxi;
+      if (taxi && taxi.active) return 'TAXI FARE — drive your passenger to the destination';
+      const cur = S.missions && S.missions.current;
+      if (cur) return cur.objective || cur.title || ('JOB: ' + String(cur.id || '').toUpperCase());
+      if ((S.missionIndex || 0) > 0) return 'Job done — press P and pick the next job';
+      return 'New in town — press P to see the job board';
+    } catch (e) {
+      return 'Explore Solmar Bay';
     }
   }
 
-  // --- per-frame refresh ------------------------------------------------
-  function tick(dt) {
-    // Speedometer: the car's speed while driving, the player's on foot.
-    const speed = S.car ? S.car.speed : (S.player ? (S.player.speed || 0) : 0);
-    const shown = String(Math.round(Math.abs(speed)));
-    if (shown !== last.speed && speedNum) {
-      speedNum.textContent = shown;
-      last.speed = shown;
-    }
-    const gear = gearFor(speed);
-    if (gear !== last.gear && speedGear) {
-      speedGear.textContent = gear;
-      last.gear = gear;
-    }
-    const label = S.car
-      ? ((S.config && S.config.vehicles && S.config.vehicles[S.car.kind] && S.config.vehicles[S.car.kind].label) || S.car.kind || 'CAR').toUpperCase()
-      : 'ON FOOT';
-    if (label !== last.car && speedCar) {
-      speedCar.textContent = label;
-      last.car = label;
-    }
+  ctx.updates.push((dt, t) => {
+    try {
+      // cash, formatted like $120
+      const cashEl = pick('cash');
+      if (cashEl) cashEl.textContent = '$' + Math.round(typeof S.cash === 'number' ? S.cash : 0);
 
-    // Weapon slots: the equipped slot shows live ammo, the rest a dash.
-    const equipped = S.player && S.player.loadout ? S.player.loadout.equipped : 0;
-    slots.forEach((slot, i) => {
-      const isActive = i === equipped;
-      slot.classList.toggle('active', isActive);
-      const ammoEl = slot.querySelector('.slot-ammo');
-      if (!ammoEl) return;
-      const want = isActive ? String(S.player ? S.player.ammo : 0) : '—';
-      if (ammoEl.textContent !== want) ammoEl.textContent = want;
-    });
+      // district
+      const distEl = pick('district');
+      if (distEl) distEl.textContent = districtLabel(S.district);
 
-    // Wanted stars: filled for the level, hollow for the rest.
-    const wanted = S.wanted || 0;
-    const stars = '★'.repeat(wanted) + '☆'.repeat(Math.max(0, 5 - wanted));
-    if (stars !== last.wanted && wantedEl) {
-      wantedEl.textContent = stars;
-      last.wanted = stars;
-    }
-
-    // Health bar width follows the player's health.
-    const hp = S.player ? clamp(Math.round(S.player.health || 0), 0, 100) : 100;
-    const hpText = hp + '%';
-    if (hpText !== last.health && healthFill) {
-      healthFill.style.width = hpText;
-      last.health = hpText;
-    }
-
-    // Clock, district, cash and respect: the top-left block. The
-    // clock starts at 18:28 on day 1 and runs on S.time, so jumping
-    // the clock to 21:48 reads as night here as well as in dayNight.
-    const totalMin = 18 * 60 + 28 + (S.time || 0);
-    const day = 1 + Math.floor(totalMin / 1440);
-    const clockMin = ((totalMin % 1440) + 1440) % 1440;
-    const hh = String(Math.floor(clockMin / 60)).padStart(2, '0');
-    const mm = String(Math.floor(clockMin % 60)).padStart(2, '0');
-    const phase = (S.dayNight && S.dayNight.phase) || 'SUNSET';
-    const dayLine = 'DAY ' + day + ' ' + hh + ':' + mm + ' ' + phase;
-    if (dayLine !== last.dayTime && dayTimeEl) {
-      dayTimeEl.textContent = dayLine;
-      last.dayTime = dayLine;
-    }
-    const dName = S.districtName ? S.districtName(S.district) : String(S.district || '').toUpperCase();
-    if (dName !== last.district && districtEl) {
-      districtEl.textContent = dName;
-      last.district = dName;
-    }
-    const cashText = '$' + Math.floor(S.cash || 0).toLocaleString('en-US');
-    if (cashText !== last.cash && cashEl) {
-      cashEl.textContent = cashText;
-      last.cash = cashText;
-    }
-    const respectText = String(S.respect || 0);
-    if (respectText !== last.respectNum && respectNumEl) {
-      respectNumEl.textContent = respectText;
-      last.respectNum = respectText;
-    }
-    const rankTitle = (S.respectDirector && S.respectDirector.rank) ? S.respectDirector.rank.title : '';
-    if (rankTitle !== last.respectRank && respectRankEl) {
-      respectRankEl.textContent = rankTitle;
-      last.respectRank = rankTitle;
-    }
-
-    // Objective line: written by the mission module, rendered here.
-    const objText = (S.missions && typeof S.missions.objectiveText === 'function')
-      ? S.missions.objectiveText()
-      : '';
-    if (objText !== last.objective && objective) {
-      objective.textContent = objText;
-      last.objective = objText;
-    }
-
-    // Toast: reveal it while it carries text, tuck it away after a
-    // while. The text itself is never cleared — other modules read it.
-    if (toast) {
-      const text = toast.textContent || '';
-      if (text !== last.toastText) {
-        last.toastText = text;
-        last.toastSince = performance.now();
-        if (text.length > 0) toast.classList.remove('hidden');
-      } else if (text.length > 0 && performance.now() - last.toastSince > TOAST_LINGER_MS) {
-        toast.classList.add('hidden');
+      // day / time — the clock starts at 18:28 and S.time counts minutes
+      const clockEl = pick('day-time');
+      if (clockEl) {
+        const total = CLOCK_BASE_MINUTES + (typeof S.time === 'number' ? S.time : 0);
+        const hh = Math.floor(total / 60) % 24;
+        const mm = Math.floor(total) % 60;
+        let label = 'SUNSET';
+        try {
+          if (S.dayNight && S.dayNight.phase) label = S.dayNight.phase;
+          else if (S.dayNight && typeof S.dayNight.night === 'number' && S.dayNight.night > 0.5) label = 'NIGHT';
+        } catch (e) { /* keep SUNSET */ }
+        clockEl.textContent = 'DAY ' + (S.day || 1) + ' ' + pad2(hh) + ':' + pad2(mm) + ' ' + label;
       }
-    }
 
-    // The roster and the minimap refresh on a game-time heartbeat, not
-    // every frame: at 4 Hz the numbers stay live without churning DOM.
-    rosterTimer += dt;
-    if (rosterTimer >= ROSTER_REFRESH) {
-      rosterTimer = 0;
-      refreshRoster();
-    }
-    mapTimer += dt;
-    if (mapTimer >= MINIMAP_REFRESH) {
-      mapTimer = 0;
+      // respect points + rank — the spans carry the numbers; never write
+      // textContent onto #respect-line itself, it would wipe those spans
+      // out of the DOM and the HUD numbers would vanish.
+      const rankTitle = (S.respectDirector && S.respectDirector.rank && S.respectDirector.rank.title) || 'NOBODY';
+      const numEl = pick('respect-num');
+      if (numEl) numEl.textContent = String(typeof S.respect === 'number' ? S.respect : 0);
+      const rankEl = pick('respect-rank');
+      if (rankEl) rankEl.textContent = rankTitle;
+
+      // health bar
+      const hp = (S.player && typeof S.player.health === 'number')
+        ? S.player.health
+        : (typeof S.health === 'number' ? S.health : 100);
+      const fillEl = pick('health-fill');
+      if (fillEl) fillEl.style.width = Math.max(0, Math.min(100, hp)) + '%';
+      const barEl = pick('health-bar');
+      if (barEl) barEl.setAttribute('data-hp', String(Math.round(hp)));
+
+      // radio station + track
+      const stationEl = pick('radio-station');
+      const trackEl = pick('radio-track');
+      let stationName = '';
+      let trackName = '';
+      try {
+        const stations = ctx.api.radioStations;
+        if (Array.isArray(stations) && typeof S.radioStation === 'number' && stations[S.radioStation]) {
+          stationName = stations[S.radioStation].name || '';
+          trackName = (ctx.api.currentTrack && ctx.api.currentTrack()) || '';
+        } else if (typeof S.radioStation === 'string') {
+          stationName = S.radioStation;
+        }
+      } catch (e) { /* keep blank */ }
+      if (stationEl && stationName) stationEl.textContent = stationName;
+      if (trackEl && trackName) trackEl.textContent = trackName;
+
+      // wanted stars
+      const wantedEl = pick('wanted');
+      const w = wantedLevel();
+      if (wantedEl) wantedEl.textContent = '★'.repeat(w) + '☆'.repeat(5 - w);
+
+      // police roster
+      refreshRoster(t);
+
+      // minimap
       drawMinimap();
+
+      // weapon slots
+      try {
+        const slots = document.querySelectorAll('#weapons .slot');
+        const equipped = (S.player && S.player.loadout && typeof S.player.loadout.equipped === 'number')
+          ? S.player.loadout.equipped : 0;
+        slots.forEach((slot, i) => {
+          const info = slotInfo(i);
+          const nameEl = slot.querySelector('.slot-name');
+          if (nameEl) nameEl.textContent = info.name;
+          const ammoEl = slot.querySelector('.slot-ammo');
+          if (ammoEl) ammoEl.textContent = info.ammo;
+          slot.classList.toggle('active', i === equipped);
+        });
+      } catch (e) { /* slots are optional per frame */ }
+
+      // speedometer
+      const speed = vehicleSpeed();
+      const speedEl = pick('speed-num');
+      if (speedEl) speedEl.textContent = String(Math.round(speed));
+      const gearEl = pick('speed-gear');
+      if (gearEl) {
+        let gear = 'N';
+        if (S.car) {
+          if (speed >= 1 && speed < 25) gear = '1';
+          else if (speed < 50) gear = '2';
+          else if (speed < 75) gear = '3';
+          else if (speed < 100) gear = '4';
+          else if (speed >= 100) gear = '5';
+          else gear = '1';
+        }
+        gearEl.textContent = gear;
+      }
+      const carEl = pick('speed-car');
+      if (carEl) {
+        if (S.car) {
+          carEl.textContent = (S.car.displayName || S.car.name || ((S.car.kind || 'CAR').toUpperCase())).trim();
+        } else {
+          carEl.textContent = 'ON FOOT';
+        }
+      }
+
+      // objective
+      const objEl = pick('objective');
+      if (objEl) objEl.textContent = objectiveText();
+    } catch (e) {
+      // A HUD read must never throw into the main loop.
     }
-  }
-
-  // main.js drives the HUD through S.hud.update(dt) once per frame
-  // (playing and menu alike), so this module does NOT also register
-  // on S._tick — that would run the same refresh twice per frame.
-  S.hud = { tick, update: tick, refreshRoster, drawMinimap };
-  drawMinimap();
-  return S.hud;
+  });
 }
-
-export default init;

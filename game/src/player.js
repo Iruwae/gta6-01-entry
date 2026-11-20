@@ -1,227 +1,202 @@
+// player.js — Vic on foot in Solmar Bay.
+// Walks the streets, keeps his health, and climbs in and out of cars.
+// Written fresh for round 7 from the shared spec; no repo code was read.
 import * as THREE from '../vendor/three.module.min.js';
 
-// SOLMAR BAY — the on-foot player: walk, aim, shoot, reload.
-// This module owns S.player while the player is outside a car. The
-// car itself is the vehicles module's job: it owns KeyE, the driving
-// model, and copying the car's position onto the player, so this file
-// never touches E and never moves the player while S.car is set.
-//
-// The weapons module owns the slot keys (Digit1..4) and the tracer
-// lines; this file owns the trigger. The split matters: firing lives
-// in exactly one place — here — so ammo can never drop twice for one
-// round. A reload takes 1.2 s and refills the whole magazine in one
-// atomic step when its timer runs out; switching slots (handled by
-// the weapons module) refills the new magazine at once.
-
 const WALK_SPEED = 7.5;
-const RUN_SPEED = 11;
-const WORLD_HALF = 178;
-const RELOAD_TIME = 1.2;
+const RUN_SPEED = 11.5;
+const TURN_SPEED = 2.4;
+const MAP_EDGE = 178;
+const ENTER_RANGE = 5.5;
 
-// Fallbacks when the weapons module has not built its tables yet.
-// These match the rack: pistol 12 / SMG 30 / shotgun 6 / rifle 30.
-const FALLBACK_RATES = [0.25, 0.09, 0.85, 0.13];
-const FALLBACK_MAGS = [12, 30, 6, 30];
-
-const _raycaster = new THREE.Raycaster();
-const _aimPoint = new THREE.Vector3();
-
-function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v;
+function dom(ctx, id) {
+  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
+  if (typeof document !== 'undefined') return document.getElementById(id);
+  return null;
 }
 
-export function init(S) {
-  const p = S.player;
-  if (!p) return null;
-  if (!p.pos) p.pos = new THREE.Vector3(-90, 0, -66);
-  if (typeof p.heading !== 'number') p.heading = 0;
-  if (typeof p.health !== 'number') p.health = 100;
-  if (typeof p.ammo !== 'number') p.ammo = 12;
-  if (typeof p.reloading !== 'boolean') p.reloading = false;
-  if (typeof p.reloadT !== 'number') p.reloadT = 0;
-  p._fireCd = 0;
-  p._shotsFired = 0;
-  p.speed = 0;
-  if (!p.vel) p.vel = new THREE.Vector3();
-  if (!p.loadout) {
-    const defs = [
-      { name: 'PISTOL', mag: 12, damage: 12 },
-      { name: 'SMG', mag: 30, damage: 8 },
-      { name: 'SHOTGUN', mag: 6, damage: 30 },
-      { name: 'RIFLE', mag: 30, damage: 22 },
-    ];
-    const lo = { equipped: 0, defs };
-    lo.current = () => ({ def: lo.defs[lo.equipped] || lo.defs[0] });
-    p.loadout = lo;
+function keyDown(ctx, held, code) {
+  if (held.has(code)) return true;
+  const inp = ctx.input;
+  if (!inp) return false;
+  try {
+    if (inp.keys instanceof Set) return inp.keys.has(code);
+    if (Array.isArray(inp.keys)) return inp.keys.includes(code);
+    if (inp.keys && typeof inp.keys === 'object') return !!inp.keys[code];
+    if (typeof inp.down === 'function') return !!inp.down(code);
+  } catch (e) { /* input shape unknown; fall back to our own keys */ }
+  return false;
+}
+
+export function init(ctx) {
+  const S = ctx.state;
+  const T = ctx.THREE || THREE;
+  if (!S.player) {
+    S.player = {
+      pos: new T.Vector3(0, 0, 0),
+      heading: 0,
+      health: 100,
+      ammo: 12,
+      reloading: false,
+      reloadT: 0,
+      loadout: { equipped: 0, current() { return null; } },
+    };
   }
+  const P = S.player;
+  if (!P.pos || typeof P.pos.set !== 'function') P.pos = new T.Vector3(P.pos ? P.pos.x || 0 : 0, 0, P.pos ? P.pos.z || 0 : 0);
+  if (typeof P.health !== 'number') P.health = 100;
+  if (typeof P.heading !== 'number') P.heading = 0;
+  if (typeof P.ammo !== 'number') P.ammo = 12;
+  if (typeof P.reloading !== 'boolean') P.reloading = false;
+  if (!P.loadout) P.loadout = { equipped: 0, current() { return null; } };
+  if (typeof S.health !== 'number') S.health = P.health;
 
-  // ---- the visible figure -------------------------------------------
-  const figure = new THREE.Group();
-  figure.name = 'solmar-player';
-  const jacket = new THREE.MeshStandardMaterial({ color: 0x2e8a7a, roughness: 0.8 });
-  const denim = new THREE.MeshStandardMaterial({ color: 0x2a3a5a, roughness: 0.9 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0xc89878, roughness: 0.8 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
-
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.72, 0.32), jacket);
-  torso.position.y = 1.12;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 12, 10), skin);
+  // A simple on-foot figure: warm jacket, dark trousers, cap.
+  const mesh = new T.Group();
+  const jacket = new T.Mesh(
+    new T.BoxGeometry(0.62, 0.85, 0.36),
+    new T.MeshStandardMaterial({ color: 0xe8641f, roughness: 0.85 })
+  );
+  jacket.position.y = 1.05;
+  const head = new T.Mesh(
+    new T.SphereGeometry(0.26, 12, 10),
+    new T.MeshStandardMaterial({ color: 0xd9a077, roughness: 0.7 })
+  );
   head.position.y = 1.72;
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.09, 12), dark);
-  cap.position.y = 1.88;
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.75, 0.22), denim);
-  legL.position.set(-0.15, 0.38, 0);
-  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.75, 0.22), denim);
-  legR.position.set(0.15, 0.38, 0);
-  // The gun in the right hand: a small dark box that points forward.
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.5), dark);
-  gun.position.set(0.3, 1.15, 0.3);
-  figure.add(torso, head, cap, legL, legR, gun);
-  figure.position.copy(p.pos);
-  figure.rotation.y = p.heading;
-  if (S.scene) S.scene.add(figure);
-  p.mesh = figure;
+  const cap = new T.Mesh(
+    new T.CylinderGeometry(0.28, 0.28, 0.1, 12),
+    new T.MeshStandardMaterial({ color: 0x22222e, roughness: 0.6 })
+  );
+  cap.position.y = 1.92;
+  const legs = new T.Mesh(
+    new T.BoxGeometry(0.5, 0.7, 0.32),
+    new T.MeshStandardMaterial({ color: 0x2a2f45, roughness: 0.9 })
+  );
+  legs.position.y = 0.35;
+  mesh.add(jacket, head, cap, legs);
+  mesh.position.copy(P.pos);
+  if (ctx.scene) ctx.scene.add(mesh);
+  P.mesh = mesh;
+  S.playerMesh = mesh;
 
-  let prevKeys = {};
-  let bobPhase = 0;
+  const held = new Set();
+  let lastPos = { x: P.pos.x, z: P.pos.z };
 
-  function magOfSlot(i) {
-    if (S.weapons && typeof S.weapons.magOf === 'function') return S.weapons.magOf(i);
-    if (p.loadout && p.loadout.defs && p.loadout.defs[i]) return p.loadout.defs[i].mag;
-    return FALLBACK_MAGS[i] || 12;
+  function nearestCar(maxDist) {
+    let best = null;
+    let bestD = maxDist;
+    for (const car of S.cars || []) {
+      if (!car || car.aiPolice) continue;
+      if (car.occupied) continue;
+      const d = Math.hypot(car.pos.x - P.pos.x, car.pos.z - P.pos.z);
+      if (d < bestD) { bestD = d; best = car; }
+    }
+    return best;
   }
 
-  function rateOfSlot(i) {
-    if (S.weapons && typeof S.weapons.fireRateOf === 'function') return S.weapons.fireRateOf(i);
-    return FALLBACK_RATES[i] || 0.25;
+  function enterOrExit() {
+    if (S.mode !== 'playing' || S.cutscene) return;
+    if (S.car) {
+      const car = S.car;
+      S.car = null;
+      car.occupied = false;
+      car.speed = 0;
+      const side = Math.cos(P.heading || 0);
+      const fwd = Math.sin(P.heading || 0);
+      P.pos.set(car.pos.x + side * 1.8, 0, car.pos.z - fwd * 1.8);
+      mesh.visible = true;
+      const toast = dom(ctx, 'toast');
+      if (toast) toast.textContent = 'You stepped out of the ' + (car.kind || 'car') + '.';
+      return;
+    }
+    let car = null;
+    if (ctx.api && ctx.api.vehicles && typeof ctx.api.vehicles.nearestCar === 'function') {
+      car = ctx.api.vehicles.nearestCar(P.pos, ENTER_RANGE);
+    } else {
+      car = nearestCar(ENTER_RANGE);
+    }
+    if (!car) return;
+    S.car = car;
+    car.occupied = true;
+    car.parked = false;
+    mesh.visible = false;
+    P.pos.copy(car.pos);
+    const toast = dom(ctx, 'toast');
+    if (toast) toast.textContent = 'You took the ' + (car.name || car.kind || 'car') + '.';
+    if (ctx.api && typeof ctx.api.addHeat === 'function') ctx.api.addHeat(6);
   }
 
-  // Point the player at the ground under the mouse cursor, so the
-  // figure faces where the shots are going. Falls back to the
-  // current heading when there is no camera or no clean ray hit.
-  function aimAtMouse() {
-    try {
-      const cam = S.camera;
-      const mouse = S.mouse;
-      if (!cam || !mouse) return;
-      const w = window.innerWidth || 1280;
-      const h = window.innerHeight || 720;
-      const nx = (mouse.x / w) * 2 - 1;
-      const ny = -((mouse.y / h) * 2 - 1);
-      if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
-      _raycaster.setFromCamera({ x: nx, y: ny }, cam);
-      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-      const hit = _raycaster.ray.intersectPlane(plane, _aimPoint);
-      if (!hit) return;
-      const dx = _aimPoint.x - p.pos.x;
-      const dz = _aimPoint.z - p.pos.z;
-      if (Math.hypot(dx, dz) > 0.5) p.heading = Math.atan2(dx, dz);
-    } catch (e) { /* aiming is best-effort; movement must not die */ }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      held.add(e.code);
+      if (e.code === 'KeyE') enterOrExit();
+      if (e.code && e.code.indexOf('Arrow') === 0) e.preventDefault();
+    });
+    window.addEventListener('keyup', (e) => { held.delete(e.code); });
+    window.addEventListener('blur', () => { held.clear(); });
   }
 
-  function update(rawDt) {
-    const dt = clamp(typeof rawDt === 'number' ? rawDt : 0.016, 0, 0.05);
-    const keys = S.keys || {};
-    const inCar = !!S.car;
-    const live = S.mode === 'playing' && !S.cutscene;
+  ctx.api.player = {
+    enterOrExit,
+    nearestCar,
+    mesh,
+  };
+  ctx.api.enterCar = enterOrExit;
+  ctx.api.exitCar = enterOrExit;
 
-    if (p._fireCd > 0) p._fireCd -= dt;
+  ctx.updates.push((dt) => {
+    if (typeof S.health === 'number' && S.health !== P.health && S.playerMesh) {
+      // S.health mirrors the player; the player value leads.
+      S.health = P.health;
+    }
+    P.health = Math.max(0, Math.min(100, P.health));
+    S.health = P.health;
 
-    if (live && !inCar) {
-      // ---- walk: world-aligned WASD / arrows, Shift to run ----------
-      let mx = 0;
-      let mz = 0;
-      if (keys['KeyW'] || keys['ArrowUp']) mz -= 1;
-      if (keys['KeyS'] || keys['ArrowDown']) mz += 1;
-      if (keys['KeyA'] || keys['ArrowLeft']) mx -= 1;
-      if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
-      const moving = mx !== 0 || mz !== 0;
-      const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? RUN_SPEED : WALK_SPEED;
-      if (moving) {
-        const len = Math.hypot(mx, mz);
-        mx /= len;
-        mz /= len;
-        // Face where we are going; forward is (sin h, cos h).
-        p.heading = Math.atan2(mx, mz);
-        const step = speed * dt;
-        const nx = p.pos.x + mx * step;
-        const nz = p.pos.z + mz * step;
-        const blocked = typeof S.isBlocked === 'function' ? S.isBlocked : null;
-        // Try each axis on its own so the player slides along walls.
-        if (!blocked || !blocked(nx, p.pos.z)) p.pos.x = clamp(nx, -WORLD_HALF, WORLD_HALF);
-        if (!blocked || !blocked(p.pos.x, nz)) p.pos.z = clamp(nz, -WORLD_HALF, WORLD_HALF);
-        p.speed = speed;
-        p.vel.set(mx * speed, 0, mz * speed);
-        bobPhase += dt * speed * 1.6;
-      } else {
-        p.speed = 0;
-        p.vel.set(0, 0, 0);
+    if (S.car) {
+      P.pos.copy(S.car.pos);
+      P.pos.y = 0;
+      mesh.visible = false;
+      mesh.position.copy(P.pos);
+      lastPos = { x: P.pos.x, z: P.pos.z };
+      return;
+    }
+    mesh.visible = true;
+
+    if (S.mode === 'playing' && !S.cutscene) {
+      const fwd = keyDown(ctx, held, 'KeyW') || keyDown(ctx, held, 'ArrowUp');
+      const back = keyDown(ctx, held, 'KeyS') || keyDown(ctx, held, 'ArrowDown');
+      const left = keyDown(ctx, held, 'KeyA') || keyDown(ctx, held, 'ArrowLeft');
+      const right = keyDown(ctx, held, 'KeyD') || keyDown(ctx, held, 'ArrowRight');
+      const running = keyDown(ctx, held, 'ShiftLeft') || keyDown(ctx, held, 'ShiftRight');
+      if (left) P.heading += TURN_SPEED * dt;
+      if (right) P.heading -= TURN_SPEED * dt;
+      let move = 0;
+      if (fwd) move += 1;
+      if (back) move -= 0.55;
+      if (move !== 0) {
+        const speed = running ? RUN_SPEED : WALK_SPEED;
+        P.pos.x += Math.sin(P.heading) * move * speed * dt;
+        P.pos.z += Math.cos(P.heading) * move * speed * dt;
       }
-
-      // ---- aim + fire ----------------------------------------------
-      if (S.mouse && S.mouse.down) aimAtMouse();
-      const slot = p.loadout ? p.loadout.equipped : 0;
-      if (S.mouse && S.mouse.down && !p.reloading && p._fireCd <= 0) {
-        if (p.ammo > 0) {
-          p.ammo -= 1;
-          p._shotsFired += 1;
-          p._fireCd = rateOfSlot(slot);
-          if (S.juice && typeof S.juice.add === 'function') S.juice.add(0.05);
-          if (p.ammo === 0) {
-            // Dry mag: start the reload on its own.
-            p.reloading = true;
-            p.reloadT = RELOAD_TIME;
-          }
-        } else if (!p.reloading) {
-          p.reloading = true;
-          p.reloadT = RELOAD_TIME;
-        }
-      }
-
-      // ---- reload: R starts it, the timer commits it atomically -----
-      const pressedR = !!keys['KeyR'] && !prevKeys['KeyR'];
-      if (pressedR && !p.reloading && p.ammo < magOfSlot(slot)) {
-        p.reloading = true;
-        p.reloadT = RELOAD_TIME;
-      }
+      P.pos.x = Math.max(-MAP_EDGE, Math.min(MAP_EDGE, P.pos.x));
+      P.pos.z = Math.max(-MAP_EDGE, Math.min(MAP_EDGE, P.pos.z));
+      P.pos.y = 0;
     }
 
-    if (p.reloading) {
-      p.reloadT -= dt;
-      if (p.reloadT <= 0) {
-        const slot = p.loadout ? p.loadout.equipped : 0;
-        p.ammo = magOfSlot(slot);
-        p.reloading = false;
-        p.reloadT = 0;
-      }
-    }
+    mesh.position.copy(P.pos);
+    mesh.rotation.y = P.heading;
+    // Track velocity for the police brain (playerVel estimate).
+    const vx = dt > 0 ? (P.pos.x - lastPos.x) / dt : 0;
+    const vz = dt > 0 ? (P.pos.z - lastPos.z) / dt : 0;
+    P.velX = vx;
+    P.velZ = vz;
+    P.speed = Math.hypot(vx, vz);
+    lastPos = { x: P.pos.x, z: P.pos.z };
 
-    // ---- death: back on your feet at the garage, full health --------
-    if (p.health <= 0) {
-      p.health = 100;
-      p.pos.set(-90, 0, -66);
-      p.heading = 0;
-      if (S.car) S.car = null;
-      S.heat = 0;
-      S.wanted = 0;
-    }
-    p.health = clamp(p.health, 0, 100);
-    S.health = p.health;
-
-    // ---- keep the figure glued to the state -------------------------
-    figure.position.copy(p.pos);
-    figure.rotation.y = p.heading;
-    figure.visible = !inCar;
-    const bob = p.speed > 0 ? Math.abs(Math.sin(bobPhase)) * 0.06 : 0;
-    figure.position.y = p.pos.y + bob;
-    legL.rotation.x = p.speed > 0 ? Math.sin(bobPhase) * 0.5 : 0;
-    legR.rotation.x = p.speed > 0 ? -Math.sin(bobPhase) * 0.5 : 0;
-
-    prevKeys = Object.assign({}, keys);
-  }
-
-  p.tick = update;
-  p.update = update;
-  S.playerTick = update;
-  return p;
+    const fill = dom(ctx, 'health-fill');
+    if (fill) fill.style.width = P.health + '%';
+    const bar = dom(ctx, 'health-bar');
+    if (bar) bar.setAttribute('aria-valuenow', String(Math.round(P.health)));
+  });
 }

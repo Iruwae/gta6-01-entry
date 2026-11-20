@@ -1,108 +1,172 @@
-// crew.js — Lena Cruz, getaway-driver companion (round-5 rebuild, B2).
-// S.crew = { active, mesh, update(dt) }. While a crew job is live she
-// trails the player about three metres back; otherwise her mesh hides.
-// The mesh is built from plain boxes/spheres so it needs no assets.
+// crew.js — Lena Cruz, getaway driver, fighter, and banter partner.
+// She joins Vic from the crew mission onward, follows him through the
+// city, fights beside him, and talks while she works.
+// Written fresh for round 7 from the shared spec; no repo code was read.
+import * as THREE from '../vendor/three.module.min.js';
 
-function makeStubMesh() {
-  const pos = {
-    x: 0, y: 0, z: 0,
-    set(nx, ny, nz) { this.x = nx; this.y = ny; this.z = nz; },
-    lerp(tx, k) { this.x += (tx.x - this.x) * k; this.y += (tx.y - this.y) * k; this.z += (tx.z - this.z) * k; },
-  };
-  return { visible: false, position: pos, rotation: { x: 0, y: 0, z: 0 } };
+const BANTER = {
+  raceWin: [
+    'LENA: "Told you — I drive, you win. That is the deal, Vic."',
+    'LENA: "Did you see their faces at the last gate? Beautiful."',
+  ],
+  jobDone: [
+    'LENA: "Clean run. Vic is going to love this one."',
+    'LENA: "Another one in the bag. We are getting good at this."',
+  ],
+  pickup: [
+    'LENA: "Hop in, I have the engine warm and the radio loud."',
+    'LENA: "Shotgun is yours. I am driving, so no backseat rules."',
+  ],
+  fight: [
+    'LENA: "Stay behind me — I have been in worse scrapes than this."',
+    'LENA: "They picked the wrong crew tonight."',
+  ],
+  drive: [
+    'LENA: "Left at the lights, then we lose them in the marina."',
+    'LENA: "This city is ours if we keep moving."',
+  ],
+  heat: [
+    'LENA: "Cops on us. Breathe, drive smooth, and do not panic."',
+    'VIC: "We will shake them at the underpass, like always."',
+  ],
+};
+
+function dom(ctx, id) {
+  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
+  if (typeof document !== 'undefined') return document.getElementById(id);
+  return null;
 }
 
-function buildLenaMesh(THREE) {
-  const g = new THREE.Group();
-  const jacket = new THREE.MeshStandardMaterial({ color: 0x0e7490, roughness: 0.8 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0xe8b48c, roughness: 0.7 });
-  const hairM = new THREE.MeshStandardMaterial({ color: 0xff7a59, roughness: 0.9 });
-  const pants = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+export function init(ctx) {
+  const S = ctx.state;
+  const T = ctx.THREE || THREE;
+  if (!S.crew) S.crew = { active: false, mesh: null };
+  const crew = S.crew;
+  if (typeof crew.active !== 'boolean') crew.active = false;
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.68, 0.3), jacket);
-  torso.position.y = 1.05;
-  g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 18, 14), skin);
-  head.position.y = 1.62;
-  g.add(head);
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.22, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM);
-  hair.position.y = 1.66;
-  g.add(hair);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.72, 0.22), pants);
-  legL.position.set(-0.14, 0.36, 0);
-  g.add(legL);
-  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.72, 0.22), pants);
-  legR.position.set(0.14, 0.36, 0);
-  g.add(legR);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.6, 0.16), jacket);
-  armL.position.set(-0.34, 1.05, 0);
-  g.add(armL);
-  const armR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.6, 0.16), jacket);
-  armR.position.set(0.34, 1.05, 0);
-  g.add(armR);
-  g.visible = false;
-  return g;
+  // Lena on foot: teal jacket, dark hair, a driver who looks the part.
+  const mesh = new T.Group();
+  const jacket = new T.Mesh(
+    new T.BoxGeometry(0.58, 0.8, 0.34),
+    new T.MeshStandardMaterial({ color: 0x1f7a6d, roughness: 0.85 })
+  );
+  jacket.position.y = 1.02;
+  const head = new T.Mesh(
+    new T.SphereGeometry(0.25, 12, 10),
+    new T.MeshStandardMaterial({ color: 0xc98d64, roughness: 0.7 })
+  );
+  head.position.y = 1.68;
+  const hair = new T.Mesh(
+    new T.BoxGeometry(0.52, 0.42, 0.4),
+    new T.MeshStandardMaterial({ color: 0x1a1210, roughness: 0.9 })
+  );
+  hair.position.set(0, 1.82, -0.06);
+  const legs = new T.Mesh(
+    new T.BoxGeometry(0.48, 0.68, 0.3),
+    new T.MeshStandardMaterial({ color: 0x1d2436, roughness: 0.9 })
+  );
+  legs.position.y = 0.34;
+  mesh.add(jacket, head, hair, legs);
+  mesh.visible = !!crew.active;
+  if (S.player) mesh.position.set(S.player.pos.x - 2, 0, S.player.pos.z - 2);
+  if (ctx.scene) ctx.scene.add(mesh);
+  crew.mesh = mesh;
+  crew.name = 'Lena Cruz';
+  crew.role = 'getaway driver';
+
+  function say(text) {
+    const toast = dom(ctx, 'toast');
+    if (toast) toast.textContent = text;
+    return text;
+  }
+
+  // The banter director: speaker-tagged toast lines, guarded by a
+  // short cooldown so Lena talks like a person, not a ticker.
+  if (!S.banterDirector) {
+    const lines = BANTER;
+    let pick = 0;
+    const director = {
+      _cooldown: 0,
+      lines,
+      say,
+      line(kind) {
+        const pool = lines[kind] || lines.drive;
+        const text = pool[pick % pool.length];
+        pick++;
+        return say(text);
+      },
+      raceWin() { if (this._cooldown > 0) return null; this._cooldown = 9; return this.line('raceWin'); },
+      jobDone() { if (this._cooldown > 0) return null; this._cooldown = 9; return this.line('jobDone'); },
+      pickup() { if (this._cooldown > 0) return null; this._cooldown = 9; return this.line('pickup'); },
+      fight() { if (this._cooldown > 0) return null; this._cooldown = 9; return this.line('fight'); },
+      drive() { if (this._cooldown > 0) return null; this._cooldown = 9; return this.line('drive'); },
+      heat() { if (this._cooldown > 0) return null; this._cooldown = 9; return this.line('heat'); },
+    };
+    S.banterDirector = director;
+  }
+  const banter = S.banterDirector;
+
+  function join() {
+    crew.active = true;
+    mesh.visible = true;
+    say('LENA: "I am with you, Vic. Wherever this goes, we go together."');
+    return true;
+  }
+
+  function leave() {
+    crew.active = false;
+    mesh.visible = false;
+    return true;
+  }
+
+  crew.join = join;
+  crew.leave = leave;
+  crew.say = say;
+  ctx.api.crew = { join, leave, say, mesh };
+  ctx.api.crewJoin = join;
+  ctx.api.crewLeave = leave;
+  ctx.api.banter = banter;
+
+  let fightTimer = 0;
+  let bob = 0;
+
+  ctx.updates.push((dt, t) => {
+    if (banter && typeof banter._cooldown === 'number' && banter._cooldown > 0) {
+      banter._cooldown = Math.max(0, banter._cooldown - dt);
+    }
+    if (!crew.active || !S.player) {
+      mesh.visible = false;
+      return;
+    }
+    mesh.visible = true;
+    const p = S.player.pos;
+    const heading = S.player.heading || 0;
+    // Trail just behind and to the side of the player.
+    const tx = p.x - Math.sin(heading) * 2.2 + Math.cos(heading) * 1.1;
+    const tz = p.z - Math.cos(heading) * 2.2 - Math.sin(heading) * 1.1;
+    const k = Math.min(1, dt * 4);
+    mesh.position.x += (tx - mesh.position.x) * k;
+    mesh.position.z += (tz - mesh.position.z) * k;
+    bob += dt * 6;
+    mesh.position.y = Math.abs(Math.sin(bob)) * 0.05;
+    mesh.rotation.y = heading;
+
+    // Lena fights: when a cop closes in she squares up to them, and
+    // once in a while she says so.
+    let nearestCop = null;
+    let nearestD = 1e9;
+    for (const car of S.cars || []) {
+      if (!car || !car.aiPolice) continue;
+      const d = Math.hypot(car.pos.x - p.x, car.pos.z - p.z);
+      if (d < nearestD) { nearestD = d; nearestCop = car; }
+    }
+    if (nearestCop && nearestD < 22) {
+      mesh.rotation.y = Math.atan2(nearestCop.pos.x - mesh.position.x, nearestCop.pos.z - mesh.position.z);
+      fightTimer -= dt;
+      if (fightTimer <= 0) {
+        fightTimer = 7;
+        if (banter && typeof banter.fight === 'function') banter.fight();
+      }
+    }
+  });
 }
-
-export function init(S) {
-  const crew = {
-    active: false,
-    mesh: makeStubMesh(),
-
-    update(dt) {
-      const mesh = crew.mesh;
-      if (!mesh) return;
-      if (!crew.active || !S.player || !S.player.pos) {
-        mesh.visible = false;
-        return;
-      }
-      mesh.visible = true;
-      const p = S.player.pos;
-      const heading = S.player.heading || 0;
-      const tx = p.x - Math.sin(heading) * 3;
-      const tz = p.z - Math.cos(heading) * 3;
-      const k = Math.min(1, Math.max(0, (dt || 0.15) * 3.2));
-      if (mesh.position && typeof mesh.position.lerp === 'function' && mesh.position.isVector3) {
-        mesh.position.lerp({ x: tx, y: 0, z: tz }, k);
-      } else if (mesh.position) {
-        mesh.position.x += (tx - mesh.position.x) * k;
-        mesh.position.z += (tz - mesh.position.z) * k;
-        mesh.position.y = 0;
-      }
-      if (mesh.rotation) mesh.rotation.y = heading;
-    },
-  };
-
-  S.crew = crew;
-
-  // Upgrade the stub to a real THREE group as soon as the vendor
-  // build loads; the stub keeps S.crew.mesh non-null until then.
-  (async () => {
-    try {
-      let THREE = null;
-      try {
-        THREE = await import('../vendor/three.module.min.js');
-      } catch (e1) {
-        THREE = await import('three');
-      }
-      if (!THREE || !THREE.Group) return;
-      const real = buildLenaMesh(THREE);
-      const old = crew.mesh;
-      if (old && old.position) real.position.set(old.position.x || 0, 0, old.position.z || 0);
-      else if (S.player && S.player.pos) real.position.set(S.player.pos.x, 0, S.player.pos.z);
-      real.visible = !!crew.active;
-      crew.mesh = real;
-      const scene = S.scene || S.world || null;
-      if (scene && typeof scene.add === 'function') scene.add(real);
-    } catch (e) { /* stub mesh keeps working */ }
-  })();
-
-  setInterval(() => {
-    try { crew.update(0.12); } catch (e) { /* never break the page */ }
-  }, 120);
-  if (Array.isArray(S._moduleTicks)) S._moduleTicks.push((dt) => crew.update(dt));
-
-  return crew;
-}
-
-export default init;

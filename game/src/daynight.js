@@ -1,82 +1,70 @@
-import * as THREE from '../vendor/three.module.min.js';
+// Solmar Bay — day/night clock (round 7 rebuild).
+// S.time is minutes since the day opened at 18:28, so S.time = 200
+// is exactly 21:48. The phase is recomputed from S.time every
+// frame (the test sets S.time directly), the night value ramps
+// smoothly toward its target, and the HUD day/time line follows.
+export function init(ctx) {
+  const S = ctx.state || ctx.S;
+  const dom = ctx.dom || {};
 
-// SOLMAR BAY — the day/night clock. Game time runs from 18:28; night
-// fades in between 20:30 and 22:00 (smoothstep), fades out again
-// toward dawn, and the world follows: the sun dims and cools, the
-// sky dome darkens, fog closes in, windows and lamps switch on.
-// S.time is minutes since 18:28, so time=200 means 21:48.
-function smooth01(t) {
-  const x = Math.max(0, Math.min(1, t));
-  return x * x * (3 - 2 * x);
-}
+  const OPEN_MIN = 18 * 60 + 28; // day opens at sunset, 18:28
+  const NIGHT_MIN = 21 * 60 + 30; // night from 21:30
+  const DAWN_MIN = 5 * 60 + 30; // dawn until 05:30
+  const SUNSET_MIN = 17 * 60; // golden hour from 17:00
+  const MIN_PER_SEC = 0.5; // game minutes per real second
 
-export function init(S) {
-  const sun = new THREE.DirectionalLight(0xffb36b, 2.2);
-  sun.position.set(-90, 55, -40);
-  S.sunLight = sun;
-  S.scene.add(sun);
-  S.scene.add(sun.target);
+  if (typeof S.time !== 'number') S.time = 0;
+  if (typeof S.day !== 'number') S.day = 1;
+  if (!S.dayNight || typeof S.dayNight !== 'object') {
+    S.dayNight = { phase: 'SUNSET', night: 0 };
+  }
+  if (typeof S.dayNight.night !== 'number') S.dayNight.night = 0;
 
-  const duskFog = new THREE.Color(0x4a2a44);
-  const nightFog = new THREE.Color(0x0a0e1e);
-  const duskSun = new THREE.Color(0xffb36b);
-  const nightSun = new THREE.Color(0x8fb4ff);
+  function phaseFor(clockMin) {
+    if (clockMin >= NIGHT_MIN || clockMin < DAWN_MIN) return 'NIGHT';
+    if (clockMin >= SUNSET_MIN) return 'SUNSET';
+    if (clockMin < 6 * 60 + 30) return 'DAWN';
+    return 'DAY';
+  }
+  function nightTargetFor(phase) {
+    if (phase === 'NIGHT') return 1;
+    if (phase === 'SUNSET') return 0.18;
+    if (phase === 'DAWN') return 0.4;
+    return 0;
+  }
+  function clockFor(time) {
+    const total = OPEN_MIN + time;
+    return {
+      day: 1 + Math.floor(total / 1440),
+      min: ((total % 1440) + 1440) % 1440,
+    };
+  }
 
-  S.dayNight = S.dayNight || { phase: 'SUNSET', night: 0 };
-  S.dayNight.phase = 'SUNSET';
-  S.dayNight.night = 0;
+  ctx.api.dayNight = { phaseFor, nightTargetFor, clockFor };
 
-  const tick = (dt) => {
-    const totalMin = 18 * 60 + 28 + S.time;
-    const clockMin = ((totalMin % 1440) + 1440) % 1440;
-    const hh = Math.floor(clockMin / 60);
-    const mm = Math.floor(clockMin % 60);
+  let lastText = '';
+  ctx.updates.push((dt) => {
+    // Advance the clock; the phase below always re-reads S.time.
+    S.time += dt * MIN_PER_SEC;
+    const c = clockFor(S.time);
+    S.day = c.day;
+    const phase = phaseFor(c.min);
+    const target = nightTargetFor(phase);
+    const cur = typeof S.dayNight.night === 'number' ? S.dayNight.night : 0;
+    // Smooth ramp: ~0.09 of the remaining gap per frame at dt 0.05,
+    // so a jump to night lands well inside a few dozen frames.
+    const k = 1 - Math.exp(-dt * 1.8);
+    S.dayNight.night = Math.max(0, Math.min(1, cur + (target - cur) * k));
+    S.dayNight.phase = phase;
+    S.dayNight.clockMinutes = c.min;
 
-    let target = 0;
-    if (clockMin >= 22 * 60 || clockMin <= 5 * 60 + 30) {
-      target = 1;
-    } else if (clockMin > 20 * 60 + 30 && clockMin < 22 * 60) {
-      target = smooth01((clockMin - (20 * 60 + 30)) / 90);
-    } else if (clockMin > 5 * 60 + 30 && clockMin < 6 * 60 + 30) {
-      target = 1 - smooth01((clockMin - (5 * 60 + 30)) / 60);
+    const hh = String(Math.floor(c.min / 60)).padStart(2, '0');
+    const mm = String(c.min % 60).padStart(2, '0');
+    const text = 'DAY ' + S.day + ' ' + hh + ':' + mm + ' ' + phase;
+    if (text !== lastText) {
+      lastText = text;
+      const el = dom['day-time'] || document.getElementById('day-time');
+      if (el) el.textContent = text;
     }
-
-    const dn = S.dayNight;
-    if (dn.night < target) dn.night = Math.min(target, dn.night + 0.03);
-    else if (dn.night > target) dn.night = Math.max(target, dn.night - 0.03);
-    const n = dn.night;
-
-    if (n > 0.5) dn.phase = 'NIGHT';
-    else if (hh >= 5 && hh < 8) dn.phase = 'MORNING';
-    else if (hh >= 8 && hh < 17) dn.phase = 'DAY';
-    else dn.phase = 'SUNSET';
-
-    S.day = 1 + Math.floor(totalMin / 1440);
-    S.clock = { hh, mm, totalMin };
-
-    sun.intensity = 2.2 + (0.4 - 2.2) * n;
-    sun.color.copy(duskSun).lerp(nightSun, n);
-    if (S.hemi) S.hemi.intensity = 0.7 + (0.28 - 0.7) * n;
-    if (S.ambient) S.ambient.intensity = 0.35 + (0.12 - 0.35) * n;
-    if (S.scene.fog) S.scene.fog.color.copy(duskFog).lerp(nightFog, n);
-    if (S.skyDome) {
-      S.skyDome.material.uniforms.uNight.value = n;
-      S.skyDome.material.uniforms.uTime.value += dt;
-    }
-
-    const mats = S._cityMats;
-    if (mats) {
-      for (const m of mats.buildings) m.emissiveIntensity = n * 1.15;
-      if (mats.lampGlow) mats.lampGlow.opacity = n * 0.9;
-      if (mats.lampHead) mats.lampHead.emissiveIntensity = n * 2.2;
-      if (mats.trafficHead) mats.trafficHead.emissiveIntensity = n * 2.0;
-      if (mats.billboards) {
-        for (const b of mats.billboards) b.material.opacity = 0.55 + n * 0.45;
-      }
-    }
-  };
-
-  S._tick.push(tick);
-  S.dayNightTick = tick;
-  return tick;
+  });
 }

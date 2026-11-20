@@ -1,262 +1,239 @@
-// missions.js — the ten story jobs of Solmar Bay.
-//
-// Each job is a briefing (dialogue lines), a place to reach, and a
-// payout. The job board (menu.js) lists S.missions.list and starts a
-// job by index; the first job also starts itself when the player walks
-// up to the garage, because that is where the story begins.
-//
-// The spine (id, title, giver, brief) comes from S.config.missions so
-// the board, the HUD and this module never disagree about a job's
-// name. Everything else — reward, target, crew, lines — lives in the
-// DETAIL table below, keyed by mission id.
+// missions.js — ten story jobs for Vic Torres in Solmar Bay.
+// A job board, briefing dialogue, objectives out in the city, and
+// cash on completion. All characters and story are original.
+// Written fresh for round 7 from the shared spec; no repo code was read.
 
-// Per-job detail the config spine does not carry. Targets are map
-// points; reaching one inside COMPLETE_RADIUS finishes the job.
-const DETAIL = {
-  m1: {
-    reward: 200, crew: false,
-    target: { x: 0, z: 135, label: 'THE STRIP' },
-    objective: 'Take the garage sport car for a shake-down on the Strip',
+const GARAGE = { x: -90, z: -66 };
+const JOBS = [
+  {
+    id: 'm1', num: 1, title: 'First Drop', payout: 250,
+    objective: 'Drive the package to the old pier gate',
+    dest: { x: 140, z: -140 },
     lines: [
-      { speaker: 'LENA CRUZ', text: 'There she is. Red, loud, and already paid for — mostly. Take her down the Strip and see how she feels.' },
-      { speaker: 'MARCO SOLIS', text: 'Easy on the gearbox, kid. Vic is watching this one, and Vic remembers every scratch.' },
-    ],
-    done: [
-      { speaker: 'LENA CRUZ', text: 'She pulls clean. You drive like you mean it — Vic is going to like you.' },
+      { name: 'LENA CRUZ', text: 'Vic wants a package moved, no questions. Pick it up here at the garage and take it to the old pier gate, east side. Quiet streets, quick feet.' },
+      { name: 'MARCO SOLIS', text: 'And Vic? If the cops light you up, lose them before you reach the gate. A hot drop is a dead drop.' },
     ],
   },
-  m2: {
-    reward: 250, crew: false,
-    target: { x: 140, z: -100, label: 'UPTOWN DROP' },
-    objective: 'Run Marco’s package to the uptown drop before dark',
+  {
+    id: 'm2', num: 2, title: 'Salt Air Pickup', payout: 300,
+    objective: 'Collect the crate from the marina yard',
+    dest: { x: -140, z: 140 },
     lines: [
-      { speaker: 'MARCO SOLIS', text: 'A package, one address, no questions. Uptown, before the sun is gone. Do not open it.' },
-      { speaker: 'LENA CRUZ', text: 'And do not let the PD get a look at you. They love a courier with a schedule.' },
-    ],
-    done: [
-      { speaker: 'MARCO SOLIS', text: 'Delivered, sealed, no fuss. That is how you stay employed around here.' },
+      { name: 'LENA CRUZ', text: 'A crate came in on the night boat and nobody signed for it. Grab it from the marina yard, west end, and bring it back to Vic.' },
+      { name: 'VIC TORRES', text: 'That crate pays for your next three dinners, kid. Do not drop it, do not open it, do not sell it.' },
     ],
   },
-  m3: {
-    reward: 300, crew: false,
-    target: { x: 120, z: 120, label: 'THE DOCKS' },
-    objective: 'Scout the harbor docks and clock the night shift',
+  {
+    id: 'm3', num: 3, title: 'The Quiet Valet', payout: 350,
+    objective: 'Lift the sunset-red coupe from the north lot',
+    dest: { x: 150, z: 0 },
     lines: [
-      { speaker: 'LENA CRUZ', text: 'The docks run a night shift that is not on any roster. Get down there, look around, and come back with what you see.' },
-    ],
-    done: [
-      { speaker: 'LENA CRUZ', text: 'So the night shift is real. Vic will want to hear this himself.' },
+      { name: 'MARCO SOLIS', text: 'A sunset-red coupe sits in the north lot with the keys in the sun visor. Rich kid, lazy habits. Take it, bring it to the yard.' },
+      { name: 'LENA CRUZ', text: 'If an alarm screams, drive like you mean it. The fence only pays for cars that arrive in one piece.' },
     ],
   },
-  m4: {
-    reward: 300, crew: false,
-    target: { x: -140, z: -40, label: 'OLD TOWN' },
-    objective: 'Lose the tail through Old Town without firing a shot',
+  {
+    id: 'm4', num: 4, title: 'Paper Trail', payout: 400,
+    objective: 'Swap the ledger at the back office',
+    dest: { x: -150, z: -40 },
     lines: [
-      { speaker: 'MARCO SOLIS', text: 'Somebody is following you, and they are not subtle about it. Old Town, tight streets, no gunfire. Lose them.' },
-    ],
-    done: [
-      { speaker: 'MARCO SOLIS', text: 'Clean. Whoever that was, they are still circling the block looking for you.' },
+      { name: 'VIC TORRES', text: 'Somebody is cooking my books. There is a ledger in a back office on the west side. Swap it for the clean one in your pocket.' },
+      { name: 'MARCO SOLIS', text: 'In and out. Nobody sees your face, nobody remembers your jacket.' },
     ],
   },
-  m5: {
-    reward: 600, crew: true,
-    target: { x: 0, z: 165, label: 'THE PIER' },
-    objective: 'Hit the pier job with Lena riding shotgun — do not miss',
+  {
+    id: 'm5', num: 5, title: 'Crew Night', payout: 600,
+    objective: 'Hit the docks with Lena and bring back the haul',
+    dest: { x: 140, z: 140 },
     lines: [
-      { speaker: 'VIC TORRES', text: 'Payday at the pier. The crew is counting on this one, so listen close: in fast, out faster, nobody gets left behind.' },
-      { speaker: 'LENA CRUZ', text: 'I am riding shotgun. You drive, I handle the rest — and try not to scratch my door this time.' },
-      { speaker: 'VIC TORRES', text: 'One more thing. If the PD shows up, you do not stop for a chat. You go.' },
-    ],
-    done: [
-      { speaker: 'VIC TORRES', text: 'That is the payday I promised. Split is fair, crew is happy. You are one of us now.' },
-      { speaker: 'LENA CRUZ', text: 'Told you we make a good team. Same time next week?' },
+      { name: 'LENA CRUZ', text: 'Tonight we work together, Vic. I drive, you carry, and nobody gets left on the docks. The haul is in the far container row.' },
+      { name: 'VIC TORRES', text: 'Lena is your crew now. Watch her back and she will watch yours — that is the whole job, and the whole rule.' },
+      { name: 'LENA CRUZ', text: 'Keys are in my hand already. Let us go make the bay remember our names.' },
     ],
   },
-  m6: {
-    reward: 350, crew: false,
-    target: { x: 110, z: 138, label: 'THE YARD' },
-    objective: 'Boost a ride and bring it to Vic’s yard, clean, no heat',
+  {
+    id: 'm6', num: 6, title: 'Low Tide', payout: 450,
+    objective: 'Reach the beached skiff at the south shore',
+    dest: { x: -40, z: -150 },
     lines: [
-      { speaker: 'VIC TORRES', text: 'First real boost. Pick a ride, bring it to my yard, and keep the heat off you. Clean is the whole job.' },
-    ],
-    done: [
-      { speaker: 'VIC TORRES', text: 'No scratches, no sirens. The fence will pay well for this one.' },
+      { name: 'LENA CRUZ', text: 'A skiff beached itself on the south shore at low tide with a lockbox under the bench. Wade out, grab it, come home.' },
+      { name: 'VIC TORRES', text: 'Tide comes back fast down there. Do not admire the view.' },
     ],
   },
-  m7: {
-    reward: 450, crew: false,
-    target: { x: 120, z: 60, label: 'HARBOR BRIDGE' },
-    objective: 'Outrun the PD interceptor across the harbor bridge',
+  {
+    id: 'm7', num: 7, title: 'The Long Way Home', payout: 500,
+    objective: 'Escort the courier to the east gate',
+    dest: { x: 150, z: 80 },
     lines: [
-      { speaker: 'VIC TORRES', text: 'The interceptor unit is fast and it does not give up. Take them across the bridge and leave them in your mirrors.' },
-    ],
-    done: [
-      { speaker: 'LENA CRUZ', text: 'You outran the interceptor! The whole bay is going to hear about this one.' },
+      { name: 'MARCO SOLIS', text: 'A courier needs an escort to the east gate. Somebody wants his satchel, and they are not shy about it.' },
+      { name: 'LENA CRUZ', text: 'You drive lead, I watch the mirrors. If a car sits on us twice, it is not a coincidence.' },
     ],
   },
-  m8: {
-    reward: 500, crew: true,
-    target: { x: 0, z: -100, label: 'THE ROADBLOCK' },
-    objective: 'Drive the crew through the roadblock and keep everyone breathing',
+  {
+    id: 'm8', num: 8, title: 'Harbor Lights', payout: 550,
+    objective: 'Photograph the manifest at the west crane',
+    dest: { x: -150, z: 80 },
     lines: [
-      { speaker: 'LENA CRUZ', text: 'Roadblock ahead and the crew is in the car. Steady hands, steady speed — we go through, not around.' },
-      { speaker: 'VIC TORRES', text: 'Nobody gets out of that car until we are clear. Understood?' },
-    ],
-    done: [
-      { speaker: 'LENA CRUZ', text: 'Everyone breathing, nobody cuffed. That is how a crew stays a crew.' },
+      { name: 'VIC TORRES', text: 'I need proof, not promises. The manifest hangs by the west crane. Get close enough to read it and get out.' },
+      { name: 'MARCO SOLIS', text: 'Cranes mean cameras. Keep your head down and your engine running.' },
     ],
   },
-  m9: {
-    reward: 900, crew: false,
-    target: { x: 120, z: -90, label: 'UPTOWN VAULT' },
-    objective: 'The uptown vault job — everything rides on this one',
+  {
+    id: 'm9', num: 9, title: 'Dust and Diesel', payout: 650,
+    objective: 'Deliver the fuel drums to the south depot',
+    dest: { x: 80, z: -150 },
     lines: [
-      { speaker: 'VIC TORRES', text: 'The vault job. Everything we have built rides on tonight, so no improvising. Get in, get the score, get out.' },
-      { speaker: 'MARCO SOLIS', text: 'The route is planned to the metre. Trust the plan and the plan trusts you.' },
-    ],
-    done: [
-      { speaker: 'VIC TORRES', text: 'The big score. That is retirement money for half the bay — and you earned your cut.' },
+      { name: 'LENA CRUZ', text: 'Fuel drums, south depot, before the trucks roll out. Heavy load, so brake early and take the corners wide.' },
+      { name: 'VIC TORRES', text: 'That depot keeps half the bay moving. They pay on time when we deliver on time.' },
     ],
   },
-  m10: {
-    reward: 1000, crew: true,
-    target: { x: 0, z: 150, label: 'THE BEACH' },
-    objective: 'One last run at dawn — leave the bay, or own it',
+  {
+    id: 'm10', num: 10, title: 'Bay Legend', payout: 1000,
+    objective: 'Meet Vic at the north overlook and close the book',
+    dest: { x: 0, z: -168 },
     lines: [
-      { speaker: 'LENA CRUZ', text: 'One last run, at dawn, on the beach road. After this, you either leave the bay or you own it.' },
-      { speaker: 'VIC TORRES', text: 'Whatever you choose, kid — it was a pleasure doing business with you.' },
-    ],
-    done: [
-      { speaker: 'LENA CRUZ', text: 'Solmar Bay is yours now. Try to look after it better than the last lot did.' },
+      { name: 'VIC TORRES', text: 'One last run, kid. Meet me at the north overlook. After tonight the whole bay knows the name Vic Torres — and yours right beside it.' },
+      { name: 'LENA CRUZ', text: 'We started with a borrowed car and a pocket of nothing. Finish this, and we are legends.' },
     ],
   },
-};
+];
 
-const COMPLETE_RADIUS = 10;
-const GARAGE_RADIUS = 7;
-
-function dist2(ax, az, bx, bz) {
-  const dx = ax - bx;
-  const dz = az - bz;
-  return dx * dx + dz * dz;
+function dom(ctx, id) {
+  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
+  if (typeof document !== 'undefined') return document.getElementById(id);
+  return null;
 }
 
-export function init(S) {
-  const spine = (S.config && S.config.missions) || [];
-  const anchors = (S.config && S.config.anchors) || {};
-  const garage = anchors.garage || { x: -90, z: -66 };
+export function init(ctx) {
+  const S = ctx.state;
+  if (typeof S.cash !== 'number') S.cash = 120;
+  if (typeof S.missionIndex !== 'number') S.missionIndex = 0;
+  if (!S.missions || typeof S.missions.start !== 'function') {
+    S.missions = { start: null, current: (S.missions && S.missions.current) || null };
+  }
+  if (!S.crew) S.crew = { active: false, mesh: null };
 
-  // The live list: config spine plus this module's detail. The job
-  // board reads id / title / reward straight off these entries.
-  const list = spine.map((job, i) => {
-    const extra = DETAIL[job.id] || {};
-    return {
-      id: job.id,
-      title: job.title,
-      giver: job.giver,
-      brief: job.brief,
-      index: i,
-      reward: extra.reward || 100,
-      crew: !!extra.crew,
-      target: extra.target || { x: 0, z: 0, label: 'SOLMAR BAY' },
-      objective: extra.objective || job.brief,
-      lines: extra.lines || [{ speaker: job.giver, text: job.brief }],
-      done: extra.done || [{ speaker: job.giver, text: 'Job done. Well driven.' }],
+  let lastListIndex = -1;
+
+  // Dialogue lives in exactly one place: the dialogue module owns the
+  // #dialogue box, its lines, and its click handler. This module used to
+  // run a second controller on the same box, so one click fired both
+  // listeners — the dialogue module hid the box, and its backstop then
+  // re-opened the canned briefing instead of the mission's next line.
+  // Missions now only hand their lines to the dialogue module, lazily.
+  function showDialogue(lines) {
+    if (ctx.api && typeof ctx.api.showDialogue === 'function' && ctx.api.showDialogue !== showDialogue) {
+      ctx.api.showDialogue(lines);
+    }
+  }
+
+  function advanceDialogue() {
+    if (ctx.api && typeof ctx.api.advanceDialogue === 'function' && ctx.api.advanceDialogue !== advanceDialogue) {
+      ctx.api.advanceDialogue();
+    }
+  }
+
+  function toast(text) {
+    const el = dom(ctx, 'toast');
+    if (el) el.textContent = text;
+  }
+
+  function joinCrew() {
+    if (!S.crew) S.crew = { active: false, mesh: null };
+    S.crew.active = true;
+    if (S.crew.mesh) S.crew.mesh.visible = true;
+    if (ctx.api && typeof ctx.api.crewJoin === 'function') ctx.api.crewJoin();
+  }
+
+  function start(id) {
+    let index = -1;
+    if (typeof id === 'string') {
+      const m = id.match(/(\d+)/);
+      index = m ? parseInt(m[1], 10) - 1 : JOBS.findIndex((j) => j.id === id);
+    } else if (typeof id === 'number') {
+      index = id >= 0 && id < JOBS.length ? id : -1;
+    }
+    if (index < 0 || index >= JOBS.length) return null;
+    const job = JOBS[index];
+    const current = {
+      id: job.id, num: job.num, title: job.title,
+      objective: job.objective, payout: job.payout,
+      dest: { x: job.dest.x, z: job.dest.z },
+      lines: job.lines,
     };
+    S.missions.current = current;
+    if (job.num >= 5) joinCrew();
+    showDialogue(job.lines);
+    const obj = dom(ctx, 'objective');
+    if (obj) obj.textContent = job.title + ': ' + job.objective;
+    refreshList();
+    return current;
+  }
+
+  function complete(job) {
+    S.cash += job.payout;
+    S.missionIndex = Math.max(S.missionIndex, job.num);
+    S.missions.current = null;
+    toast(job.title + ' complete — $' + job.payout + ' paid.');
+    if (S.respectDirector && typeof S.respectDirector.add === 'function') S.respectDirector.add(25, job.title);
+    const obj = dom(ctx, 'objective');
+    if (obj) obj.textContent = S.missionIndex < JOBS.length ? 'Next job: ' + JOBS[S.missionIndex].title : 'All jobs done — you run the bay now.';
+    refreshList();
+  }
+
+  function refreshList() {
+    const list = dom(ctx, 'mission-list');
+    if (!list) return;
+    list.innerHTML = '';
+    JOBS.forEach((job, i) => {
+      const row = document.createElement('div');
+      row.className = 'job-row';
+      const status = i < S.missionIndex ? 'DONE' : i === S.missionIndex ? 'AVAILABLE' : 'LOCKED';
+      row.dataset.mission = job.id;
+      row.innerHTML = '';
+      const titleEl = document.createElement('span');
+      titleEl.className = 'job-title';
+      titleEl.textContent = 'JOB ' + job.num + ' — ' + job.title;
+      const payEl = document.createElement('span');
+      payEl.className = 'job-pay';
+      payEl.textContent = '$' + job.payout + ' • ' + status;
+      row.appendChild(titleEl);
+      row.appendChild(payEl);
+      row.addEventListener('click', () => {
+        if (i <= S.missionIndex && !S.missions.current) start(i);
+      });
+      list.appendChild(row);
+    });
+    lastListIndex = S.missionIndex;
+  }
+
+  S.missions.start = start;
+  // NOTE: do not assign ctx.api.showDialogue / advanceDialogue here —
+  // the dialogue module owns those; assigning the wrappers above would
+  // make them call themselves.
+  ctx.api.missions = { start, jobs: JOBS, complete, showDialogue, advanceDialogue };
+
+  refreshList();
+  const btnMissions = dom(ctx, 'btn-missions');
+  if (btnMissions && !btnMissions.dataset.missionsWired) {
+    btnMissions.dataset.missionsWired = '1';
+    btnMissions.addEventListener('click', () => { setTimeout(refreshList, 50); });
+  }
+
+  ctx.updates.push((dt) => {
+    if (lastListIndex !== S.missionIndex) refreshList();
+
+    // Job 1 finds the player at the garage.
+    if (!S.missions.current && S.missionIndex === 0 && S.mode === 'playing' && !S.cutscene && S.player) {
+      const d = Math.hypot(S.player.pos.x - GARAGE.x, S.player.pos.z - GARAGE.z);
+      if (d < 9) start(0);
+    }
+
+    const cur = S.missions.current;
+    if (cur && cur.dest && S.player && S.mode === 'playing') {
+      const where = S.car ? S.car.pos : S.player.pos;
+      const d = Math.hypot(where.x - cur.dest.x, where.z - cur.dest.z);
+      if (d < 7) complete(cur);
+    }
   });
-
-  const missions = {
-    list,
-    current: null,
-    completed: [],
-
-    // Begin job i: set the crew flag, point the HUD at the target,
-    // and open the briefing. Safe to call while paused (job board).
-    start(i) {
-      const job = list[i];
-      if (!job) return null;
-      missions.current = job;
-      S.missionIndex = i;
-      if (S.crew) S.crew.active = job.crew;
-      showBriefing(job.lines);
-      const toast = document.getElementById('toast');
-      if (toast) {
-        toast.textContent = 'JOB: ' + job.id.toUpperCase() + ' — ' + job.title;
-        toast.classList.remove('hidden');
-      }
-      return job;
-    },
-
-    // The objective line the HUD prints for the active job.
-    objectiveText() {
-      const job = missions.current;
-      if (!job) return '';
-      return job.id.toUpperCase() + ' — ' + job.title + ': ' + job.objective;
-    },
-
-    // Per-frame, driven by main.js. Auto-starts the first job at the
-    // garage, and finishes the active job when its target is reached.
-    tick() {
-      if (S.mode !== 'playing' && S.mode !== undefined) return;
-      const anchor = S.car ? S.car.pos : (S.player && S.player.pos);
-      if (!anchor) return;
-
-      if (!missions.current && S.missionIndex === 0 && list.length > 0) {
-        if (dist2(anchor.x, anchor.z, garage.x, garage.z) <= GARAGE_RADIUS * GARAGE_RADIUS) {
-          missions.start(0);
-          return;
-        }
-      }
-
-      const job = missions.current;
-      if (!job || !job.target) return;
-      if (dist2(anchor.x, anchor.z, job.target.x, job.target.z) <= COMPLETE_RADIUS * COMPLETE_RADIUS) {
-        finish(job);
-      }
-    },
-  };
-  // main.js prefers tick(), falls back to update().
-  missions.update = missions.tick;
-
-  function showBriefing(lines) {
-    if (S.dialogue && typeof S.dialogue.show === 'function') {
-      S.dialogue.show(lines);
-      return;
-    }
-    // Dialogue not initialised yet (init order): write the box by hand
-    // so a briefing is never silently lost.
-    const box = document.getElementById('dialogue');
-    const nameEl = document.getElementById('dlg-name');
-    const textEl = document.getElementById('dlg-text');
-    if (!box || !nameEl || !textEl || lines.length === 0) return;
-    nameEl.textContent = lines[0].speaker;
-    textEl.textContent = lines[0].text;
-    box.classList.remove('hidden');
-  }
-
-  function finish(job) {
-    missions.current = null;
-    missions.completed.push(job.id);
-    S.missionIndex = Math.min(job.index + 1, list.length);
-    if (S.crew) S.crew.active = false;
-    S.cash = (S.cash || 0) + job.reward;
-    if (S.respectDirector && typeof S.respectDirector.add === 'function') {
-      S.respectDirector.add(25, 'mission ' + job.id);
-    }
-    const toast = document.getElementById('toast');
-    if (toast) {
-      toast.textContent = 'JOB DONE: ' + job.title + ' +$' + job.reward;
-      toast.classList.remove('hidden');
-    }
-    showBriefing(job.done);
-  }
-
-  // Replace the state.js stand-in (its start() only set current) with
-  // the live object. Anything holding the old reference still sees a
-  // working start() through S.missions.
-  S.missions = missions;
-  return missions;
 }
-
-export default init;

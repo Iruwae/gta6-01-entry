@@ -1,67 +1,54 @@
-import * as THREE from '../vendor/three.module.min.js';
+// Solmar Bay — post effects (round 7 rebuild).
+// A cheap sunset colour grade done entirely through the renderer:
+// filmic tone mapping with an exposure that eases down as night
+// falls. No composer, no extra passes, no new render targets —
+// and every step is guarded, so a missing WebGL feature can only
+// ever leave the grade off, never break the frame.
+export function init(ctx) {
+  const S = ctx.state || ctx.S;
+  const renderer = ctx.renderer;
+  const T = ctx.THREE;
 
-// SOLMAR BAY — the light post pipeline. No composer, no example
-// modules (nothing offline to import): ACES tone mapping on the
-// renderer, a shared radial glow texture for lamp halos and the heli
-// spotlight, a CSS vignette, and a tiny flash helper for hits and
-// cutscene punches.
-export function init(S) {
-  const renderer = S.renderer;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.12;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  let exposure = 1.12;
+  let active = false;
 
-  const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 128;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.3, 'rgba(255,224,160,0.55)');
-  grad.addColorStop(0.65, 'rgba(255,200,120,0.16)');
-  grad.addColorStop(1, 'rgba(255,200,120,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 128, 128);
-  const glowTexture = new THREE.CanvasTexture(c);
-  S.glowTexture = glowTexture;
-
-  if (!document.getElementById('vignette')) {
-    const v = document.createElement('div');
-    v.id = 'vignette';
-    document.body.appendChild(v);
-  }
-  if (!document.getElementById('flash')) {
-    const f = document.createElement('div');
-    f.id = 'flash';
-    document.body.appendChild(f);
+  function applyGrade(night) {
+    if (!renderer) return;
+    try {
+      // Filmic tone mapping gives the sunset its warm roll-off.
+      const filmic = T && typeof T.ACESFilmicToneMapping !== 'undefined'
+        ? T.ACESFilmicToneMapping : 4;
+      if (renderer.toneMapping !== filmic) renderer.toneMapping = filmic;
+      const target = 1.12 - 0.3 * Math.max(0, Math.min(1, night));
+      exposure += (target - exposure) * 0.08;
+      renderer.toneMappingExposure = exposure;
+      active = true;
+    } catch (err) {
+      // A renderer that refuses the grade still renders the scene.
+      active = false;
+    }
   }
 
-  S.postfx = {
-    glowTexture,
-    setExposure(e) {
-      renderer.toneMappingExposure = e;
+  // Try once up front so the very first frame is already graded.
+  try {
+    applyGrade(S.dayNight && typeof S.dayNight.night === 'number' ? S.dayNight.night : 0);
+  } catch (err) {
+    active = false;
+  }
+
+  const postfx = {
+    setGrade(night) {
+      try { applyGrade(night); } catch (err) { /* grade is optional */ }
     },
-    flash(color, ms) {
-      const el = document.getElementById('flash');
-      if (!el) return;
-      el.style.background = color || 'rgba(255,240,200,0.85)';
-      el.style.opacity = '0.85';
-      window.setTimeout(() => {
-        el.style.opacity = '0';
-      }, ms || 130);
-    },
-    makeGlow(color, scale) {
-      const m = new THREE.SpriteMaterial({
-        map: glowTexture,
-        color: color || 0xffc27a,
-        transparent: true,
-        opacity: 0.85,
-        depthWrite: false,
-      });
-      const s = new THREE.Sprite(m);
-      s.scale.set(scale || 6, scale || 6, 1);
-      return s;
-    },
+    get exposure() { return exposure; },
+    get active() { return active; },
   };
-  return S.postfx;
+  ctx.api.postfx = postfx;
+  S.postfx = postfx;
+
+  ctx.updates.push(() => {
+    if (!renderer) return;
+    const night = S.dayNight && typeof S.dayNight.night === 'number' ? S.dayNight.night : 0;
+    try { applyGrade(night); } catch (err) { /* never break rendering */ }
+  });
 }

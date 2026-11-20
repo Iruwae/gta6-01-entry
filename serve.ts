@@ -1,85 +1,110 @@
-// A tiny static server for game/ (Node 22, standard library only), so an entry can be played
-// locally without a build step: `node serve.ts` serves game/ on http://localhost:8080.
-// It sends the MIME types a browser game needs, refuses any path outside game/, and otherwise
-// does nothing clever: this is a development convenience, not a web server for the internet.
-import { createReadStream, statSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// serve.ts — SOLMAR BAY dev server (GTA6-01 round 7 rebuild).
+//
+// Serves the static game/ folder on http://localhost:8080 so the game
+// can be opened in a desktop browser. This is a development convenience
+// only: no caching tricks, no compression, no directory listings, and
+// no path outside game/ is ever served.
+//
+// Usage:
+//   node serve.ts               (port 8080)
+//   node serve.ts --port 8123
+//   node serve.ts --port=8123
 
-const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const args = process.argv.slice(2);
-const portIndex = args.indexOf('--port');
-const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
-const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
+import { createServer } from "node:http";
+import { readFile, stat } from "node:fs/promises";
+import { extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.glb': 'model/gltf-binary',
-  '.gltf': 'model/gltf+json',
-  '.bin': 'application/octet-stream',
-  '.wasm': 'application/wasm',
-  '.wav': 'audio/wav',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
-  '.txt': 'text/plain; charset=utf-8',
+const HERE = resolve(fileURLToPath(new URL(".", import.meta.url)));
+const GAME_ROOT = join(HERE, "game");
+
+const TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
 };
 
-createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  // Health probe for automation (smoke tests, screenshot tooling): a tiny
-  // JSON answer that never touches the filesystem.
-  if (url.pathname === '/health') {
-    const body = JSON.stringify({ ok: true, game: 'solmar-bay', port });
-    response.writeHead(200, {
-      'content-type': 'application/json; charset=utf-8',
-      'content-length': Buffer.byteLength(body),
+function pickPort(): number {
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--port" && args[i + 1] !== undefined) {
+      const n = Number(args[i + 1]);
+      if (Number.isInteger(n) && n > 0 && n < 65536) return n;
+    }
+    if (arg.startsWith("--port=")) {
+      const n = Number(arg.slice("--port=".length));
+      if (Number.isInteger(n) && n > 0 && n < 65536) return n;
+    }
+  }
+  return 8080;
+}
+
+function notFound(res: import("node:http").ServerResponse): void {
+  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end("not found");
+}
+
+const server = createServer(async (req, res) => {
+  try {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("method not allowed");
+      return;
+    }
+    const raw = decodeURIComponent((req.url || "/").split("?")[0]);
+    const rel = raw === "/" ? "index.html" : raw.replace(/^\/+/, "");
+    const target = resolve(join(GAME_ROOT, rel));
+    if (target !== GAME_ROOT && !target.startsWith(GAME_ROOT + "/")) {
+      res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("forbidden");
+      return;
+    }
+    let file = target;
+    let info;
+    try {
+      info = await stat(file);
+    } catch {
+      notFound(res);
+      return;
+    }
+    if (info.isDirectory()) {
+      file = join(file, "index.html");
+      try {
+        info = await stat(file);
+      } catch {
+        notFound(res);
+        return;
+      }
+    }
+    if (!info.isFile()) {
+      notFound(res);
+      return;
+    }
+    const body = await readFile(file);
+    res.writeHead(200, {
+      "Content-Type":
+        TYPES[extname(file).toLowerCase()] || "application/octet-stream",
+      "Content-Length": body.length,
     });
-    response.end(body);
-    return;
+    res.end(req.method === "HEAD" ? undefined : body);
+  } catch (err) {
+    console.error("serve error:", err);
+    if (!res.headersSent) {
+      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+    }
+    res.end("server error");
   }
-  let pathname: string;
-  try {
-    pathname = decodeURIComponent(url.pathname);
-  } catch {
-    response.writeHead(400).end('bad request');
-    return;
-  }
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolve(join(root, normalize(pathname)));
-  if (file !== root && !file.startsWith(root + sep)) {
-    response.writeHead(403).end('forbidden');
-    return;
-  }
-  let size: number;
-  try {
-    const stats = statSync(file);
-    if (!stats.isFile()) throw new Error('not a file');
-    size = stats.size;
-  } catch {
-    response.writeHead(404).end('not found');
-    return;
-  }
-  response.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
-    'cache-control': 'no-store',
-  });
-  createReadStream(file).pipe(response);
-}).listen(port, '127.0.0.1', () => {
-  console.log(`game/ is on http://localhost:${port}`);
 });
-// r5b: QA screenshot staging runs through window.__solmar — see tools/shots.mjs.
-// r5b: the shots script serves game/ on :8903 with its own static server.
+
+const port = pickPort();
+server.listen(port, () => {
+  console.log(`SOLMAR BAY dev server: http://localhost:${port}/ (serving game/)`);
+});

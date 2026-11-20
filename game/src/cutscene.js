@@ -1,91 +1,67 @@
-// cutscene.js — intro flyover (round-5 rebuild, builder B2).
-// S.cutscene is null between scenes and { t } while one plays. A new
-// game starts it (we listen for #btn-new ourselves so the scene opens
-// even if nothing else drives it); KeyX or ten seconds ends it.
-//
-// NOTE (fix, second pass): ending the flyover is also what leaves the
-// main menu — the game sits in mode 'menu' while the cutscene plays,
-// and nothing else flips it to 'playing'. So end() sets S.mode to
-// 'playing' and hides the #menu overlay. Without this the menu layer
-// keeps covering the screen: dialogue clicks land on it, police never
-// spawn, and mouse fire never reaches the canvas.
+// SOLMAR BAY — cutscenes (round 7 rebuild, builder D).
+// The intro flyover plays when a new game starts: S.cutscene is true
+// and the cutscene overlay is visible. X (or a click on the overlay)
+// skips it — S.cutscene goes false, the overlay hides, and the game
+// resumes in playing mode. The same overlay serves short mission
+// briefings through ctx.api.playCutscene.
 
-const MAX_T = 10;
+const INTRO_TEXT = 'SOLMAR BAY — The sun is going down on the bay, and a nobody with a borrowed car is about to become somebody. Press X to skip.';
+const MAX_CUTSCENE_SECONDS = 16;
 
-export function init(S) {
-  if (typeof S.cutscene === 'undefined') S.cutscene = null;
+export function init(ctx) {
+  const S = ctx.state;
+  const pick = (id) => (ctx.dom && ctx.dom[id]) || document.getElementById(id);
+  let cutT = 0;
 
-  let panel = document.getElementById('cutscene');
-  if (!panel) {
-    panel = document.createElement('div');
-    panel.id = 'cutscene';
-    panel.className = 'hidden';
-    panel.innerHTML = '<div class="cut-title">SOLMAR BAY</div><div class="cut-sub">Every sunset is a getaway waiting to happen. Press X to skip.</div>';
-    document.body.appendChild(panel);
+  function playCutscene(text) {
+    S.cutscene = true;
+    S.mode = 'cutscene';
+    cutT = 0;
+    const textEl = pick('cutscene-text');
+    if (textEl) textEl.textContent = text || INTRO_TEXT;
+    const overlay = pick('cutscene');
+    if (overlay) overlay.classList.remove('hidden');
   }
 
-  function show() {
-    if (panel) panel.classList.remove('hidden');
-  }
-  function hide() {
-    if (panel) panel.classList.add('hidden');
-  }
-
-  function hideMenuOverlay() {
-    const menu = document.getElementById('menu');
-    if (menu) menu.classList.add('hidden');
+  function skipCutscene() {
+    if (!S.cutscene) return false;
+    S.cutscene = false;
+    const overlay = pick('cutscene');
+    if (overlay) overlay.classList.add('hidden');
+    if (S.mode === 'cutscene') S.mode = 'playing';
+    return true;
   }
 
-  function begin() {
-    S.cutscene = { t: 0 };
-    show();
-  }
-  function end() {
-    S.cutscene = null;
-    hide();
-    // The flyover is the last step of starting a new game: leaving
-    // it drops the player into the world and clears the menu layer.
-    if (S.mode === 'menu' || !S.mode) {
-      S.mode = 'playing';
-      hideMenuOverlay();
-    }
-  }
+  ctx.api.playCutscene = playCutscene;
+  ctx.api.startCutscene = playCutscene;
+  ctx.api.skipCutscene = skipCutscene;
+  ctx.api.endCutscene = skipCutscene;
 
-  function update(dt) {
-    if (S.cutscene) {
-      S.cutscene.t = (S.cutscene.t || 0) + (dt || 0.15);
-      show();
-      if (S.cutscene.t > MAX_T) end();
-    } else {
-      hide();
-    }
-  }
+  // The intro line is in place even if the menu shows the overlay
+  // directly instead of calling playCutscene.
+  try {
+    const textEl = pick('cutscene-text');
+    if (textEl && !textEl.textContent.trim()) textEl.textContent = INTRO_TEXT;
+  } catch (e) { /* ignore */ }
 
-  // New game: start the flyover just after the game's own handler runs,
-  // unless the game already started one itself. Never restart the intro
-  // while already playing (a focused New Game button + Enter/Space
-  // would otherwise replay it mid-game).
-  const btnNew = document.getElementById('btn-new');
-  if (btnNew) {
-    btnNew.addEventListener('click', () => {
-      setTimeout(() => {
-        if (!S.cutscene && S.mode !== 'playing') begin();
-      }, 120);
-    });
-  }
+  const overlay = pick('cutscene');
+  if (overlay) overlay.addEventListener('click', skipCutscene);
 
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyX' && S.cutscene) end();
+    if (e.repeat) return;
+    if (!S.cutscene) return;
+    if (e.code === 'KeyX' || e.code === 'Space' || e.code === 'Enter') skipCutscene();
   });
 
-  S.cutsceneDirector = { begin, end, update };
-
-  setInterval(() => {
-    try { update(0.15); } catch (e) { /* never break the page */ }
-  }, 150);
-  if (Array.isArray(S._moduleTicks)) S._moduleTicks.push((dt) => update(dt));
-
-  return S.cutsceneDirector;
+  ctx.updates.push((dt) => {
+    try {
+      if (!S.cutscene) return;
+      // Keep the overlay visible for as long as the flag is set, even if
+      // another module raised the flag without showing the overlay.
+      const el = pick('cutscene');
+      if (el && el.classList.contains('hidden')) el.classList.remove('hidden');
+      cutT += dt || 0;
+      if (cutT > MAX_CUTSCENE_SECONDS) skipCutscene();
+    } catch (e) { /* cutscenes must never break the loop */ }
+  });
 }
-
-export default init;

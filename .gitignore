@@ -1,12 +1,15 @@
+# SOLMAR BAY — ignore list, written fresh for the round 7 rebuild.
 node_modules/
-.DS_Store
-*.log
-.env
-.env.*
+.output/
+output/
 dist/
 build/
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+.env
+.env.local
+coverage/
 .vscode/
 .idea/
-*.tmp
-*.swp
-coverage/

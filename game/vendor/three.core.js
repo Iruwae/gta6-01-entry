@@ -1,3 +1,11 @@
+/*
+ * SOLMAR BAY — GTA6-01 round 7 rebuild.
+ *
+ * Vendored three.js core build (three.core.js).
+ * The library code below is UNMODIFIED — only this header comment was
+ * added for the round 7 re-authorship pass.
+ */
+
 /**
  * Minified by jsDelivr using Terser v5.48.0.
  * Original file: /npm/three@0.187.0/build/three.core.js

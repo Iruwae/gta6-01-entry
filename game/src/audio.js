@@ -1,127 +1,134 @@
-// audio.js — synthesized sound, no audio files (round-5 rebuild, B2).
-// A tiny WebAudio rig: an engine hum that follows speed and a short
-// jingle arpeggio whenever the radio station changes. Everything is
-// wrapped in try/catch and the context is created lazily on the first
-// user gesture, so a missing AudioContext can never crash the game.
+// SOLMAR BAY — sound (round 7 rebuild, builder D).
+// Synthesized WebAudio only: beeps, tones and a noise burst for gunfire.
+// No audio files, no network. Everything is guarded, so a browser with
+// no audio (or a headless one) never throws. The audio context is only
+// created after a real user gesture, and the engine hum follows the car.
 
-const JINGLE_NOTES = {
-  0: [523.25, 659.25, 783.99, 1046.5],
-  1: [440.0, 554.37, 659.25, 880.0],
-  2: [466.16, 587.33, 698.46, 932.33],
-  3: [392.0, 493.88, 587.33, 783.99],
-  4: [329.63, 415.3, 493.88, 659.25],
-  5: [261.63, 329.63, 392.0, 523.25],
-};
+export function init(ctx) {
+  const S = ctx.state;
+  let audioCtx = null;
+  let master = null;
+  let engineOsc = null;
+  let engineGain = null;
+  let engineOn = false;
 
-export function init(S) {
-  const audio = {
-    ctx: null,
-    master: null,
-    engineOsc: null,
-    engineOsc2: null,
-    engineGain: null,
-    enabled: true,
+  function ensure() {
+    if (audioCtx) return audioCtx;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      audioCtx = new AC();
+      master = audioCtx.createGain();
+      master.gain.value = 0.16;
+      master.connect(audioCtx.destination);
+      return audioCtx;
+    } catch (e) {
+      audioCtx = null;
+      return null;
+    }
+  }
 
-    ensure() {
-      if (audio.ctx) {
-        if (audio.ctx.state === 'suspended') audio.ctx.resume().catch(() => {});
-        return true;
+  // First gesture unlocks audio; nothing is created before this.
+  const unlock = () => { try { ensure(); } catch (e) { /* silent */ } };
+  window.addEventListener('pointerdown', unlock, { once: true });
+  window.addEventListener('keydown', unlock, { once: true });
+
+  function tone(freq, dur, type, vol, slideTo) {
+    try {
+      const ac = ensure();
+      if (!ac || !master) return;
+      if (ac.state === 'suspended') ac.resume().catch(() => {});
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq, ac.currentTime);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, ac.currentTime + dur);
+      gain.gain.setValueAtTime(vol || 0.5, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start();
+      osc.stop(ac.currentTime + dur);
+    } catch (e) { /* sound must never throw */ }
+  }
+
+  function noiseBurst(dur, vol) {
+    try {
+      const ac = ensure();
+      if (!ac || !master) return;
+      if (ac.state === 'suspended') ac.resume().catch(() => {});
+      const len = Math.max(1, Math.floor(ac.sampleRate * dur));
+      const buffer = ac.createBuffer(1, len, ac.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = ac.createBufferSource();
+      src.buffer = buffer;
+      const gain = ac.createGain();
+      gain.gain.value = vol || 0.7;
+      src.connect(gain);
+      gain.connect(master);
+      src.start();
+    } catch (e) { /* sound must never throw */ }
+  }
+
+  function setEngine(on, speed) {
+    try {
+      if (!on) {
+        if (engineGain) engineGain.gain.value = 0;
+        engineOn = false;
+        return;
       }
-      try {
-        const AC = window.AudioContext || window.webkitAudioContext;
-        if (!AC) return false;
-        audio.ctx = new AC();
-        audio.master = audio.ctx.createGain();
-        audio.master.gain.value = 0.14;
-        audio.master.connect(audio.ctx.destination);
-        const filter = audio.ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.value = 900;
-        filter.connect(audio.master);
-        audio.engineGain = audio.ctx.createGain();
-        audio.engineGain.gain.value = 0.0;
-        audio.engineGain.connect(filter);
-        audio.engineOsc = audio.ctx.createOscillator();
-        audio.engineOsc.type = 'sawtooth';
-        audio.engineOsc.frequency.value = 55;
-        audio.engineOsc.connect(audio.engineGain);
-        audio.engineOsc.start();
-        audio.engineOsc2 = audio.ctx.createOscillator();
-        audio.engineOsc2.type = 'square';
-        audio.engineOsc2.frequency.value = 110;
-        audio.engineOsc2.connect(audio.engineGain);
-        audio.engineOsc2.start();
-        return true;
-      } catch (e) {
-        audio.ctx = null;
-        return false;
+      const ac = ensure();
+      if (!ac || !master) return;
+      if (ac.state === 'suspended') ac.resume().catch(() => {});
+      if (!engineOsc) {
+        engineOsc = ac.createOscillator();
+        engineOsc.type = 'sawtooth';
+        engineGain = ac.createGain();
+        engineGain.gain.value = 0;
+        engineOsc.connect(engineGain);
+        engineGain.connect(master);
+        engineOsc.start();
       }
-    },
+      const mph = typeof speed === 'number' ? speed : 0;
+      engineOsc.frequency.setValueAtTime(48 + mph * 1.4, ac.currentTime);
+      engineGain.gain.value = 0.05;
+      engineOn = true;
+    } catch (e) { /* sound must never throw */ }
+  }
 
-    setSpeed(v) {
-      try {
-        if (!audio.ctx || !audio.engineOsc) return;
-        const speed = Math.max(0, v || 0);
-        const f = 52 + speed * 2.4;
-        audio.engineOsc.frequency.setTargetAtTime(f, audio.ctx.currentTime, 0.08);
-        if (audio.engineOsc2) {
-          audio.engineOsc2.frequency.setTargetAtTime(f * 2, audio.ctx.currentTime, 0.08);
-        }
-        if (audio.engineGain) {
-          const g = S.car ? 0.05 + Math.min(0.1, speed * 0.002) : 0.0;
-          audio.engineGain.gain.setTargetAtTime(g, audio.ctx.currentTime, 0.1);
-        }
-      } catch (e) { /* synth is best-effort */ }
-    },
-
-    blip(freq, when, dur) {
-      try {
-        if (!audio.ctx || !audio.master) return;
-        const o = audio.ctx.createOscillator();
-        const g = audio.ctx.createGain();
-        o.type = 'triangle';
-        o.frequency.value = freq;
-        g.gain.setValueAtTime(0.0001, when);
-        g.gain.exponentialRampToValueAtTime(0.22, when + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
-        o.connect(g);
-        g.connect(audio.master);
-        o.start(when);
-        o.stop(when + dur + 0.05);
-      } catch (e) { /* synth is best-effort */ }
-    },
-
-    jingle(station) {
-      try {
-        if (!audio.ensure()) return;
-        const notes = JINGLE_NOTES[station] || JINGLE_NOTES[0];
-        const t0 = audio.ctx.currentTime + 0.03;
-        notes.forEach((n, i) => audio.blip(n, t0 + i * 0.09, 0.16));
-      } catch (e) { /* synth is best-effort */ }
-    },
-
-    update(dt) {
-      try {
-        if (!audio.ctx) return;
-        const v = S.car ? (S.car.speed || 0) : 0;
-        audio.setSpeed(v);
-      } catch (e) { /* synth is best-effort */ }
-    },
+  const sfx = {
+    click() { tone(880, 0.06, 'square', 0.25); },
+    shot() { noiseBurst(0.14, 0.8); tone(160, 0.1, 'square', 0.35, 60); },
+    pickup() { tone(660, 0.09, 'sine', 0.4); setTimeout(() => tone(990, 0.12, 'sine', 0.4), 70); },
+    coin() { tone(1320, 0.08, 'sine', 0.35); setTimeout(() => tone(1760, 0.14, 'sine', 0.3), 80); },
+    denied() { tone(220, 0.16, 'square', 0.3, 160); },
+    engine(on, speed) { setEngine(on, speed); },
   };
 
-  S.audio = audio;
+  ctx.api.audio = sfx;
+  ctx.api.sfx = sfx;
+  ctx.api.playClick = () => sfx.click();
+  ctx.api.playShot = () => sfx.shot();
+  ctx.api.playPickup = () => sfx.pickup();
+  ctx.api.setEngineSound = (on, speed) => sfx.engine(on, speed);
 
-  // Autoplay policy: the context may only start after a gesture.
-  const wake = () => { try { audio.ensure(); } catch (e) {} };
-  window.addEventListener('keydown', wake);
-  window.addEventListener('pointerdown', wake);
-
-  setInterval(() => {
-    try { audio.update(0.2); } catch (e) { /* never break the page */ }
-  }, 200);
-  if (Array.isArray(S._moduleTicks)) S._moduleTicks.push((dt) => audio.update(dt));
-
-  return audio;
+  // The engine hum follows the car; it stays silent until audio was
+  // unlocked by a gesture, and setEngine no-ops until then.
+  ctx.updates.push(() => {
+    try {
+      if (!audioCtx) return;
+      if (S.mode !== 'playing') {
+        if (engineOn) setEngine(false, 0);
+        return;
+      }
+      const car = S.car;
+      let speed = 0;
+      if (car) {
+        if (typeof car.speed === 'number') speed = car.speed;
+        else if (car.vel && typeof car.vel.length === 'function') speed = car.vel.length();
+      }
+      setEngine(!!car, speed);
+    } catch (e) { /* sound must never break the loop */ }
+  });
 }
-
-export default init;

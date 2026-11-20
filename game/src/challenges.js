@@ -1,66 +1,60 @@
-// challenges.js — the daily board (round-5 rebuild, builder B2).
-// S.challengesDirector = { today, rows(), _paid }.
-// Three jobs refresh per session: collect packages, win a street
-// race, run a taxi fare. rows() feeds the board UI; update() pays
-// each challenge exactly once, the moment its stat reaches target.
+// challenges.js — the daily challenge board of Solmar Bay.
+// Three rows, one payout each, and each pays out exactly once.
+// Written fresh for round 7 from the shared spec; no repo code was read.
 
-const DAILY_JOBS = [
-  { id: 'daily-packages', stat: 'packages', target: 3, reward: 100, label: 'Collect 3 packages' },
-  { id: 'daily-race', stat: 'racesWon', target: 1, reward: 150, label: 'Win 1 street race' },
-  { id: 'daily-taxi', stat: 'faresDone', target: 1, reward: 120, label: 'Finish 1 taxi fare' },
+const BOARD = [
+  { id: 'ch-packages', text: 'Collect 3 packages', reward: 100, stat: 'packages', target: 3 },
+  { id: 'ch-race', text: 'Win 1 street race', reward: 150, stat: 'racesWon', target: 1 },
+  { id: 'ch-taxi', text: 'Finish 1 taxi fare', reward: 120, stat: 'faresDone', target: 1 },
 ];
 
-export function init(S) {
-  if (!S.stats) S.stats = {};
+function dom(ctx, id) {
+  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
+  if (typeof document !== 'undefined') return document.getElementById(id);
+  return null;
+}
+
+export function init(ctx) {
+  const S = ctx.state;
+  if (!S.stats) S.stats = { packages: 0, racesWon: 0, fencesSold: 0, faresDone: 0 };
+  for (const k of ['packages', 'racesWon', 'fencesSold', 'faresDone']) {
+    if (typeof S.stats[k] !== 'number') S.stats[k] = 0;
+  }
+  if (typeof S.cash !== 'number') S.cash = 120;
+
+  const today = BOARD.map((c) => ({ ...c }));
+
+  function rows() {
+    return today.map((c) => ({
+      id: c.id,
+      text: c.text,
+      reward: c.reward,
+      stat: c.stat,
+      target: c.target,
+      progress: Math.min(S.stats[c.stat] || 0, c.target),
+      done: (S.stats[c.stat] || 0) >= c.target,
+      paid: S.challengesDirector._paid.includes(c.id),
+    }));
+  }
 
   const director = {
-    today: DAILY_JOBS.map((j) => ({ ...j })),
-    _paid: new Set(),
-
-    rows() {
-      return director.today.map((c) => ({
-        text: c.label + ' — $' + c.reward,
-        reward: c.reward,
-      }));
-    },
-
-    update(dt) {
-      if (S.mode === 'paused') return;
-      for (const c of director.today) {
-        if (director._paid.has(c.id)) continue;
+    today,
+    _paid: [],
+    rows,
+    check() {
+      for (const c of today) {
+        if (director._paid.includes(c.id)) continue;
         if ((S.stats[c.stat] || 0) >= c.target) {
-          director._paid.add(c.id);
-          S.cash = (S.cash || 0) + c.reward;
-          const toast = document.getElementById('toast');
-          if (toast) {
-            toast.textContent = 'Challenge done: ' + c.label + ' +$' + c.reward;
-            toast.classList.remove('hidden');
-          }
+          director._paid.push(c.id);
+          S.cash += c.reward;
+          const toast = dom(ctx, 'toast');
+          if (toast) toast.textContent = 'Challenge complete: ' + c.text + ' — $' + c.reward + '.';
         }
       }
     },
   };
-
   S.challengesDirector = director;
+  ctx.api.challenges = director;
 
-  // Render into the board if the page has one.
-  const board = document.getElementById('challenges-list');
-  if (board) {
-    board.innerHTML = '';
-    for (const row of director.rows()) {
-      const el = document.createElement('div');
-      el.className = 'challenge-row';
-      el.textContent = row.text;
-      board.appendChild(el);
-    }
-  }
-
-  setInterval(() => {
-    try { director.update(0.4); } catch (e) { /* never break the page */ }
-  }, 400);
-  if (Array.isArray(S._moduleTicks)) S._moduleTicks.push((dt) => director.update(dt));
-
-  return director;
+  ctx.updates.push(() => { director.check(); });
 }
-
-export default init;

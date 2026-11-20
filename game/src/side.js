@@ -1,259 +1,165 @@
-// side.js — the things to do between story jobs.
-//
-// Three activities, all driven off the config anchors:
-//   - street races: T on the start pad, then four checkpoint gates in
-//     order. Finish them all and the prize lands in your pocket.
-//   - taxi fares: Y at the stand, then drive the passenger to the
-//     beacon. The fare grows with the trip.
-//   - packages: twelve glowing parcels hidden around the bay. Walk
-//     or drive over one to pocket it.
-//
-// Gates, beacons and parcels are real meshes in the scene, so the
-// screenshot staging can frame them — a race gate is a tall orange
-// ring you can see from down the road.
+// SOLMAR BAY — side activities (round 7 rebuild, builder D).
+// Three ways to earn on the side: street races (T at the start pad —
+// four checkpoint gates, $300 for the win), taxi fares (Y at the taxi
+// stand — pick up, drop off, $120), and twelve collectible packages
+// scattered around the city ($50 each). The live state lives on
+// S.sideActivities exactly as the rest of the game expects it.
 
-import * as THREE from '../vendor/three.module.min.js';
+const RACE_PAD = { x: -60, z: -60 };
+const RACE_GATES = [
+  { x: 60, z: -60 },
+  { x: 60, z: 60 },
+  { x: -60, z: 60 },
+  { x: -60, z: -60 },
+];
+const RACE_PRIZE = 300;
+const TAXI_STAND = { x: 68, z: 60 };
+const TAXI_DEST = { x: 30, z: 30 };
+const TAXI_FARE = 120;
+const PACKAGE_SPOTS = [
+  { x: -120, z: 120 }, { x: 120, z: -120 }, { x: -120, z: -120 }, { x: 140, z: 140 },
+  { x: -150, z: 0 }, { x: 150, z: 0 }, { x: 0, z: -150 }, { x: 0, z: 150 },
+  { x: -150, z: -150 }, { x: 150, z: 150 }, { x: -60, z: 150 }, { x: 60, z: -150 },
+];
+const PACKAGE_PAY = 50;
 
-const PAD_RADIUS = 8;
-const GATE_RADIUS = 9;
-const STAND_RADIUS = 8;
-const DROP_RADIUS = 8;
-const PARCEL_RADIUS = 4;
-
-function dist2(ax, az, bx, bz) {
-  const dx = ax - bx;
-  const dz = az - bz;
-  return dx * dx + dz * dz;
+function near(ax, az, bx, bz, r) {
+  return Math.hypot(ax - bx, az - bz) < r;
 }
 
-function say(text) {
-  const toast = document.getElementById('toast');
-  if (!toast) return;
-  toast.textContent = text;
-  toast.classList.remove('hidden');
-}
+export function init(ctx) {
+  const S = ctx.state;
+  const THREE = ctx.THREE;
 
-export function init(S) {
-  const cfg = S.config || {};
-  const raceCfg = cfg.race || {};
-  const taxiCfg = cfg.taxi || {};
-  const parcelSpots = cfg.packages || [];
-  const pad = raceCfg.start || { x: -60, z: -60 };
-  const gates = raceCfg.gates || [];
-  const prize = raceCfg.prize || 300;
-  const stand = (taxiCfg.stand || { x: 68, z: 60 });
-  const destinations = taxiCfg.destinations || [];
-  const minFare = taxiCfg.minFare || 80;
-
-  // --- live state, hung off S.sideActivities ---------------------------
-  const race = {
-    active: false,
-    gate: 0,
-    gates: gates.map((g) => ({ x: g.x, z: g.z })),
-    prize,
-    start: { x: pad.x, z: pad.z },
-  };
-  const taxi = {
-    active: false,
-    dest: null,
-    fare: 0,
-    passenger: '',
-  };
-  const packages = {
-    spots: parcelSpots.map((p) => ({ x: p.x, z: p.z, taken: false, mesh: null })),
-    reward: cfg.packageReward || 50,
-  };
-  S.sideActivities = { race, taxi, packages };
-  if (!S.stats) S.stats = { racesWon: 0, faresDone: 0, packages: 0, fencesSold: 0 };
-
-  // --- scene dressing ----------------------------------------------------
-  // Gate rings: tall, orange, upright. Only the next gate glows bright;
-  // the rest wait dimmed. All of them hide when no race is running.
-  const gateMeshes = [];
-  function buildGates() {
-    if (!S.scene) return;
-    const ringGeo = new THREE.TorusGeometry(4, 0.35, 10, 28);
-    gates.forEach((g, i) => {
-      const mat = new THREE.MeshStandardMaterial({
-        color: 0xff7a3c, emissive: 0x993300, roughness: 0.5,
-      });
-      const ring = new THREE.Mesh(ringGeo, mat);
-      ring.position.set(g.x, 3.2, g.z);
-      ring.visible = false;
-      S.scene.add(ring);
-      gateMeshes.push(ring);
-    });
-    // The start pad: a flat amber disc so the pad reads on the road.
-    const padGeo = new THREE.CylinderGeometry(5, 5, 0.15, 24);
-    const padMat = new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0x664400 });
-    const disc = new THREE.Mesh(padGeo, padMat);
-    disc.position.set(pad.x, 0.1, pad.z);
-    S.scene.add(disc);
+  // Make sure the shared side-activity shape exists, whatever the state
+  // module already built.
+  if (!S.sideActivities || typeof S.sideActivities !== 'object') {
+    S.sideActivities = { taxi: { active: false }, race: { active: false } };
   }
+  if (!S.sideActivities.taxi) S.sideActivities.taxi = { active: false };
+  if (!S.sideActivities.race) S.sideActivities.race = { active: false };
+  const race = S.sideActivities.race;
+  const taxi = S.sideActivities.taxi;
+  race.active = !!race.active;
+  taxi.active = !!taxi.active;
+  if (!Array.isArray(race.gates) || race.gates.length === 0) race.gates = RACE_GATES.map((g) => ({ x: g.x, z: g.z }));
+  if (typeof race.gateIndex !== 'number') race.gateIndex = 0;
 
-  // One beacon per taxi drop: a slim cyan pillar at the destination.
-  let beacon = null;
-  function showBeacon(dest) {
-    hideBeacon();
-    if (!S.scene || !dest) return;
-    const geo = new THREE.CylinderGeometry(0.6, 0.6, 14, 10);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x22d3ee, emissive: 0x0e7490, transparent: true, opacity: 0.75,
-    });
-    beacon = new THREE.Mesh(geo, mat);
-    beacon.position.set(dest.x, 7, dest.z);
-    S.scene.add(beacon);
+  // Twelve packages, with a small golden marker each in the 3D scene.
+  if (!Array.isArray(S.packages) || S.packages.length !== 12) {
+    S.packages = PACKAGE_SPOTS.map((s) => ({ x: s.x, z: s.z, taken: false, mesh: null }));
   }
-  function hideBeacon() {
-    if (beacon && S.scene) S.scene.remove(beacon);
-    beacon = null;
-  }
-
-  // Parcels: small gold boxes, one per spot, spinning slowly in tick.
-  function buildParcels() {
-    if (!S.scene) return;
-    const geo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
-    for (const spot of packages.spots) {
-      const mat = new THREE.MeshStandardMaterial({ color: 0xffd24a, emissive: 0x665500, roughness: 0.4 });
-      const box = new THREE.Mesh(geo, mat);
-      box.position.set(spot.x, 1, spot.z);
-      S.scene.add(box);
-      spot.mesh = box;
+  try {
+    if (ctx.scene && THREE) {
+      const geo = new THREE.BoxGeometry(1.4, 1.4, 1.4);
+      for (const pkg of S.packages) {
+        if (pkg.mesh) continue;
+        const mat = new THREE.MeshStandardMaterial({ color: 0xffd166, emissive: 0xa87600, emissiveIntensity: 0.7 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(pkg.x, 1.2, pkg.z);
+        ctx.scene.add(mesh);
+        pkg.mesh = mesh;
+      }
     }
+  } catch (e) { /* packages still work without meshes */ }
+
+  const toast = (msg) => { try { if (ctx.api.showToast) ctx.api.showToast(msg); } catch (e) { /* silent */ } };
+  const blip = () => { try { if (ctx.api.audio && ctx.api.audio.pickup) ctx.api.audio.pickup(); } catch (e) { /* silent */ } };
+
+  function actorPos() {
+    if (S.car && S.car.pos) return S.car.pos;
+    return S.player && S.player.pos;
   }
 
-  buildGates();
-  buildParcels();
-
-  // --- races ---------------------------------------------------------------
-  let gateFlash = 0;
   function startRace() {
+    if (race.active) return false;
+    const p = actorPos();
+    if (!p || !near(p.x, p.z, RACE_PAD.x, RACE_PAD.z, 18)) {
+      toast('The race starts at the pad on the west side — get close and press T.');
+      return false;
+    }
     race.active = true;
-    race.gate = 0;
-    gateMeshes.forEach((m, i) => {
-      m.visible = true;
-      m.material.emissive.setHex(i === 0 ? 0xff5500 : 0x331100);
-    });
-    say('RACE: hit all ' + gates.length + ' gates — $' + prize + ' to the winner');
+    race.gateIndex = 0;
+    toast('Street race! Hit all 4 gates — $' + RACE_PRIZE + ' if you win.');
+    return true;
   }
 
-  function raceTick(anchor) {
-    if (!race.active) return;
-    if (race.gate >= gates.length) return;
-    const g = gates[race.gate];
-    if (!g) return;
-    if (dist2(anchor.x, anchor.z, g.x, g.z) <= GATE_RADIUS * GATE_RADIUS) {
-      race.gate += 1;
-      gateFlash = 1;
-      gateMeshes.forEach((m, i) => {
-        m.material.emissive.setHex(i === race.gate ? 0xff5500 : 0x331100);
-      });
-      if (race.gate >= gates.length) {
-        race.active = false;
-        gateMeshes.forEach((m) => { m.visible = false; });
-        S.cash = (S.cash || 0) + prize;
-        S.stats.racesWon = (S.stats.racesWon || 0) + 1;
-        say('RACE WON: +$' + prize);
-        if (S.respectDirector && typeof S.respectDirector.add === 'function') {
-          S.respectDirector.add(15, 'race win');
-        }
-      } else {
-        say('GATE ' + race.gate + '/' + gates.length + ' — next gate lit');
-      }
+  function startTaxi() {
+    if (taxi.active) return false;
+    const p = actorPos();
+    if (!p || !near(p.x, p.z, TAXI_STAND.x, TAXI_STAND.z, 16)) {
+      toast('The taxi stand is on the east side — get close and press Y.');
+      return false;
     }
-  }
-
-  // --- taxi ------------------------------------------------------------------
-  let destCursor = 0;
-  function startFare() {
-    if (destinations.length === 0) return;
-    const dest = destinations[destCursor % destinations.length];
-    destCursor += 1;
-    const dx = dest.x - stand.x;
-    const dz = dest.z - stand.z;
-    const trip = Math.sqrt(dx * dx + dz * dz);
     taxi.active = true;
-    taxi.dest = { x: dest.x, z: dest.z };
-    taxi.fare = minFare + Math.round(trip / 25) * 10;
-    taxi.passenger = 'FARE';
-    showBeacon(taxi.dest);
-    say('TAXI: passenger wants (' + dest.x + ', ' + dest.z + ') — fare $' + taxi.fare);
+    taxi.dest = { x: TAXI_DEST.x, z: TAXI_DEST.z };
+    taxi.fare = TAXI_FARE;
+    taxi.passenger = 'a night-shift nurse';
+    toast('Fare picked up — drop your passenger off downtown.');
+    return true;
   }
 
-  function taxiTick(anchor) {
-    if (!taxi.active || !taxi.dest) return;
-    if (dist2(anchor.x, anchor.z, taxi.dest.x, taxi.dest.z) <= DROP_RADIUS * DROP_RADIUS) {
-      const fare = taxi.fare;
-      taxi.active = false;
-      taxi.dest = null;
-      taxi.fare = 0;
-      hideBeacon();
-      S.cash = (S.cash || 0) + fare;
-      S.stats.faresDone = (S.stats.faresDone || 0) + 1;
-      say('FARE DONE: +$' + fare);
-    }
+  function collectPackage(pkg) {
+    pkg.taken = true;
+    try { if (pkg.mesh) pkg.mesh.visible = false; } catch (e) { /* ignore */ }
+    if (S.stats) S.stats.packages = (S.stats.packages || 0) + 1;
+    S.cash = (S.cash || 0) + PACKAGE_PAY;
+    toast('Package found — +$' + PACKAGE_PAY + '.');
+    blip();
   }
 
-  // --- packages ----------------------------------------------------------------
-  function parcelsTick(anchor, dt) {
-    for (const spot of packages.spots) {
-      if (spot.taken) continue;
-      if (spot.mesh) spot.mesh.rotation.y += dt * 1.5;
-      if (dist2(anchor.x, anchor.z, spot.x, spot.z) <= PARCEL_RADIUS * PARCEL_RADIUS) {
-        spot.taken = true;
-        if (spot.mesh && S.scene) S.scene.remove(spot.mesh);
-        S.stats.packages = (S.stats.packages || 0) + 1;
-        S.cash = (S.cash || 0) + packages.reward;
-        say('PACKAGE FOUND: +$' + packages.reward + ' (' + S.stats.packages + '/12)');
-      }
-    }
-  }
+  ctx.api.startRace = startRace;
+  ctx.api.startTaxi = startTaxi;
+  ctx.api.racePad = RACE_PAD;
+  ctx.api.taxiStand = TAXI_STAND;
 
-  // --- keys + frame ---------------------------------------------------------------
-  let prevKeys = {};
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    if (S.mode !== 'playing') return;
+    if (e.code === 'KeyT') startRace();
+    else if (e.code === 'KeyY') startTaxi();
+  });
 
-  function tick(dt) {
-    const keys = S.keys || {};
-    const pressedT = !!keys.KeyT && !prevKeys.KeyT;
-    const pressedY = !!keys.KeyY && !prevKeys.KeyY;
-    prevKeys = { ...keys };
-    if (S.mode !== 'playing' || S.cutscene) return;
-    const anchor = S.car ? S.car.pos : (S.player && S.player.pos);
-    if (!anchor) return;
-
-    if (pressedT) {
+  ctx.updates.push(() => {
+    try {
+      const p = actorPos();
+      if (!p) return;
+      // Street race gates.
       if (race.active) {
-        say('Race already running — gate ' + (race.gate + 1) + '/' + gates.length);
-      } else if (!S.car) {
-        say('Races are driven — get in a car and come back to the start pad.');
-      } else if (dist2(anchor.x, anchor.z, pad.x, pad.z) <= PAD_RADIUS * PAD_RADIUS) {
-        startRace();
-      } else {
-        say('The street race starts at the pad downtown — look for the amber disc.');
+        const gate = race.gates[race.gateIndex];
+        if (gate && near(p.x, p.z, gate.x, gate.z, 14)) {
+          race.gateIndex += 1;
+          blip();
+          if (race.gateIndex >= race.gates.length) {
+            race.active = false;
+            if (S.stats) S.stats.racesWon = (S.stats.racesWon || 0) + 1;
+            S.cash = (S.cash || 0) + RACE_PRIZE;
+            toast('Race won! +$' + RACE_PRIZE + '.');
+            try {
+              if (S.banterDirector && typeof S.banterDirector.raceWin === 'function') S.banterDirector.raceWin();
+            } catch (e) { /* banter is optional */ }
+          } else {
+            toast('Gate ' + race.gateIndex + ' of ' + race.gates.length + ' — keep going!');
+          }
+        }
       }
-    }
-
-    if (pressedY) {
-      if (taxi.active) {
-        say('Fare already running — follow the beacon.');
-      } else if (!S.car) {
-        say('Fares need a car — pick one up first.');
-      } else if (dist2(anchor.x, anchor.z, stand.x, stand.z) <= STAND_RADIUS * STAND_RADIUS) {
-        startFare();
-      } else {
-        say('The taxi stand is by the harbor road — look for the fares.');
+      // Taxi drop-off.
+      if (taxi.active && taxi.dest) {
+        if (near(p.x, p.z, taxi.dest.x, taxi.dest.z, 14)) {
+          taxi.active = false;
+          if (S.stats) S.stats.faresDone = (S.stats.faresDone || 0) + 1;
+          S.cash = (S.cash || 0) + (taxi.fare || TAXI_FARE);
+          toast('Fare delivered — +$' + (taxi.fare || TAXI_FARE) + '.');
+          blip();
+        }
       }
-    }
-
-    if (gateFlash > 0) gateFlash = Math.max(0, gateFlash - dt);
-    raceTick(anchor);
-    taxiTick(anchor);
-    parcelsTick(anchor, dt);
-  }
-
-  S._tick.push(tick);
-  S.side = { race, taxi, packages, startRace, startFare };
-  return S.side;
+      // Packages.
+      if (Array.isArray(S.packages)) {
+        for (const pkg of S.packages) {
+          if (!pkg || pkg.taken) continue;
+          if (near(p.x, p.z, pkg.x, pkg.z, 8)) collectPackage(pkg);
+        }
+      }
+    } catch (e) { /* side activities must never break the loop */ }
+  });
 }
-
-export default init;

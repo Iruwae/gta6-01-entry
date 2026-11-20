@@ -1,6 +1,33 @@
-// SOLMAR BAY — one seeded stream so the city layout is identical
-// every boot. mulberry32: tiny, fast, and good enough for streets.
-function mulberry32(seed) {
+// SOLMAR BAY — small random helpers for the GTA6-01 round 7 rebuild.
+// Plain functions, no state of their own except an optional seeded
+// generator for anything that needs a repeatable shuffle.
+
+export function rand(min = 0, max = 1) {
+  return min + Math.random() * (max - min);
+}
+
+export function randInt(min, max) {
+  return Math.floor(rand(min, max + 1));
+}
+
+export function pick(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+export function chance(p) {
+  return Math.random() < p;
+}
+
+export function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+export function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+// A tiny deterministic generator (mulberry32) for seeded shuffles.
+export function seeded(seed) {
   let a = seed >>> 0;
   return function next() {
     a |= 0;
@@ -11,18 +38,21 @@ function mulberry32(seed) {
   };
 }
 
-export function init(S) {
-  const seed = 20261120;
-  const rng = mulberry32(seed);
-  S.seed = seed;
-  S.rng = rng;
-  S.rand = (a, b) => {
-    if (a === undefined) return rng();
-    if (b === undefined) return rng() * a;
-    return a + rng() * (b - a);
-  };
-  S.randInt = (a, b) => Math.floor(a + rng() * (b - a + 1));
-  S.pick = (arr) => arr[Math.floor(rng() * arr.length)];
-  S.chance = (p) => rng() < p;
-  return rng;
+export function shuffle(list, rng = Math.random) {
+  const out = list.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
+}
+
+export const random = { rand, randInt, pick, chance, clamp, lerp, seeded, shuffle };
+export default random;
+
+// The boot hub calls this early so modules can reach the helpers on ctx.
+export function init(ctx) {
+  ctx.random = random;
 }

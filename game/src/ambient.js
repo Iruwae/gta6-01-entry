@@ -1,73 +1,111 @@
+// Solmar Bay — ambient life (round 7 rebuild).
+// Birds circling the bay, flags waving over the Strip, neon signs
+// flickering, and a slow harbour haze of gulls. Pure flavour: no
+// gameplay, no collisions, a few dozen cheap meshes and a light
+// per-frame update.
 import * as THREE from '../vendor/three.module.min.js';
 
-// SOLMAR BAY — sky life: slow clouds drifting over the bay and a few
-// birds circling the rooftops. Pure atmosphere, zero gameplay, one
-// cheap tick.
-export function init(S) {
-  const scene = S.scene;
-  const rng = S.rng;
+export function init(ctx) {
+  const S = ctx.state || ctx.S;
+  const scene = ctx.scene;
+  const T = ctx.THREE || THREE;
 
-  const cloudMat = new THREE.MeshBasicMaterial({
-    color: 0xffe8d8,
-    transparent: true,
-    opacity: 0.55,
-    fog: false,
-  });
-  const cloudGeo = new THREE.SphereGeometry(1, 10, 8);
-  const clouds = [];
-  for (let i = 0; i < 6; i++) {
-    const puff = new THREE.Group();
-    const n = 3;
-    for (let j = 0; j < n; j++) {
-      const ball = new THREE.Mesh(cloudGeo, cloudMat);
-      ball.position.set(j * 7 - n * 3.5, rng() * 2, rng() * 4 - 2);
-      ball.scale.set(7 + rng() * 4, 2.6 + rng() * 1.4, 4 + rng() * 2);
-      puff.add(ball);
-    }
-    puff.position.set(-220 + rng() * 440, 58 + rng() * 26, -180 + rng() * 360);
-    scene.add(puff);
-    clouds.push({ puff, speed: 0.6 + rng() * 0.9 });
-  }
-
-  const birdMat = new THREE.MeshBasicMaterial({ color: 0x1a1a22 });
+  // ---- birds: dark dart shapes circling high over the city -----------
+  const birdMat = new T.MeshBasicMaterial({ color: 0x1a1a22 });
+  const wingGeo = new T.BoxGeometry(1.6, 0.06, 0.35);
   const birds = [];
-  for (let i = 0; i < 4; i++) {
-    const bird = new THREE.Group();
-    const wingGeo = new THREE.BoxGeometry(1.6, 0.06, 0.5);
-    const left = new THREE.Mesh(wingGeo, birdMat);
+  for (let i = 0; i < 6; i++) {
+    const grp = new T.Group();
+    const left = new T.Mesh(wingGeo, birdMat);
     left.position.x = -0.8;
-    const right = new THREE.Mesh(wingGeo, birdMat);
+    grp.add(left);
+    const right = new T.Mesh(wingGeo, birdMat);
     right.position.x = 0.8;
-    bird.add(left, right);
-    scene.add(bird);
+    grp.add(right);
+    scene.add(grp);
     birds.push({
-      bird, left, right,
-      radius: 34 + i * 13,
-      height: 30 + i * 5,
-      angle: rng() * Math.PI * 2,
-      speed: 0.14 + rng() * 0.08,
-      flap: rng() * 10,
+      mesh: grp, left, right,
+      r: 60 + i * 22,
+      h: 42 + (i % 3) * 12,
+      a: (i / 6) * Math.PI * 2,
+      speed: 0.05 + (i % 3) * 0.015,
+      cx: -40 + (i % 3) * 40,
+      cz: 20 - (i % 2) * 60,
     });
   }
 
-  const tick = (dt) => {
-    for (const c of clouds) {
-      c.puff.position.x += c.speed * dt;
-      if (c.puff.position.x > 250) c.puff.position.x = -250;
-    }
+  // ---- flags over the Strip and downtown ------------------------------
+  const flagCols = [0xff5a7a, 0x2fb3c9, 0xffc23d, 0x7a4ad8];
+  const flags = [];
+  for (let i = 0; i < 8; i++) {
+    const fx = -70 + i * 20;
+    const fz = i % 2 === 0 ? 128 : -8;
+    const pole = new T.Mesh(
+      new T.CylinderGeometry(0.08, 0.1, 7, 6),
+      new T.MeshLambertMaterial({ color: 0x3a3a40 })
+    );
+    pole.position.set(fx, 3.5, fz);
+    scene.add(pole);
+    const cloth = new T.Mesh(
+      new T.PlaneGeometry(2.6, 1.4),
+      new T.MeshLambertMaterial({ color: flagCols[i % flagCols.length], side: T.DoubleSide })
+    );
+    cloth.position.set(fx + 1.35, 6.2, fz);
+    scene.add(cloth);
+    flags.push({ cloth, phase: i * 0.9 });
+  }
+
+  // ---- neon signs: bright boxes that flicker on the Strip -------------
+  const neonCols = [0xff4d8a, 0x2fd8ff, 0xffc23d, 0x3dd68c];
+  const signs = [];
+  for (let i = 0; i < 6; i++) {
+    const mat = new T.MeshBasicMaterial({ color: neonCols[i % neonCols.length] });
+    const sign = new T.Mesh(new T.BoxGeometry(5 + (i % 3), 1, 0.3), mat);
+    sign.position.set(-60 + i * 24, 8 + (i % 2) * 2, 131);
+    scene.add(sign);
+    signs.push({ mesh: sign, mat, seed: i * 1.7 });
+  }
+
+  // ---- harbour gulls: two slow dots out over the water edge -----------
+  const gullMat = new T.MeshBasicMaterial({ color: 0xdddddd });
+  const gulls = [];
+  for (let i = 0; i < 3; i++) {
+    const g = new T.Mesh(new T.SphereGeometry(0.5, 6, 4), gullMat);
+    g.scale.set(2.2, 0.5, 0.6);
+    scene.add(g);
+    gulls.push({ mesh: g, a: i * 2.1, r: 30 + i * 8 });
+  }
+
+  ctx.api.ambient = { birds, flags, signs, gulls };
+  S.ambient = ctx.api.ambient;
+
+  ctx.updates.push((dt, t) => {
     for (const b of birds) {
-      b.angle += b.speed * dt;
-      b.flap += dt * 9;
-      const x = Math.cos(b.angle) * b.radius;
-      const z = Math.sin(b.angle) * b.radius;
-      b.bird.position.set(x, b.height + Math.sin(b.flap * 0.5) * 1.2, z);
-      b.bird.rotation.y = -b.angle;
-      const flap = Math.sin(b.flap) * 0.55;
+      b.a += b.speed * dt;
+      const x = b.cx + Math.cos(b.a) * b.r;
+      const z = b.cz + Math.sin(b.a) * b.r;
+      b.mesh.position.set(x, b.h + Math.sin(t * 0.7 + b.a) * 2, z);
+      b.mesh.rotation.y = -b.a;
+      const flap = Math.sin(t * 7 + b.a * 3) * 0.55;
       b.left.rotation.z = flap;
       b.right.rotation.z = -flap;
     }
-  };
-  S._tick.push(tick);
-  S.ambient = { clouds, birds };
-  return S.ambient;
+    for (const f of flags) {
+      f.cloth.rotation.y = Math.sin(t * 1.6 + f.phase) * 0.45;
+      f.cloth.rotation.z = Math.sin(t * 2.3 + f.phase) * 0.08;
+    }
+    for (const s of signs) {
+      // Mostly steady, with an occasional buzz-dip.
+      const wob = Math.sin(t * 3.1 + s.seed) * Math.sin(t * 0.7 + s.seed * 2);
+      const bright = wob > 0.86 ? 0.35 : 1;
+      s.mat.color.setHex(neonCols[Math.floor(s.seed) % neonCols.length]);
+      s.mesh.visible = bright > 0.5 || Math.sin(t * 9 + s.seed) > -0.4;
+      s.mesh.scale.y = bright;
+    }
+    for (const g of gulls) {
+      g.a += dt * 0.08;
+      g.mesh.position.set(150 + Math.cos(g.a) * g.r, 26 + Math.sin(g.a * 2) * 2, 150 + Math.sin(g.a) * g.r);
+      g.mesh.rotation.y = -g.a;
+    }
+  });
 }
