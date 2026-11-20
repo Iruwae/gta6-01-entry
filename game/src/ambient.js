@@ -1,130 +1,123 @@
-// SOLMAR BAY — ambient life (round 8, written fresh from the spec).
-// Birds circling overhead, flags waving, neon signs flickering —
-// things that make the city feel alive without touching gameplay.
-// Deliberately cheap: a few objects, a little sine math, no allocations
-// in the frame loop.
+// ambient.js — the city breathing: traffic on the road grid and birds
+// circling over the beach. Traffic cars are kept out of S.cars on
+// purpose, so the enter-car key never grabs a moving car by mistake.
+// Written fresh for round 8 from the shared contract.
 import * as THREE from '../vendor/three.module.min.js';
 
-const NEON_COLS = [0xff4ad8, 0x37e6ff, 0xffb347, 0x7dff5e];
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export function init(ctx) {
-  const T = ctx.THREE || THREE;
-  const scene = ctx.scene;
   const S = ctx.state;
+  const scene = ctx.scene;
+  const rand = mulberry32(4242);
 
-  // ---- birds: small dark darts circling high over the city ----
-  const birdMat = new THREE.MeshBasicMaterial({ color: 0x1a1620 });
-  const birdGeo = new THREE.ConeGeometry(0.35, 1.6, 4);
-  birdGeo.rotateX(Math.PI / 2);
+  // Shared headlight material so every traffic car lights up at night.
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffdf80, emissiveIntensity: 0.5 });
+
+  function buildTrafficMesh(color) {
+    const g = new THREE.Group();
+    const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.5 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x14141c, roughness: 0.6, metalness: 0.3 });
+    const glass = new THREE.MeshStandardMaterial({ color: 0x9fd8e8, roughness: 0.15, metalness: 0.7 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.62, 4.2), paint);
+    body.position.y = 0.55;
+    g.add(body);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.55, 1.9), glass);
+    cabin.position.set(0, 1.05, -0.2);
+    g.add(cabin);
+    for (const x of [-0.7, 0.7]) {
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.08), headMat);
+      lamp.position.set(x, 0.6, 2.12);
+      g.add(lamp);
+    }
+    const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 12);
+    for (const [x, z] of [[-0.95, 1.3], [0.95, 1.3], [-0.95, -1.3], [0.95, -1.3]]) {
+      const wheel = new THREE.Mesh(wheelGeo, dark);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 0.36, z);
+      g.add(wheel);
+    }
+    return g;
+  }
+
+  // Traffic runs the road grid (roads at multiples of 60) and wraps.
+  const ROADS = [-120, -60, 0, 60, 120];
+  const COLORS = [0x8a97a8, 0xb8b0a0, 0x6a7a8a, 0xa85a4a, 0x4a6a8a, 0xc8c8c8];
+  const traffic = [];
+  for (let i = 0; i < 9; i++) {
+    const alongZ = rand() > 0.5;
+    const road = ROADS[Math.floor(rand() * ROADS.length)];
+    const dir = rand() > 0.5 ? 1 : -1;
+    const lane = (rand() - 0.5) * 4;
+    const color = COLORS[Math.floor(rand() * COLORS.length)];
+    const mesh = buildTrafficMesh(color);
+    scene.add(mesh);
+    traffic.push({
+      mesh, alongZ, road, dir, lane,
+      speed: 8 + rand() * 6,
+      s: (rand() - 0.5) * 360,
+    });
+  }
+  S.traffic = traffic;
+  ctx.api.traffic = traffic;
+
+  // Gulls over the beach, circling slow and high.
   const birds = [];
-  for (let i = 0; i < 6; i++) {
-    const b = new THREE.Mesh(birdGeo, birdMat);
+  const birdMat = new THREE.MeshBasicMaterial({ color: 0x1a1420, side: THREE.DoubleSide });
+  for (let i = 0; i < 8; i++) {
+    const b = new THREE.Group();
+    const w1 = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.25), birdMat);
+    w1.rotation.z = 0.5; w1.position.x = -0.4; b.add(w1);
+    const w2 = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.25), birdMat);
+    w2.rotation.z = -0.5; w2.position.x = 0.4; b.add(w2);
     scene.add(b);
     birds.push({
       mesh: b,
-      cx: -40 + i * 18, cz: -30 + (i % 3) * 45,
-      r: 34 + i * 7, h: 42 + (i % 4) * 9,
-      a: i * 1.1, speed: 0.14 + (i % 3) * 0.05,
+      cx: (rand() - 0.5) * 120,
+      cz: 150 + rand() * 30,
+      r: 20 + rand() * 40,
+      h: 26 + rand() * 14,
+      a: rand() * Math.PI * 2,
+      w: 0.1 + rand() * 0.12,
     });
   }
+  S.birds = birds;
 
-  // ---- flags on poles near the Strip and the beach ----
-  const flags = [];
-  const flagCols = [0xff6b6b, 0xffb347, 0x37e6ff, 0x7dff5e, 0xff4ad8];
-  for (let i = 0; i < 5; i++) {
-    const x = -50 + i * 25, z = i % 2 === 0 ? 120 : 158;
-    const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.09, 0.09, 7, 6),
-      new THREE.MeshLambertMaterial({ color: 0x3a3840 })
-    );
-    pole.position.set(x, 3.5, z); scene.add(pole);
-    const flag = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.6, 1.5),
-      new THREE.MeshBasicMaterial({ color: flagCols[i % flagCols.length], side: THREE.DoubleSide })
-    );
-    flag.position.set(x + 1.35, 6.2, z);
-    scene.add(flag);
-    flags.push({ mesh: flag, phase: i * 1.3 });
-  }
-
-  // ---- neon signs on the Strip that flicker ----
-  const neons = [];
-  for (let i = 0; i < 6; i++) {
-    const mat = new THREE.MeshBasicMaterial({
-      color: NEON_COLS[i % NEON_COLS.length], transparent: true, opacity: 1,
-    });
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(6, 1.1, 0.5), mat);
-    sign.position.set(-55 + i * 22, 7 + (i % 3) * 3, 118);
-    scene.add(sign);
-    const pole = new THREE.Mesh(
-      new THREE.BoxGeometry(0.4, 7, 0.4),
-      new THREE.MeshLambertMaterial({ color: 0x222028 })
-    );
-    pole.position.set(-58 + i * 22, 3.5, 118);
-    scene.add(pole);
-    neons.push({ mat, phase: i * 2.1 });
-  }
-
-  // A few drifting paper specks low over the streets.
-  const speckMat = new THREE.MeshBasicMaterial({ color: 0xd8c9a8, transparent: true, opacity: 0.7 });
-  const specks = [];
-  for (let i = 0; i < 8; i++) {
-    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.35), speckMat);
-    s.position.set(-100 + i * 28, 1 + (i % 3), -80 + (i * 31) % 160);
-    scene.add(s);
-    specks.push({ mesh: s, phase: i * 0.9, speed: 0.5 + (i % 3) * 0.2 });
-  }
-
-  ctx.api.ambient = {
-    birds: birds.map((b) => b.mesh),
-    flags: flags.map((f) => f.mesh),
-    neonMaterials: neons.map((n) => n.mat),
-  };
-
-  function flickerNeonList(list, time, glow, rate, step) {
-    if (!list) return;
-    for (let i = 0; i < list.length; i++) {
-      const m = list[i];
-      m.transparent = true;
-      const stutter = Math.sin(time * 7 + i * step) > 0.96 ? 0.25 : 1;
-      m.opacity = glow * (0.85 + 0.15 * Math.sin(time * rate + i * 1.7)) * stutter;
+  let t = 0;
+  ctx.updates.push((dt) => {
+    t += dt;
+    const n = S.dayNight ? S.dayNight.night : 0;
+    headMat.emissiveIntensity = 0.5 + n * 2.0;
+    if (S.mode !== 'playing') return;
+    for (const c of traffic) {
+      c.s += c.dir * c.speed * dt;
+      if (c.s > 195) c.s = -195;
+      if (c.s < -195) c.s = 195;
+      if (c.alongZ) {
+        c.mesh.position.set(c.road + c.lane, 0, c.s);
+        c.mesh.rotation.y = c.dir > 0 ? 0 : Math.PI;
+      } else {
+        c.mesh.position.set(c.s, 0, c.road + c.lane);
+        c.mesh.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+      }
     }
-  }
-
-  ctx.updates.push(function ambientUpdate(dt, t) {
-    const night = (S && S.dayNight && S.dayNight.night) || 0;
-    const time = t || 0;
-
     for (const b of birds) {
-      b.a += b.speed * dt;
+      b.a += b.w * dt;
       b.mesh.position.set(
         b.cx + Math.cos(b.a) * b.r,
-        b.h + Math.sin(time * 0.7 + b.a * 2) * 2.5,
-        b.cz + Math.sin(b.a) * b.r
+        b.h + Math.sin(t * 0.7 + b.a) * 2,
+        b.cz + Math.sin(b.a) * b.r,
       );
-      b.mesh.rotation.y = Math.atan2(-Math.sin(b.a), -Math.cos(b.a)) + Math.PI / 2;
-    }
-
-    for (const f of flags) {
-      f.mesh.rotation.y = Math.sin(time * 2.2 + f.phase) * 0.45;
-      f.mesh.scale.x = 1 + Math.sin(time * 3.1 + f.phase) * 0.12;
-    }
-
-    // Neon burns brighter at night and stutters now and then.
-    const glow = 0.45 + night * 0.55;
-    flickerNeonList(neons.map((n) => n.mat), time, glow, 3.7, 2.1);
-    try {
-      const extra = ctx.api.districtInfo && ctx.api.districtInfo.neonMaterials;
-      flickerNeonList(extra, time, glow, 4.3, 1.7);
-      const cityNeon = ctx.api.city && ctx.api.city.neonMaterials;
-      flickerNeonList(cityNeon, time, glow, 3.9, 2.3);
-    } catch (e) { /* neon is cosmetic; never break the frame */ }
-
-    for (const s of specks) {
-      s.mesh.position.x += s.speed * dt;
-      s.mesh.position.y = 1 + Math.sin(time * 1.4 + s.phase) * 0.6;
-      s.mesh.rotation.z = time * 0.8 + s.phase;
-      if (s.mesh.position.x > 180) s.mesh.position.x = -180;
+      b.mesh.rotation.y = -b.a;
+      b.mesh.rotation.z = Math.sin(t * 3 + b.a * 5) * 0.25;
     }
   });
 }

@@ -1,166 +1,136 @@
-// SOLMAR BAY — Vic's fence yard (round 8, written fresh from the spec).
-// A marked yard near the harbor where the player (key V) sells the
-// current car for a quoted price: cash rises by exactly the quote, the
-// car is removed, and S.stats.fencesSold counts up. The quote depends
-// on the car kind and its condition, with a small bonus for a wanted car.
+// fence.js — Vic's fence yard at (110, 138).
+// Drive a stolen car into the yard and press V to sell it. The quote is
+// the car's condition-adjusted base price plus a small bonus per wanted
+// star, and the sale is exactly that quote: cash in, car gone, one more
+// fence sale on the stats. The yard itself is dressed with crates,
+// fence posts, and a hand-painted sign.
+// Written fresh for round 8 from the shared contract.
 import * as THREE from '../vendor/three.module.min.js';
 
-const YARD = { x: 110, z: 138, radius: 18 };
-const BASE_PRICE = { bike: 180, sedan: 240, pickup: 320, sport: 650 };
+const YARD = { x: 110, z: 138, r: 12 };
+const BASE_PRICE = { sedan: 400, bike: 300, pickup: 550, sport: 1200 };
+
+// Input shapes differ between builds; accept a Set, a plain object of
+// booleans, an isDown() function, or a pressed set — whichever is there.
+function keyHeld(input, code) {
+  if (!input) return false;
+  if (typeof input.isDown === 'function') {
+    try { return !!input.isDown(code); } catch (e) { return false; }
+  }
+  const keys = input.keys;
+  if (keys) {
+    if (typeof keys.has === 'function') return keys.has(code);
+    if (typeof keys === 'object' && keys[code]) return true;
+  }
+  const pressed = input.pressed;
+  if (pressed) {
+    if (typeof pressed.has === 'function') return pressed.has(code);
+    if (typeof pressed === 'object' && pressed[code]) return true;
+  }
+  if (typeof input[code] === 'boolean') return input[code];
+  return false;
+}
+
+function makeSign(text, fg, bg) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, 512, 128);
+  g.strokeStyle = fg; g.lineWidth = 6; g.strokeRect(8, 8, 496, 112);
+  g.fillStyle = fg; g.font = 'bold 62px sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 256, 68);
+  const tex = new THREE.CanvasTexture(c);
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(8, 2),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }),
+  );
+}
 
 export function init(ctx) {
-  const T = ctx.THREE || THREE;
-  const scene = ctx.scene;
   const S = ctx.state;
+  const scene = ctx.scene;
+  const dom = ctx.dom || {};
 
-  // ---- the yard: dirt patch, fence posts, a sign board, crates ----
-  const dirt = new THREE.Mesh(
-    new THREE.CircleGeometry(YARD.radius, 24),
-    new THREE.MeshLambertMaterial({ color: 0x6a5232 })
-  );
-  dirt.rotation.x = -Math.PI / 2;
-  dirt.position.set(YARD.x, 0.015, YARD.z);
-  scene.add(dirt);
-
-  const postMat = new THREE.MeshLambertMaterial({ color: 0x4a3a26 });
-  const railMat = new THREE.MeshLambertMaterial({ color: 0x5e4a30 });
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    const px = YARD.x + Math.cos(a) * YARD.radius;
-    const pz = YARD.z + Math.sin(a) * YARD.radius;
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2.4, 0.5), postMat);
-    post.position.set(px, 1.2, pz);
-    scene.add(post);
-  }
-  for (let i = 0; i < 12; i++) {
-    const a0 = (i / 12) * Math.PI * 2;
-    const a1 = ((i + 1) / 12) * Math.PI * 2;
-    const mx = YARD.x + (Math.cos(a0) + Math.cos(a1)) / 2 * YARD.radius;
-    const mz = YARD.z + (Math.sin(a0) + Math.sin(a1)) / 2 * YARD.radius;
-    const len = Math.hypot(Math.cos(a1) - Math.cos(a0), Math.sin(a1) - Math.sin(a0)) * YARD.radius;
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.28, 0.18), railMat);
-    rail.position.set(mx, 1.9, mz);
-    rail.rotation.y = -Math.atan2(Math.sin(a1) - Math.sin(a0), Math.cos(a1) - Math.cos(a0));
-    scene.add(rail);
-  }
-  const signBoard = new THREE.Mesh(
-    new THREE.BoxGeometry(7, 2.2, 0.3),
-    new THREE.MeshLambertMaterial({ color: 0xc9a03a, emissive: 0x8a6a1a, emissiveIntensity: 0.4 })
-  );
-  signBoard.position.set(YARD.x, 3.4, YARD.z - YARD.radius + 1);
-  scene.add(signBoard);
-  for (const [dx, dz] of [[-9, -6], [8, 7], [-6, 9]]) {
-    const crate = new THREE.Mesh(
-      new THREE.BoxGeometry(2.4, 2.4, 2.4),
-      new THREE.MeshLambertMaterial({ color: 0x7a5a38 })
-    );
-    crate.position.set(YARD.x + dx, 1.2, YARD.z + dz);
-    crate.rotation.y = dx * 0.2;
+  // ---- yard dressing: crates, a ring of fence posts, a sign ----
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 1 });
+  const crateMat2 = new THREE.MeshStandardMaterial({ color: 0x6a5a4a, roughness: 1 });
+  for (const [cx, cz, s, m] of [
+    [118, 144, 2.2, crateMat], [119.5, 142, 1.6, crateMat2],
+    [103, 131, 2.0, crateMat2], [104.5, 133, 1.4, crateMat],
+    [117, 131, 1.8, crateMat],
+  ]) {
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), m);
+    crate.position.set(cx, s / 2, cz);
+    crate.rotation.y = (cx + cz) % 1.2;
     scene.add(crate);
   }
-
-  function toastEl() {
-    if (ctx.dom && ctx.dom.toast) return ctx.dom.toast;
-    try { return document.getElementById('toast'); } catch (e) { return null; }
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1 });
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.6, 0.35), postMat);
+    post.position.set(YARD.x + Math.cos(a) * 11, 0.8, YARD.z + Math.sin(a) * 11);
+    scene.add(post);
+  }
+  const sign = makeSign("VIC'S YARD", '#ffd9a0', '#241a2e');
+  sign.position.set(YARD.x, 2.8, YARD.z - 11.5);
+  scene.add(sign);
+  for (const px of [YARD.x - 4.2, YARD.x + 4.2]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 3, 8), postMat);
+    post.position.set(px, 1.5, YARD.z - 11.5);
+    scene.add(post);
   }
 
-  function conditionOf(car) {
-    if (!car) return 1;
-    const max = car.maxHealth || car.maxHp || 100;
-    const hp = (typeof car.health === 'number') ? car.health : max;
-    return Math.max(0, Math.min(1, hp / max));
-  }
-
+  // ---- the fence director: pricing + the sale ----
   const director = {
     yard: YARD,
+
     priceFor(car) {
-      if (!car) return 0;
-      const base = BASE_PRICE[car.kind] || 200;
-      const factor = 0.55 + 0.45 * conditionOf(car);
-      return Math.round(base * factor);
+      const base = BASE_PRICE[car.kind] || 250;
+      const cond = car.maxHealth ? Math.max(0, Math.min(1, car.health / car.maxHealth)) : 1;
+      return Math.round((base * (0.5 + 0.5 * cond)) / 5) * 5;
     },
+
     wantedBonus(car) {
-      if (!car || !S) return 0;
-      const stars = S.wanted || 0;
-      return stars > 0 ? 25 * stars : 0;
+      return (S.wanted || 0) * 25;
     },
-    quoteFor(car) {
+
+    quote(car) {
       return this.priceFor(car) + this.wantedBonus(car);
     },
-    inYard(pos) {
-      if (!pos) return false;
-      const dx = pos.x - YARD.x, dz = pos.z - YARD.z;
-      return dx * dx + dz * dz <= YARD.radius * YARD.radius;
-    },
-    sell(car) {
-      if (!car || !S) return false;
-      const quote = this.quoteFor(car);
-      S.cash = (S.cash || 0) + quote;
-      if (S.stats) S.stats.fencesSold = (S.stats.fencesSold || 0) + 1;
-      // Pull the car out of the world.
-      try {
-        if (S.cars) {
-          const i = S.cars.indexOf(car);
-          if (i >= 0) S.cars.splice(i, 1);
-        }
-      } catch (e) { /* world list is best-effort */ }
-      try {
-        const mesh = car.mesh || car.group || car.model || null;
-        if (mesh) scene.remove(mesh);
-      } catch (e) { /* mesh removal is best-effort */ }
-      if (S.car === car) S.car = null;
-      if (S.player && S.player.pos && car.pos) {
-        S.player.pos.set(car.pos.x, 0, car.pos.z);
-      }
-      const el = toastEl();
-      if (el) {
-        el.textContent = 'Sold the ' + (car.kind || 'car') + ' for $' + quote + '.';
-        el.classList.remove('hidden');
-      }
-      return true;
-    },
   };
-
-  if (S) S.fenceDirector = director;
+  S.fenceDirector = director;
   ctx.api.fence = director;
-  ctx.api.fenceDirector = director;
 
-  function trySell() {
-    if (!S) return;
-    if (S.mode && S.mode !== 'playing') return;
-    if (S.cutscene) return;
-    if (!S.car) return;
-    if (!director.inYard(S.car.pos)) return;
-    director.sell(S.car);
+  function toast(text) {
+    const el = dom.toast;
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove('hidden');
   }
 
-  // Primary trigger: a real keydown for V. The smoke test holds the key,
-  // and a listener fires on the first press regardless of how the input
-  // module tracks held keys.
-  try {
-    window.addEventListener('keydown', function fenceKey(e) {
-      if (e && e.code === 'KeyV' && !e.repeat) trySell();
-    });
-  } catch (e) { /* no window (unit context): the poll below still works */ }
-
-  // Backup trigger: poll the shared input state, edge-triggered so a
-  // held key sells exactly once (the car is gone after the first sale).
-  let vWasDown = false;
-  function vIsDown() {
-    try {
-      const input = ctx.input;
-      if (!input) return false;
-      if (input.keys instanceof Set) return input.keys.has('KeyV');
-      if (input.keys && typeof input.keys === 'object') return !!input.keys.KeyV;
-      if (input.pressed && typeof input.pressed === 'object') return !!input.pressed.KeyV;
-      if (typeof input.isDown === 'function') return !!input.isDown('KeyV');
-    } catch (e) { /* input shape unknown: treat as up */ }
-    return false;
-  }
-
-  ctx.updates.push(function fenceUpdate() {
-    const down = vIsDown();
-    if (down && !vWasDown) trySell();
-    vWasDown = down;
+  // V sells the current car, but only inside the yard, only while
+  // playing, and only once per key press.
+  let prevV = false;
+  ctx.updates.push((dt) => {
+    const down = keyHeld(ctx.input, 'KeyV');
+    const pressed = down && !prevV;
+    prevV = down;
+    if (!pressed) return;
+    if (S.mode !== 'playing' || S.cutscene) return;
+    const car = S.car;
+    if (!car || car.aiPolice) return;
+    const dx = car.pos.x - YARD.x;
+    const dz = car.pos.z - YARD.z;
+    if (dx * dx + dz * dz > YARD.r * YARD.r) return;
+    const quote = director.quote(car);
+    const kind = car.kind;
+    S.cash += quote;
+    S.stats.fencesSold = (S.stats.fencesSold || 0) + 1;
+    const idx = (S.cars || []).indexOf(car);
+    if (idx >= 0) S.cars.splice(idx, 1);
+    if (car.mesh) scene.remove(car.mesh);
+    S.car = null;
+    toast("Sold the " + kind + " to Vic's fence for $" + quote + ".");
   });
 }

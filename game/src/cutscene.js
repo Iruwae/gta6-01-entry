@@ -1,124 +1,89 @@
-// cutscene.js — SOLMAR BAY, round 8 rebuild.
-// Cutscenes: the intro flyover that plays when a new game starts, and
-// short briefing cutscenes missions can raise. While one plays,
-// S.cutscene is true, S.mode is 'cutscene', and the overlay is visible.
-// Any key — X in particular — skips it at once: the flag clears, the
-// overlay hides, and play resumes. A long intro also ends on its own
-// after its timer, so a cutscene can never trap the player.
-
-const INTRO_TEXT = 'SOLMAR BAY — the sun is going down on the bay, and a nobody with $120 in his pocket is about to make a name for himself. Press X to skip.';
-const INTRO_SECONDS = 30;
-
-function el(ctx, id) {
-  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
-  return document.getElementById(id);
-}
-
-function keyDown(ctx, code) {
-  const inp = ctx.input;
-  if (!inp) return false;
-  if (typeof inp.isDown === 'function') {
-    try { return !!inp.isDown(code); } catch (e) { /* fall through */ }
-  }
-  const k = inp.keys;
-  if (k) {
-    if (typeof k.has === 'function') return k.has(code);
-    if (Array.isArray(k)) return k.includes(code);
-    if (typeof k === 'object') return !!k[code];
-  }
-  if (typeof inp[code] !== 'undefined') return !!inp[code];
-  return false;
-}
-
+// cutscene.js — SOLMAR BAY cutscenes.
+// The intro flyover plays when a new game starts: a full-screen overlay
+// cycling through title lines. X skips at any moment. While a cutscene
+// runs, S.cutscene is true and S.mode is 'cutscene'.
 export function init(ctx) {
-  const S = ctx.state;
-  const grab = (id) => el(ctx, id);
-  let timer = 0;
-  let autoAfter = INTRO_SECONDS;
-  let onDone = null;
-  let prevX = false;
+  const S = ctx.state || ctx.S;
+  const dom = ctx.dom || {};
+  const el = (id) => dom[id] || document.getElementById(id);
 
-  function show(text) {
-    const overlay = grab('cutscene');
-    const textEl = grab('cutscene-text');
-    if (textEl) textEl.textContent = text;
-    if (overlay) overlay.classList.remove('hidden');
+  const INTRO_LINES = [
+    'SOLMAR BAY',
+    'Golden hour. The city is waking up and the bay is on fire.',
+    'Vic Torres has a job with your name on it.',
+    'Steal a car. Lose the heat. Become a legend.',
+  ];
+  const LINE_TIME = 2.8;
+
+  let active = false;
+  let lines = INTRO_LINES;
+  let idx = 0;
+  let timer = 0;
+
+  function paint() {
+    const box = el('cutscene');
+    const text = el('cutscene-text');
+    if (text) text.textContent = lines[idx] || '';
+    if (box) box.classList.remove('hidden');
+  }
+
+  function play(id, customLines) {
+    lines = Array.isArray(customLines) && customLines.length ? customLines : INTRO_LINES;
+    if (id === 'intro') lines = INTRO_LINES;
+    idx = 0;
+    timer = 0;
+    active = true;
     S.cutscene = true;
     S.mode = 'cutscene';
-    timer = 0;
-  }
-
-  function playIntro() {
-    onDone = null;
-    autoAfter = INTRO_SECONDS;
-    show(INTRO_TEXT);
-  }
-
-  function play(text, seconds, cb) {
-    onDone = typeof cb === 'function' ? cb : null;
-    autoAfter = typeof seconds === 'number' && seconds > 0 ? seconds : 8;
-    show(String(text || ''));
+    paint();
+    return true;
   }
 
   function skip() {
-    if (!S.cutscene) return;
+    if (!active && !S.cutscene) return false;
+    active = false;
     S.cutscene = false;
-    const overlay = grab('cutscene');
-    if (overlay) overlay.classList.add('hidden');
-    S.mode = 'playing';
-    timer = 0;
-    const cb = onDone;
-    onDone = null;
-    if (cb) {
-      try { cb(); } catch (e) { /* a briefing callback must never break the skip */ }
-    }
+    if (S.mode === 'cutscene') S.mode = 'playing';
+    const box = el('cutscene');
+    if (box) box.classList.add('hidden');
+    return true;
   }
 
-  // Any key skips — the keydown listener catches it even between frames,
-  // and the update poll below is the backup.
-  if (typeof window !== 'undefined') {
-    window.addEventListener('keydown', () => {
-      if (S.cutscene) skip();
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    if (e.code !== 'KeyX') return;
+    if (S.cutscene) skip();
+  });
+
+  if (Array.isArray(ctx.updates)) {
+    ctx.updates.push((dt) => {
+      try {
+        // If something else raised the cutscene flag without going
+        // through play(), adopt it and run the intro lines.
+        if (S.cutscene && !active) {
+          lines = INTRO_LINES;
+          idx = 0;
+          timer = 0;
+          active = true;
+          if (S.mode !== 'cutscene') S.mode = 'cutscene';
+          paint();
+          return;
+        }
+        if (!active) return;
+        if (!S.cutscene) { skip(); return; }
+        timer += dt || 0.016;
+        if (timer >= LINE_TIME) {
+          timer = 0;
+          idx += 1;
+          if (idx >= lines.length) skip();
+          else paint();
+        }
+      } catch (e) { /* cutscenes must never crash the loop */ }
     });
   }
-  const overlay = grab('cutscene');
-  if (overlay) overlay.addEventListener('click', skip);
 
-  ctx.api.cutscene = {
-    play,
-    playIntro,
-    skip,
-    isActive: () => !!S.cutscene,
-  };
-
-  ctx.updates.push((dt) => {
-    if (!S.cutscene) {
-      prevX = false;
-      return;
-    }
-    // Backup skip on X through the shared input state.
-    const xDown = keyDown(ctx, 'KeyX');
-    if (xDown && !prevX) {
-      prevX = xDown;
-      skip();
-      return;
-    }
-    prevX = xDown;
-
-    timer += dt;
-    // Slow flyover: drift the camera across the bay while the intro runs.
-    try {
-      const cam = ctx.camera;
-      if (cam) {
-        const k = Math.min(1, timer / 14);
-        const x = -170 + 230 * k;
-        const y = 72 - 44 * k;
-        const z = 150 - 185 * k;
-        cam.position.set(x, y, z);
-        cam.lookAt(0, 4, 0);
-      }
-    } catch (e) { /* the camera belongs to main.js; never fight it */ }
-
-    if (timer >= autoAfter) skip();
-  });
+  ctx.api.playCutscene = play;
+  ctx.api.startCutscene = play;
+  ctx.api.skipCutscene = skip;
+  ctx.api.cutscene = { play, start: play, skip, isPlaying: () => active };
 }

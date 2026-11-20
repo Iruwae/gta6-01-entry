@@ -1,43 +1,31 @@
-# SOLMAR BAY — ignore build output, dependencies and machine files.
-# Source of truth is the game/ and tools/ trees; everything below is
-# generated, local, or private to one machine.
-
-# Dependencies and install artefacts
+# Dependencies and build output
 node_modules/
-.pnp/
-.pnp.js
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-
-# Submission build output (main.ts mirrors game/ + screenshots/ here)
 output/
-/output/
+out/
 dist/
 build/
-out-r8-test/
-out-*/
 
-# Editor and OS droppings
+# Submission dossier output (built by main.ts)
+dossier.json
+
+# Logs and local environment
+*.log
+.env
+.env.*
+!.env.example
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS files
 .DS_Store
 Thumbs.db
-Desktop.ini
+desktop.ini
+
+# Editor files
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
-.vscode/
-.idea/
-*.code-workspace
-
-# Logs and local caches
-*.log
-npm-debug.log*
-.cache/
-.parcel-cache/
-
-# Secrets and local credentials — never commit these
-.env
-.env.*
-*.pem
-*.key
-credentials.json

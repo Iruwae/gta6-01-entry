@@ -1,114 +1,121 @@
-// audio.js — SOLMAR BAY, round 8 rebuild.
-// All sound is synthesized with WebAudio: short oscillator blips for
-// the UI and pickups, a square-wave bark for gunshots, and a low
-// sawtooth hum whose pitch follows the car for the engine. No audio
-// files, no network. Every call is guarded, so a browser without audio
-// — or a headless one — simply hears nothing and the game never throws.
-// Nothing starts until the player interacts: the context is created and
-// resumed on the first pointer or key gesture.
-
+// audio.js — SOLMAR BAY sound.
+// Tiny WebAudio synth: UI blips, gunshots, pickup chimes, cash
+// arpeggios and a soft engine hum that follows the car. Everything is
+// lazy and guarded — if the browser has no audio, the game plays on
+// silently instead of throwing.
 export function init(ctx) {
-  const S = ctx.state;
+  const S = ctx.state || ctx.S;
+
   let ac = null;
+  let master = null;
   let engineOsc = null;
   let engineGain = null;
-  let engineOn = false;
+  let muted = false;
 
   function ensure() {
-    if (ac) return true;
+    if (ac) {
+      if (ac.state === 'suspended') ac.resume().catch(() => {});
+      return ac;
+    }
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return false;
+      if (!AC) return null;
       ac = new AC();
+      master = ac.createGain();
+      master.gain.value = 0.16;
+      master.connect(ac.destination);
+      // Engine hum: a low sawtooth kept quiet until the car moves.
       engineOsc = ac.createOscillator();
       engineOsc.type = 'sawtooth';
-      engineOsc.frequency.value = 55;
+      engineOsc.frequency.value = 42;
       engineGain = ac.createGain();
       engineGain.gain.value = 0;
-      engineOsc.connect(engineGain);
-      engineGain.connect(ac.destination);
+      const filt = ac.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.value = 320;
+      engineOsc.connect(filt);
+      filt.connect(engineGain);
+      engineGain.connect(master);
       engineOsc.start();
-      engineOn = true;
-      return true;
     } catch (e) {
       ac = null;
-      engineOsc = null;
-      engineGain = null;
-      return false;
     }
+    return ac;
   }
 
-  function unlock() {
+  // Create the context on the first real gesture so autoplay rules pass.
+  window.addEventListener('pointerdown', ensure, { once: true });
+  window.addEventListener('keydown', ensure, { once: true });
+
+  function tone(freq, dur, type, vol, when) {
+    if (muted) return;
+    const ctx2 = ensure();
+    if (!ctx2 || !master) return;
     try {
-      if (ensure() && ac.state === 'suspended') ac.resume();
-    } catch (e) { /* audio is best-effort */ }
+      const t0 = ctx2.currentTime + (when || 0);
+      const o = ctx2.createOscillator();
+      const g = ctx2.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol == null ? 0.5 : vol, t0);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + (dur || 0.12));
+      o.connect(g);
+      g.connect(master);
+      o.start(t0);
+      o.stop(t0 + (dur || 0.12) + 0.02);
+    } catch (e) { /* never let a beep crash the game */ }
   }
 
-  if (typeof window !== 'undefined') {
-    window.addEventListener('pointerdown', unlock);
-    window.addEventListener('keydown', unlock);
-  }
-
-  function tone(freq, dur, type, vol, slideTo) {
+  function shot() {
+    if (muted) return;
+    const ctx2 = ensure();
+    if (!ctx2 || !master) return;
     try {
-      if (!ensure()) return;
-      if (ac.state === 'suspended') return;
-      const osc = ac.createOscillator();
-      const gain = ac.createGain();
-      osc.type = type || 'sine';
-      osc.frequency.setValueAtTime(freq, ac.currentTime);
-      if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), ac.currentTime + dur);
-      gain.gain.setValueAtTime(vol || 0.1, ac.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
-      osc.connect(gain);
-      gain.connect(ac.destination);
-      osc.start();
-      osc.stop(ac.currentTime + dur + 0.02);
-    } catch (e) { /* never let a blip break the game */ }
+      const len = Math.floor(ctx2.sampleRate * 0.09);
+      const buf = ctx2.createBuffer(1, len, ctx2.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = ctx2.createBufferSource();
+      src.buffer = buf;
+      const g = ctx2.createGain();
+      g.gain.value = 0.7;
+      src.connect(g);
+      g.connect(master);
+      src.start();
+      tone(140, 0.08, 'square', 0.25);
+    } catch (e) { /* ignore */ }
   }
 
-  function click() {
-    tone(1250, 0.05, 'square', 0.06);
+  function pickup() { tone(660, 0.1, 'sine', 0.5); tone(990, 0.14, 'sine', 0.5, 0.08); }
+  function cash() { tone(880, 0.09, 'triangle', 0.5); tone(1174, 0.09, 'triangle', 0.5, 0.07); tone(1568, 0.16, 'triangle', 0.5, 0.14); }
+  function ui() { tone(520, 0.06, 'sine', 0.35); }
+  function jingle() { tone(392, 0.1, 'triangle', 0.4); tone(523, 0.12, 'triangle', 0.4, 0.09); }
+  function error() { tone(180, 0.16, 'square', 0.3); }
+
+  function setMuted(m) {
+    muted = !!m;
+    if (master) master.gain.value = muted ? 0 : 0.16;
   }
 
-  function pickup() {
-    tone(880, 0.09, 'sine', 0.12);
-    try {
-      setTimeout(() => tone(1318, 0.12, 'sine', 0.12), 90);
-    } catch (e) { /* one blip is enough */ }
-  }
-
-  function gunshot() {
-    tone(170, 0.14, 'square', 0.16, 55);
-  }
-
-  function engineSet(speed) {
-    try {
-      if (!ac || !engineOsc || !engineGain || !engineOn) return;
-      if (ac.state === 'suspended') return;
-      const sp = Math.max(0, Number(speed) || 0);
-      const freq = 52 + Math.min(95, sp * 2.2);
-      engineOsc.frequency.setTargetAtTime(freq, ac.currentTime, 0.1);
-      const target = S.car ? 0.04 : 0.0;
-      engineGain.gain.setTargetAtTime(target, ac.currentTime, 0.2);
-    } catch (e) { /* the hum is cosmetic */ }
+  if (Array.isArray(ctx.updates)) {
+    ctx.updates.push(() => {
+      try {
+        if (!engineOsc || !engineGain || !ac) return;
+        const car = S && S.car;
+        if (car && S.mode === 'playing') {
+          const sp = typeof car.speed === 'number' ? Math.abs(car.speed) : 0;
+          engineOsc.frequency.value = 42 + Math.min(90, sp * 1.6);
+          engineGain.gain.value = muted ? 0 : Math.min(0.05, 0.012 + sp * 0.0006);
+        } else {
+          engineGain.gain.value = 0;
+        }
+      } catch (e) { /* ignore */ }
+    });
   }
 
   ctx.api.audio = {
-    ensure,
-    unlock,
-    click,
-    pickup,
-    gunshot,
-    tone,
-    engineSet,
+    ensure, tone, shot, pickup, cash, ui, jingle, error,
+    setMuted, get muted() { return muted; },
   };
-
-  ctx.updates.push(() => {
-    if (!ac) return;
-    const speed = S.car
-      ? (typeof S.car.speed === 'number' ? S.car.speed : 0)
-      : 0;
-    engineSet(speed);
-  });
+  ctx.api.playSound = tone;
 }

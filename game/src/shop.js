@@ -1,157 +1,117 @@
-// shop.js — SOLMAR BAY, round 8 rebuild.
-// The MART corner store at (-72, -60). Press F nearby to open it. Every
-// row shows a name, a price, and a buy button; buying takes the cash
-// off the player and applies the effect at once. Food heals, the medkit
-// heals a lot, and the ammo box refills the magazine of the weapon in
-// hand.
-
-const MART = { x: -72, z: -60, r: 9 };
-
-const ITEMS = [
-  { name: 'Burger', price: 15, heal: 25, note: 'Hot, greasy, worth it.' },
-  { name: 'Soda', price: 5, heal: 8, note: 'Ice cold.' },
-  { name: 'Snack', price: 8, heal: 12, note: 'Salt and sugar.' },
-  { name: 'Coffee', price: 6, heal: 5, note: 'Keeps you awake.' },
-  { name: 'Medkit', price: 60, heal: 60, note: 'Patches you right up.' },
-  { name: 'Ammo Box', price: 40, ammo: true, note: 'A full magazine.' },
-];
-
-function el(ctx, id) {
-  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
-  return document.getElementById(id);
-}
-
-function keyDown(ctx, code) {
-  const inp = ctx.input;
-  if (!inp) return false;
-  if (typeof inp.isDown === 'function') {
-    try { return !!inp.isDown(code); } catch (e) { /* fall through */ }
-  }
-  const k = inp.keys;
-  if (k) {
-    if (typeof k.has === 'function') return k.has(code);
-    if (Array.isArray(k)) return k.includes(code);
-    if (typeof k === 'object') return !!k[code];
-  }
-  if (typeof inp[code] !== 'undefined') return !!inp[code];
-  return false;
-}
-
-function dist2d(a, b) {
-  const dx = a.x - b.x;
-  const dz = a.z - b.z;
-  return Math.sqrt(dx * dx + dz * dz);
-}
-
+// shop.js — SOLMAR BAY corner MART.
+// F opens the shop near the MART. Food heals: the Burger costs $15 and
+// restores 25 HP. Buying needs the cash on hand; healing never passes
+// full health.
 export function init(ctx) {
-  const S = ctx.state;
-  const prev = {};
-  const grab = (id) => el(ctx, id);
+  const S = ctx.state || ctx.S;
+  const dom = ctx.dom || {};
+  const el = (id) => dom[id] || document.getElementById(id);
+
+  const MART = { x: -72, z: -60 };
+  const MART_RADIUS = 11;
+
+  // name, price, heal
+  const ITEMS = [
+    { name: 'Burger', price: 15, heal: 25, desc: 'Double stack, extra pickles. Restores 25 HP.' },
+    { name: 'Taco', price: 12, heal: 18, desc: 'Street taco, still sizzling. Restores 18 HP.' },
+    { name: 'Cola', price: 5, heal: 10, desc: 'Ice-cold can. Restores 10 HP.' },
+    { name: 'Churro', price: 8, heal: 12, desc: 'Sugar-dusted, warm. Restores 12 HP.' },
+    { name: 'Bandage', price: 25, heal: 45, desc: 'Field dressing kit. Restores 45 HP.' },
+  ];
 
   function toast(msg) {
-    if (ctx.api.toast) ctx.api.toast(msg);
-    else {
-      const t = grab('toast');
-      if (t) t.textContent = msg;
-    }
+    try {
+      if (ctx.api && typeof ctx.api.toast === 'function') { ctx.api.toast(msg); return; }
+    } catch (e) { /* fall through */ }
+    const t = el('toast');
+    if (t) t.textContent = msg;
   }
 
   function nearMart() {
     const p = S.player && S.player.pos;
     if (!p) return false;
-    return dist2d(p, MART) < MART.r;
+    const dx = p.x - MART.x;
+    const dz = p.z - MART.z;
+    return Math.sqrt(dx * dx + dz * dz) < MART_RADIUS;
   }
 
-  function healPlayer(amount) {
+  function heal(n) {
     if (!S.player) return;
-    S.player.health = Math.min(100, (S.player.health || 0) + amount);
-    if (typeof S.health === 'number') S.health = S.player.health;
-  }
-
-  function refillAmmo() {
-    if (!S.player || !S.player.loadout) return 0;
-    let mag = 12;
-    try {
-      const def = S.player.loadout.current().def;
-      if (def) mag = def.magSize || def.mag || def.capacity || 12;
-    } catch (e) { /* fall back to a pistol-sized mag */ }
-    S.player.ammo = mag;
-    return mag;
+    const next = Math.min(100, (S.player.health || 0) + n);
+    S.player.health = next;
+    S.health = next;
   }
 
   function buy(item) {
-    if ((S.cash || 0) < item.price) {
+    if (typeof S.cash !== 'number' || S.cash < item.price) {
       toast('Not enough cash for a ' + item.name + '.');
       return false;
     }
     S.cash -= item.price;
-    if (item.heal) {
-      healPlayer(item.heal);
-      toast(item.name + ' — +' + item.heal + ' HP.');
-    } else if (item.ammo) {
-      const mag = refillAmmo();
-      toast('Ammo Box — magazine refilled to ' + mag + '.');
-    } else {
-      toast('Bought a ' + item.name + '.');
-    }
-    if (ctx.api.audio && typeof ctx.api.audio.pickup === 'function') {
-      try { ctx.api.audio.pickup(); } catch (e) { /* audio is best-effort */ }
-    }
+    heal(item.heal);
+    toast(item.name + '  •  -$' + item.price + '  •  +' + item.heal + ' HP');
+    try {
+      if (ctx.api && ctx.api.audio && typeof ctx.api.audio.pickup === 'function') ctx.api.audio.pickup();
+    } catch (e) { /* audio is optional */ }
     return true;
   }
 
-  function buildRows() {
-    const box = grab('shop-items');
-    if (!box) return;
-    box.innerHTML = '';
-    for (const item of ITEMS) {
+  function renderItems() {
+    const host = el('shop-items');
+    if (!host) return;
+    host.innerHTML = '';
+    ITEMS.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'shop-row';
-      const name = document.createElement('span');
-      name.className = 'shop-name';
-      name.textContent = item.name;
-      const price = document.createElement('span');
-      price.className = 'shop-price';
-      price.textContent = '$' + item.price;
+      const nm = document.createElement('span');
+      nm.className = 'shop-name';
+      nm.textContent = item.name;
+      const pr = document.createElement('span');
+      pr.className = 'shop-price';
+      pr.textContent = '$' + item.price;
+      const ds = document.createElement('span');
+      ds.className = 'shop-desc';
+      ds.textContent = item.desc;
       const btn = document.createElement('button');
       btn.className = 'shop-buy';
       btn.textContent = 'BUY';
       btn.addEventListener('click', () => buy(item));
-      row.appendChild(name);
-      row.appendChild(price);
+      row.appendChild(nm);
+      row.appendChild(pr);
+      row.appendChild(ds);
       row.appendChild(btn);
-      box.appendChild(row);
-    }
+      host.appendChild(row);
+    });
   }
 
-  function openShop() {
-    buildRows();
-    const panel = grab('shop-panel');
-    if (panel) panel.classList.remove('hidden');
+  function open() {
+    renderItems();
+    const p = el('shop-panel');
+    if (p) p.classList.remove('hidden');
   }
 
-  function closeShop() {
-    const panel = grab('shop-panel');
-    if (panel) panel.classList.add('hidden');
+  function close() {
+    const p = el('shop-panel');
+    if (p) p.classList.add('hidden');
   }
 
-  function shopOpen() {
-    const panel = grab('shop-panel');
-    return !!panel && !panel.classList.contains('hidden');
+  function panelOpen() {
+    const p = el('shop-panel');
+    return !!(p && !p.classList.contains('hidden'));
   }
 
-  const btnClose = grab('btn-close-shop');
-  if (btnClose) btnClose.addEventListener('click', closeShop);
+  const btnClose = el('btn-close-shop');
+  if (btnClose) btnClose.addEventListener('click', close);
 
-  ctx.api.shop = { open: openShop, close: closeShop, buy, nearMart, items: ITEMS };
-
-  ctx.updates.push(() => {
-    const down = keyDown(ctx, 'KeyF');
-    const was = !!prev.KeyF;
-    prev.KeyF = down;
-    if (!down || was) return;
-    if (S.mode !== 'playing') return;
-    if (shopOpen()) closeShop();
-    else if (nearMart()) openShop();
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    if (e.code !== 'KeyF') return;
+    if (!S.mode || S.mode !== 'playing') return;
+    if (S.cutscene) return;
+    if (panelOpen()) { close(); return; }
+    if (nearMart()) open();
+    else toast('The MART is the corner store on the south road.');
   });
+
+  ctx.api.shop = { open, close, buy, items: ITEMS, nearMart, mart: MART };
 }

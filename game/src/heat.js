@@ -1,94 +1,74 @@
-// heat.js — the wanted system of Solmar Bay.
-//
-// Heat runs 0-100 and the wanted stars are read off it: every full 20
-// points is another star, up to five. It cools down slowly on its own,
-// faster when Vic tucks into a lay-low spot or a hideout, and the
-// pay-n-spray booth at (-90, -58) wipes it clean for $150 the moment a
-// wanted car rolls through with the booth armed. The booth re-arms
-// once the car has pulled clear of it.
-
-const BOOTH = { x: -90, z: -58, radius: 9, price: 150 };
-const LAY_LOW = [
-  { x: -140, z: 140, r: 10, name: 'Alley hideout' },
-  { x: 150, z: -30, r: 10, name: 'Underpass' },
-  { x: 120, z: -120, r: 12, name: 'Safehouse' },
-];
-const DECAY_PER_SECOND = 0.6;
-const LAY_LOW_DECAY = 5;
-
-function showToast(ctx, msg) {
-  const api = ctx.api || {};
-  if (typeof api.toast === 'function') {
-    try { api.toast(msg); return; } catch (e) { /* fall through */ }
-  }
-  const el = (ctx.dom && ctx.dom.toast) ||
-    (typeof document !== 'undefined' ? document.getElementById('toast') : null);
-  if (el) el.textContent = msg;
-}
-
+// SOLMAR BAY — heat.js (round 8 rebuild, written blind from the spec)
+// The wanted system: heat (0-100) sets the wanted stars (20 heat per
+// star, max 5), heat cools slowly on the street and fast in a lay-low
+// spot, and the pay-n-spray booth wipes it clean for $150.
+// Talks to the game only through ctx.
 export function init(ctx) {
-  const S = ctx.state;
+  const S = ctx.state || ctx.S;
+  const dom = ctx.dom || {};
+
+  const $ = (id) => dom[id] || document.getElementById(id);
+
+  const BOOTH = { x: -90, z: -58, r: 9, cost: 150, armed: true };
+  const LAY_LOW = [
+    { x: -140, z: 140, r: 9 },
+    { x: 140, z: -140, r: 9 },
+    { x: -160, z: -40, r: 9 },
+  ];
+
   if (typeof S.heat !== 'number') S.heat = 0;
-  if (typeof S.wanted !== 'number') S.wanted = 0;
-
-  function syncWanted() {
-    S.wanted = S.heat <= 0 ? 0 : Math.min(5, Math.ceil(S.heat / 20));
-    return S.wanted;
-  }
-  syncWanted();
-
-  const sprayBooth = {
-    x: BOOTH.x,
-    z: BOOTH.z,
-    radius: BOOTH.radius,
-    price: BOOTH.price,
-    armed: true,
-  };
 
   const director = {
-    sprayBooth,
-    layLow: LAY_LOW.map((s) => ({ x: s.x, z: s.z, r: s.r, name: s.name })),
-    hideouts: [{ x: 120, z: -120, r: 12, name: 'Safehouse' }],
+    sprayBooth: BOOTH,
     add(n) {
       S.heat = Math.max(0, Math.min(100, (S.heat || 0) + n));
-      return syncWanted();
     },
-    clear() {
-      S.heat = 0;
-      return syncWanted();
+    cool(amount) {
+      S.heat = Math.max(0, (S.heat || 0) - (amount || 10));
     },
   };
   S.heatDirector = director;
 
-  let wasInBooth = false;
+  function toast(msg) {
+    const el = $('toast');
+    if (el) el.textContent = msg;
+  }
 
-  ctx.updates.push((dt, t) => {
-    const step = dt || 0;
-    const p = S.player.pos;
+  ctx.updates.push((dt) => {
+    if (S.mode && S.mode !== 'playing') return;
 
-    // Cool off: slow in the open, fast tucked away somewhere quiet.
-    const layingLow = LAY_LOW.some((s) => Math.hypot(p.x - s.x, p.z - s.z) < s.r);
-    if (S.heat > 0) {
-      const rate = layingLow ? LAY_LOW_DECAY : DECAY_PER_SECOND;
-      S.heat = Math.max(0, S.heat - rate * step);
+    const heat = S.heat || 0;
+    S.wanted = Math.max(0, Math.min(5, Math.floor(heat / 20)));
+
+    // Cool-down: a slow bleed on the street, fast in a lay-low spot.
+    if (heat > 0) {
+      let rate = 0.2;
+      const pp = S.player.pos;
+      for (const spot of LAY_LOW) {
+        if (Math.hypot(pp.x - spot.x, pp.z - spot.z) < spot.r) {
+          rate = 3;
+          break;
+        }
+      }
+      S.heat = Math.max(0, heat - rate * dt);
     }
-    syncWanted();
 
-    // Pay-n-spray: a wanted car rolling through the booth gets clean
-    // plates for $150 and the heat drops to zero on the spot.
-    const car = S.car;
-    const inBooth = !!car && !!car.pos &&
-      Math.hypot(car.pos.x - BOOTH.x, car.pos.z - BOOTH.z) < BOOTH.radius;
-    if (inBooth && sprayBooth.armed && S.wanted > 0 && (S.cash || 0) >= BOOTH.price) {
-      S.cash -= BOOTH.price;
-      S.heat = 0;
-      syncWanted();
-      sprayBooth.armed = false;
-      showToast(ctx, 'PAY-N-SPRAY — clean plates, heat gone. -$150');
+    // Pay-n-spray: drive a wanted car through the booth, $150, heat gone.
+    const booth = director.sprayBooth;
+    if (S.car && (S.wanted || 0) > 0 && booth.armed) {
+      const d = Math.hypot(S.car.pos.x - booth.x, S.car.pos.z - booth.z);
+      if (d < booth.r && S.cash >= booth.cost) {
+        S.cash -= booth.cost;
+        S.heat = 0;
+        S.wanted = 0;
+        booth.armed = false;
+        toast('Pay-n-spray: fresh paint, clean plates. Heat gone — $' + booth.cost + '.');
+      }
     }
-    if (!inBooth && wasInBooth) sprayBooth.armed = true;
-    wasInBooth = inBooth;
+    // Re-arm once the player is clear of the booth and heat is back.
+    if (!booth.armed && (S.heat || 0) > 0 && S.car) {
+      const d = Math.hypot(S.car.pos.x - booth.x, S.car.pos.z - booth.z);
+      if (d > 25) booth.armed = true;
+    }
   });
-
-  ctx.api.heat = director;
 }

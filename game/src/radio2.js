@@ -1,135 +1,91 @@
-// radio2.js — SOLMAR BAY, round 8 rebuild.
-// Six original radio stations, all invented names and tracks. Q cycles
-// to the next station; the first is the sunset station the game opens
-// on. The current station lives on S.radioStation as an index (0-5),
-// the HUD reads the name and track through ctx.api.radio, and the track
-// rolls on to the next one in the list every little while on its own.
-
-const STATIONS = [
-  {
-    name: 'SUNSET FM',
-    tracks: [
-      'Golden Hour Drive — Marisol Vega',
-      'Amber Skyline — The Palmettos',
-      'Last Light — Cora Del Mar',
-      'Dusk on the Bay — Sol Reyes',
-    ],
-  },
-  {
-    name: 'BAYLINE FM',
-    tracks: [
-      'Bayline Nights — DJ Marlo',
-      "Cruisin' Coral — The Tides",
-      'Harbor Lights — Lena Vale',
-      'Freeway Hearts — Nico Sands',
-    ],
-  },
-  {
-    name: 'PALM TALK',
-    tracks: [
-      'The Morning Palms — talk radio',
-      'Bay City Sports Desk — talk radio',
-      'Night Owls Call-In — talk radio',
-    ],
-  },
-  {
-    name: 'REEF RADIO',
-    tracks: [
-      'Undertow — Blue Current',
-      'Salt Air — Marina Skye',
-      'Reef Runner — The Breakers',
-    ],
-  },
-  {
-    name: 'CORAL COAST',
-    tracks: [
-      'Coral Coastline — Isla Dawn',
-      'Seaside Static — The Waveriders',
-      'Pink Horizon — Alba Mar',
-    ],
-  },
-  {
-    name: 'DUSK DRIVE',
-    tracks: [
-      'Midnight Meridian — Vega Noir',
-      'Purple Hour — The Duskers',
-      'Afterglow — Sol Marlow',
-    ],
-  },
-];
-
-const TRACK_SECONDS = 45;
-
-function keyDown(ctx, code) {
-  const inp = ctx.input;
-  if (!inp) return false;
-  if (typeof inp.isDown === 'function') {
-    try { return !!inp.isDown(code); } catch (e) { /* fall through */ }
-  }
-  const k = inp.keys;
-  if (k) {
-    if (typeof k.has === 'function') return k.has(code);
-    if (Array.isArray(k)) return k.includes(code);
-    if (typeof k === 'object') return !!k[code];
-  }
-  if (typeof inp[code] !== 'undefined') return !!inp[code];
-  return false;
-}
-
+// radio2.js — SOLMAR BAY radio.
+// Six original stations. Q cycles them. The state holds the station as
+// a NUMBER index into the list; the HUD shows the station NAME.
+// Tracks rotate inside the current station on a slow timer.
 export function init(ctx) {
-  const S = ctx.state;
-  const prev = {};
-  let trackIdx = 0;
-  let trackT = 0;
+  const S = ctx.state || ctx.S;
+  const dom = ctx.dom || {};
+  const el = (id) => dom[id] || document.getElementById(id);
 
-  // The station is an index. If state ever holds a name instead, map it.
-  if (typeof S.radioStation !== 'number') {
-    let idx = 0;
-    if (typeof S.radioStation === 'string') {
-      const found = STATIONS.findIndex(
-        (s) => s.name.toLowerCase() === String(S.radioStation).toLowerCase()
-      );
-      if (found >= 0) idx = found;
-    }
-    S.radioStation = idx;
+  const STATIONS = [
+    { name: 'SUNSET FM', tracks: ['Golden Hour Drive', 'Amber Skyline', 'Last Light Radio'] },
+    { name: 'BAYLINE 101', tracks: ['Harbor Nights', 'Cruise Control', 'Neon Palms'] },
+    { name: 'PALM TALK', tracks: ['The Bay Report', 'Sunset Call-In', 'Street Voices'] },
+    { name: 'DUSK ROCK', tracks: ['Purple Horizon', 'Engine Roar', 'Midnight Overpass'] },
+    { name: 'MARINA BEATS', tracks: ['Tide Runner', 'Dockside Groove', 'Salt Air'] },
+    { name: 'NIGHT DRIVE', tracks: ['After Dark', 'City of Lights', 'Slow Burn'] },
+  ];
+
+  // Normalise the state to a numeric index. If an older save stored the
+  // station name as a string, resolve it back to its index.
+  if (typeof S.radioStation === 'string') {
+    const found = STATIONS.findIndex((s) => s.name === S.radioStation);
+    S.radioStation = found >= 0 ? found : 0;
+  } else if (typeof S.radioStation !== 'number') {
+    S.radioStation = 0;
   }
+  let trackIdx = 0;
+  let trackTimer = 0;
 
   function current() {
-    const st = STATIONS[S.radioStation] || STATIONS[0];
-    const track = st.tracks[trackIdx % st.tracks.length];
-    return { name: st.name, track };
+    return STATIONS[((S.radioStation % STATIONS.length) + STATIONS.length) % STATIONS.length];
+  }
+
+  function paint() {
+    const st = current();
+    const rs = el('radio-station');
+    if (rs) rs.textContent = st.name;
+    const rt = el('radio-track');
+    if (rt) rt.textContent = st.tracks[trackIdx % st.tracks.length];
   }
 
   function next() {
-    S.radioStation = ((S.radioStation | 0) + 1) % STATIONS.length;
+    S.radioStation = (S.radioStation + 1) % STATIONS.length;
     trackIdx = 0;
-    trackT = 0;
-    const cur = current();
-    if (ctx.api.toast) ctx.api.toast(cur.name + ' — ' + cur.track);
-    if (ctx.api.audio && typeof ctx.api.audio.click === 'function') {
-      try { ctx.api.audio.click(); } catch (e) { /* audio is best-effort */ }
-    }
+    trackTimer = 0;
+    paint();
+    try {
+      if (ctx.api && ctx.api.audio && typeof ctx.api.audio.jingle === 'function') ctx.api.audio.jingle();
+    } catch (e) { /* audio is optional */ }
   }
+
+  function prev() {
+    S.radioStation = (S.radioStation - 1 + STATIONS.length) % STATIONS.length;
+    trackIdx = 0;
+    trackTimer = 0;
+    paint();
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    if (e.code !== 'KeyQ') return;
+    if (S.mode && S.mode !== 'playing') return;
+    if (S.cutscene) return;
+    next();
+  });
 
   ctx.api.radio = {
     stations: STATIONS,
+    names: STATIONS.map((s) => s.name),
     current,
+    name: () => current().name,
+    track: () => current().tracks[trackIdx % current().tracks.length],
     next,
-    index: () => S.radioStation,
-    track: () => current().track,
+    prev,
   };
+  ctx.api.nextStation = next;
 
-  ctx.updates.push((dt) => {
-    const down = keyDown(ctx, 'KeyQ');
-    const was = !!prev.KeyQ;
-    prev.KeyQ = down;
-    if (down && !was && S.mode === 'playing') next();
+  paint();
 
-    const st = STATIONS[S.radioStation] || STATIONS[0];
-    trackT += dt;
-    if (trackT >= TRACK_SECONDS) {
-      trackT = 0;
-      trackIdx = (trackIdx + 1) % st.tracks.length;
-    }
-  });
+  if (Array.isArray(ctx.updates)) {
+    ctx.updates.push((dt) => {
+      if (!S || S.mode !== 'playing') return;
+      trackTimer += dt || 0.016;
+      if (trackTimer > 28) {
+        trackTimer = 0;
+        trackIdx = (trackIdx + 1) % current().tracks.length;
+        paint();
+      }
+    });
+  }
 }

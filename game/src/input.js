@@ -1,104 +1,82 @@
-// SOLMAR BAY — keyboard and mouse state (GTA6-01 round 8 rebuild).
-// One held-keys set, fed by real keydown/keyup events. The set is never
-// cleared per frame: at headless speed a frame can take two seconds, so
-// a key held for two seconds must still read as held when the next
-// frame finally runs. Edge presses (just pressed this frame) live in a
-// separate set that main.js clears after each update pass.
+// Keyboard + mouse input state (round 8 rewrite).
+//
+// The shape every module reads through ctx.input:
+//   input.keys    — Set of e.code strings currently held down.
+//   input.pressed — Set of e.code strings pressed since the last frame.
+//                   main.js clears it after the module updates run, so a
+//                   key pressed between frames is never lost, and a
+//                   one-shot action (Q, E, R, ...) fires exactly once.
+//   input.mouse   — { x, y, down, clicked } in client pixels.
+//   input.isDown(code) / input.consume(code) — convenience readers.
+//
+// Modules should read keys/pressed, never add their own listeners.
 
-const GAME_KEYS = new Set([
-  'KeyW', 'KeyA', 'KeyS', 'KeyD',
-  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-  'KeyX', 'KeyR', 'KeyE', 'KeyQ', 'KeyF', 'KeyH', 'KeyG',
-  'KeyT', 'KeyY', 'KeyV', 'KeyP',
-  'Digit1', 'Digit2', 'Digit3', 'Digit4',
-  'Space', 'ShiftLeft', 'ShiftRight', 'Enter', 'Escape',
-]);
-
-function makeInput() {
-  const keys = new Set();
-  const pressed = new Set();
-  const mouse = { x: 0, y: 0, down: false, pressed: false, button: 0 };
-
-  function onKeyDown(e) {
-    if (e.repeat) return;
-    keys.add(e.code);
-    pressed.add(e.code);
-    if (GAME_KEYS.has(e.code)) e.preventDefault();
-  }
-
-  function onKeyUp(e) {
-    keys.delete(e.code);
-  }
-
-  function onBlur() {
-    // A lost window must not leave a phantom held key behind.
-    keys.clear();
-  }
-
-  function onMouseMove(e) {
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
-  }
-
-  function onMouseDown(e) {
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
-    mouse.down = true;
-    mouse.pressed = true;
-    mouse.button = e.button;
-  }
-
-  function onMouseUp(e) {
-    mouse.down = false;
-    mouse.button = e.button;
-  }
-
+export function createInput() {
   const input = {
-    keys,
-    pressed,
-    mouse,
-    // True while the key is physically held down.
-    down(code) {
-      return keys.has(code);
+    keys: new Set(),
+    pressed: new Set(),
+    mouse: { x: 0, y: 0, down: false, clicked: false },
+    isDown(code) {
+      return this.keys.has(code);
     },
-    // True once for the frame in which the key went down; consumes it.
+    // Take a pressed key out of the set; returns true only the first time.
     consume(code) {
-      if (pressed.has(code)) {
-        pressed.delete(code);
+      if (this.pressed.has(code)) {
+        this.pressed.delete(code);
         return true;
       }
       return false;
     },
-    // Any of the movement keys held.
-    moving() {
-      return keys.has('KeyW') || keys.has('KeyA') || keys.has('KeyS') ||
-        keys.has('KeyD') || keys.has('ArrowUp') || keys.has('ArrowDown') ||
-        keys.has('ArrowLeft') || keys.has('ArrowRight');
-    },
-    // Called by the boot hub after every update pass.
-    endFrame() {
-      pressed.clear();
-      mouse.pressed = false;
-    },
-    attach() {
-      window.addEventListener('keydown', onKeyDown);
-      window.addEventListener('keyup', onKeyUp);
-      window.addEventListener('blur', onBlur);
-      window.addEventListener('mousemove', onMouseMove);
-      window.addEventListener('mousedown', onMouseDown);
-      window.addEventListener('mouseup', onMouseUp);
-    },
   };
-
+  // (added) Whether the latest mouse press started on the game canvas
+  // (not on a UI panel): a press that begins on a panel is a UI click,
+  // never a trigger pull.
+  input.mouse.downOnCanvas = false;
   return input;
 }
 
-export const input = makeInput();
+export function attachInput(input) {
+  window.addEventListener('keydown', (e) => {
+    // Ignore auto-repeat: only the first keydown counts as a press.
+    if (e.repeat) return;
+    input.keys.add(e.code);
+    input.pressed.add(e.code);
+    // Keep arrows / space from scrolling the page while playing.
+    if (e.code === 'Space' || e.code.indexOf('Arrow') === 0) {
+      e.preventDefault();
+    }
+  });
 
-export default input;
+  window.addEventListener('keyup', (e) => {
+    input.keys.delete(e.code);
+  });
 
-// Wire the listeners and publish the input state onto the context.
-export function init(ctx) {
-  ctx.input = input;
-  input.attach();
+  window.addEventListener('blur', () => {
+    input.keys.clear();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    input.mouse.x = e.clientX;
+    input.mouse.y = e.clientY;
+  });
+
+  window.addEventListener('mousedown', (e) => {
+    if (e.button === 0) {
+      input.mouse.down = true;
+      input.mouse.clicked = true;
+      // (added) Record whether this press began on the game canvas —
+      // the HUD is pointer-transparent, so a press over open water
+      // lands on the canvas, while a press on a panel (dialogue,
+      // pause menu, shop) lands on that panel instead.
+      input.mouse.downOnCanvas = !!(e.target && typeof e.target.closest === 'function' && e.target.closest('#game-container'));
+    }
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (e.button === 0) {
+      input.mouse.down = false;
+    }
+  });
+
+  return input;
 }

@@ -1,55 +1,70 @@
-// SOLMAR BAY — post effects (round 8, written fresh from the spec).
-// A cheap sunset colour grade on the renderer: filmic tone mapping and
-// an exposure that eases down as night falls, plus a gentle push on the
-// sunset band overlay. Everything is guarded — if the renderer or a
-// WebGL feature is missing, this module silently does nothing and the
-// game keeps rendering.
+// postfx.js — the sunset grade: vignette, sunset band, damage flash,
+// and tone mapping that follows the day/night cycle.
+// Other modules call ctx.api.flash(color, strength) for a hit flash;
+// this module owns the overlay elements and fades them back out.
+// It never touches a toast — toasts belong to the modules that set them.
+// Written fresh for round 8 from the shared contract.
 export function init(ctx) {
   const S = ctx.state;
-  let applied = false;
-  let lastNight = -1;
+  const dom = ctx.dom || {};
+  const renderer = ctx.renderer;
 
-  function grade(night) {
-    try {
-      const renderer = ctx.renderer;
-      if (!renderer) return;
-      const T = ctx.THREE;
-      // Filmic tone mapping for the warm sunset look, set once.
-      if (T && T.ACESFilmicToneMapping !== undefined && !applied) {
-        try { renderer.toneMapping = T.ACESFilmicToneMapping; } catch (e) { /* unsupported: skip */ }
-        applied = true;
-      }
-      // Exposure eases from golden hour down to night.
-      try {
-        const target = 1.06 - night * 0.18;
-        if (typeof renderer.toneMappingExposure === 'number') {
-          renderer.toneMappingExposure += (target - renderer.toneMappingExposure) * 0.2;
-        }
-      } catch (e) { /* exposure control unsupported: skip */ }
-    } catch (e) { /* renderer unavailable: nothing to grade */ }
-
-    try {
-      const band = (ctx.dom && ctx.dom['sunset-band']) || document.getElementById('sunset-band');
-      if (band) band.style.opacity = String(0.9 - night * 0.45);
-    } catch (e) { /* overlay missing: skip */ }
+  if (renderer && ctx.THREE) {
+    renderer.toneMapping = ctx.THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
   }
 
-  ctx.api.postfx = {
-    grade,
-    apply(night) { grade(typeof night === 'number' ? night : 0); },
-  };
+  let flashA = 0;
+  let vignetteTouched = false;
 
-  ctx.updates.push(function postfxUpdate() {
-    let night = 0;
-    try {
-      night = (S && S.dayNight && S.dayNight.night) || 0;
-    } catch (e) { night = 0; }
-    night = Math.max(0, Math.min(1, night));
-    // Re-grade only when the night value has moved enough to matter,
-    // plus once at startup; the work itself is just a few assignments.
-    if (Math.abs(night - lastNight) > 0.01 || lastNight < 0) {
-      lastNight = night;
-      grade(night);
+  function showFlash(color, strength) {
+    flashA = strength === undefined ? 0.55 : strength;
+    const el = dom.flash;
+    if (el) {
+      el.style.background = color || '#ff5a3c';
+      el.style.opacity = String(flashA);
     }
+  }
+  ctx.api.flash = showFlash;
+  ctx.api.flashScreen = showFlash;
+  S.postfx = { flash: showFlash };
+
+  let t = 0;
+  ctx.updates.push((dt) => {
+    t += dt;
+    const dn = S.dayNight;
+    const n = dn ? dn.night : 0;
+
+    // Sunset band: strongest at golden hour, gone by full night.
+    const band = dom['sunset-band'];
+    if (band) {
+      const o = Math.max(0, 0.55 - n * 0.55);
+      band.style.opacity = String(o.toFixed(2));
+    }
+
+    // Vignette: only touched when the player is hurt, so the default
+    // look stays exactly as the page styled it.
+    const vig = dom.vignette;
+    const hp = S.player ? S.player.health : 100;
+    if (vig) {
+      if (hp < 50) {
+        const o = 0.45 + ((50 - hp) / 50) * 0.35 + Math.sin(t * 5) * 0.05;
+        vig.style.opacity = String(Math.min(0.9, Math.max(0.3, o)).toFixed(2));
+        vignetteTouched = true;
+      } else if (vignetteTouched) {
+        vig.style.opacity = '';
+        vignetteTouched = false;
+      }
+    }
+
+    // Flash decay.
+    if (flashA > 0) {
+      flashA = Math.max(0, flashA - dt * 1.8);
+      const el = dom.flash;
+      if (el) el.style.opacity = String(flashA.toFixed(2));
+    }
+
+    // Exposure drifts down as night falls.
+    if (renderer) renderer.toneMappingExposure = 1.12 - n * 0.3;
   });
 }

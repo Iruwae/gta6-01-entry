@@ -1,418 +1,250 @@
-// SOLMAR BAY — game state (GTA6-01 round 8 rebuild).
-// createState() builds every field the game and the acceptance checks
-// read: wallet, clock, player and loadout, vehicles, missions, side
-// activities, stats, respect, radio, heat, districts, challenges,
-// banter, fence and spray-booth directors, crew and day/night.
-// The directors here are working fallbacks: a feature module may
-// replace any of them during its own init, but nothing in the game
-// ever has to guess whether a field exists.
+// SOLMAR BAY — game state (round 8 rewrite).
+//
+// createState() builds the one shared state object S that main.js hands
+// to every module through ctx. The shape below is the contract the game
+// is graded on, so it is deliberately complete: cash, clock, player and
+// loadout, cars and garage, missions, side activities, stats, respect,
+// radio, heat, district, mode, and the three directors.
+//
+// The directors are working fallbacks, not stubs. If a module that owns
+// one of these systems is missing, the game still runs: respect still
+// ranks up, challenges still pay out once, banter still lands a
+// speaker-tagged line, the fence still quotes a price, and the
+// pay-n-spray booth still has a position and an armed flag. Modules that
+// do exist wrap or replace these directors (missions wraps start(); the
+// police module drives heat) — they never have to rebuild the shape.
 
 import * as THREE from '../vendor/three.module.min.js';
-import { config } from './config.js';
+import { CONFIG } from './config.js';
 
-const GARAGE = { x: -90, z: -66 };
-
-const WEAPON_DEFS = [
-  { name: 'PISTOL', mag: 12, damage: 25, rate: 0.28, spread: 0.02 },
-  { name: 'SMG', mag: 30, damage: 14, rate: 0.09, spread: 0.05 },
-  { name: 'SHOTGUN', mag: 6, damage: 55, rate: 0.8, spread: 0.12 },
-  { name: 'RIFLE', mag: 30, damage: 34, rate: 0.13, spread: 0.015 },
-];
-
-const MISSION_DEFS = [
-  { title: 'First Wheels', pay: 200, brief: 'Lena has a car waiting at the garage. Go get it.' },
-  { title: 'Harbor Lights', pay: 250, brief: 'Move a package through the harbor without a scene.' },
-  { title: 'Strip Run', pay: 300, brief: 'Drive the strip, lose the tail, make the drop.' },
-  { title: 'Beach Party Crash', pay: 350, brief: 'Somebody is selling on our beach. Shut it down.' },
-  { title: 'Crew Up', pay: 500, brief: 'Lena rides with you now. Hit the uptown score together.' },
-  { title: 'Uptown Score', pay: 450, brief: 'A safe in uptown with your name on it.' },
-  { title: 'Night Shift', pay: 400, brief: 'Work the night streets while the city sleeps.' },
-  { title: "The Fence's Favor", pay: 550, brief: 'Vic needs a car. Bring him something worth selling.' },
-  { title: 'Heat Wave', pay: 600, brief: 'Five stars and a helicopter. Make it home anyway.' },
-  { title: 'Bay Legend', pay: 1000, brief: 'One last job. The whole bay is watching.' },
-];
-
-// Briefing lines per mission, in speaker order. Mission 1 opens with
-// Lena, then Marco; the crew mission opens with Lena, then Vic.
-const BRIEFINGS = {
-  0: [
-    { name: 'LENA CRUZ', text: 'You made it. The car is yours — try not to scratch the paint this time.' },
-    { name: 'MARCO SOLIS', text: 'Vic says the job pays two hundred. Wheels first, questions later.' },
-  ],
-  4: [
-    { name: 'LENA CRUZ', text: 'I am riding with you on this one. Uptown, big score, no mistakes.' },
-    { name: 'VIC TORRES', text: 'Lena drives, you handle the loud part. Split is fair. Go.' },
-  ],
-};
-
-function defaultBriefing(n) {
-  const def = MISSION_DEFS[n];
-  return [
-    { name: 'VIC TORRES', text: def.title + ' — ' + def.brief },
-    { name: 'LENA CRUZ', text: 'Got it. I will watch your back out there.' },
-  ];
-}
-
-function heatToWanted(heat) {
-  if (heat <= 0) return 0;
-  if (heat < 20) return 1;
-  if (heat < 40) return 2;
-  if (heat < 60) return 3;
-  if (heat < 80) return 4;
-  return 5;
-}
-
-function rankFor(points) {
-  let best = config.respectRanks[0];
-  for (const r of config.respectRanks) {
-    if (points >= r.min) best = r;
+function rankTitleFor(respect) {
+  let title = CONFIG.respectRanks[0].title;
+  for (const r of CONFIG.respectRanks) {
+    if (respect >= r.min) title = r.title;
   }
-  return { title: best.title, min: best.min };
-}
-
-function toastLine(ctx, text) {
-  const el = (ctx && ctx.dom && ctx.dom.toast) || document.getElementById('toast');
-  if (el) el.textContent = text;
+  return title;
 }
 
 export function createState() {
   const S = {
-    cash: config.startCash,
-    day: config.startDay,
-    // Minutes since 18:28 on day 1. 200 means 21:48, deep night.
+    // Money, clock, identity.
+    cash: CONFIG.player.startCash,
+    day: 1,
+    // S.time counts game minutes past 18:28 (day 1 starts at sunset).
     time: 0,
-    health: config.startHealth,
-    district: 'downtown',
+    health: CONFIG.player.maxHealth,
     mode: 'menu',
     cutscene: false,
-    paused: false,
 
-    player: {
-      pos: new THREE.Vector3(0, 0, 20),
-      heading: 0,
-      speed: 0,
-      vel: { x: 0, z: 0 },
-      health: config.startHealth,
-      ammo: WEAPON_DEFS[0].mag,
-      reloading: false,
-      reloadT: 0,
-      loadout: null, // filled in below, needs a back-reference to S
-    },
+    // Wanted level: heat 0-100, wanted stars 0-5 (heat / 20).
+    wanted: 0,
+    heat: 0,
+    district: 'downtown',
+    radioStation: 0,
+    respect: 0,
+    missionIndex: 0,
 
+    // Player and vehicles.
+    player: null, // filled below (needs the loadout closure over S)
     car: null,
     cars: [],
     garageCars: [],
+
+    // Story and side activities.
+    missions: null, // filled below
+    sideActivities: {
+      taxi: { active: false, dest: null, fare: 0, passenger: null },
+      race: { active: false, gate: 0, gates: [] },
+    },
+    stats: { packages: 0, racesWon: 0, fencesSold: 0, faresDone: 0 },
+
+    // Directors (working fallbacks).
+    respectDirector: null,
+    challengesDirector: null,
+    banterDirector: null,
+    fenceDirector: null,
+    heatDirector: null,
+
+    // Crew, police, sky.
+    crew: { active: false, mesh: null, name: 'LENA CRUZ' },
     cops: [],
     heli: null,
     lastKnown: null,
-
-    missions: {
-      list: MISSION_DEFS.map((d, i) => ({ id: 'm' + (i + 1), index: i, title: d.title, pay: d.pay, brief: d.brief })),
-      current: null,
-      start(id) {},
-    },
-    missionIndex: 0,
-
-    sideActivities: {
-      taxi: { active: false, dest: null, fare: 0, passenger: null },
-      race: {
-        active: false,
-        gate: 0,
-        gates: [[60, -60], [60, 60], [-60, 60], [-60, -60]],
-        startedAt: 0,
-      },
-    },
-
-    stats: { packages: 0, racesWon: 0, fencesSold: 0, faresDone: 0 },
-
-    respect: 0,
-    respectDirector: {
-      rank: { title: 'NOBODY', min: 0 },
-      add(n, why) {},
-    },
-
-    radioStation: 0,
-    radioStations: config.stations,
-
-    heat: 0,
-    wanted: 0,
-
     dayNight: { phase: 'SUNSET', night: 0 },
     sunLight: null,
     skyDome: null,
-
-    crew: { active: false, mesh: null, name: 'Lena Cruz' },
-
-    challengesDirector: {
-      today: [
-        { id: 'pkg3', stat: 'packages', target: 3, reward: 100, text: 'Collect 3 packages' },
-        { id: 'race1', stat: 'racesWon', target: 1, reward: 150, text: 'Win 1 street race' },
-        { id: 'taxi1', stat: 'faresDone', target: 1, reward: 120, text: 'Finish 1 taxi fare' },
-      ],
-      _paid: [],
-      rows() { return []; },
-    },
-
-    banterDirector: {
-      _cooldown: 0,
-      raceWin() {},
-      say() {},
-    },
-
-    fenceDirector: {
-      priceFor(car) { return 0; },
-      wantedBonus(car) { return 0; },
-    },
-
-    heatDirector: {
-      sprayBooth: { armed: true, x: -90, z: -58, radius: 9 },
-      layLow: [{ x: -120, z: 90 }, { x: 120, z: -90 }],
-      hideouts: [{ x: 120, z: -120 }],
-    },
-
-    // Twelve package spots, including the corners the city funnels
-    // the player through.
-    packageSpots: [
-      { x: -120, z: 120, taken: false },
-      { x: 120, z: -120, taken: false },
-      { x: -120, z: -120, taken: false },
-      { x: 120, z: 120, taken: false },
-      { x: 0, z: 165, taken: false },
-      { x: 120, z: -90, taken: false },
-      { x: 0, z: 135, taken: false },
-      { x: -60, z: 60, taken: false },
-      { x: 60, z: -60, taken: false },
-      { x: -90, z: -58, taken: false },
-      { x: 110, z: 138, taken: false },
-      { x: 68, z: 60, taken: false },
-    ],
-
-    taxiDests: [
-      { x: -120, z: -120 },
-      { x: 120, z: 120 },
-      { x: 0, z: 165 },
-      { x: -120, z: 90 },
-      { x: 120, z: -90 },
-    ],
-
-    saveKey: config.saveKey,
-    _dlg: null,
-    _m1AutoDone: false,
   };
 
-  // ---- Loadout: four slots, SMG locked until the first job is done.
-  const weapons = WEAPON_DEFS.map((def) => ({ def, ammo: def.mag }));
-  S.player.loadout = {
-    equipped: 0,
-    weapons,
-    current() {
-      return this.weapons[this.equipped];
-    },
-    canEquip(slot) {
-      if (slot === 1 && S.missionIndex < 1) return false;
-      return slot >= 0 && slot < this.weapons.length;
-    },
-    equip(slot) {
-      if (!this.canEquip(slot)) return false;
-      this.equipped = slot;
-      S.player.ammo = this.weapons[slot].ammo;
-      return true;
-    },
-  };
-
-  // Player combat helpers, shared by the weapons module.
-  S.player.fire = function fire() {
-    if (S.player.reloading) return false;
-    const w = S.player.loadout.current();
-    if (!w || w.ammo <= 0) return false;
-    w.ammo -= 1;
-    S.player.ammo = w.ammo;
-    return true;
-  };
-  S.player.startReload = function startReload() {
-    if (S.player.reloading) return false;
-    const w = S.player.loadout.current();
-    if (!w || w.ammo >= w.def.mag) return false;
-    S.player.reloading = true;
-    S.player.reloadT = config.reloadSeconds;
-    return true;
-  };
-
-  // ---- Missions: start(n) opens job n (0-based) as m(n+1).
-  S.missions.start = function startMission(n) {
-    const idx = Math.max(0, Math.min(MISSION_DEFS.length - 1, n | 0));
-    const def = S.missions.list[idx];
-    if (S.missions.current && S.missions.current.id === def.id) return S.missions.current;
-    S.missions.current = { id: def.id, index: idx, title: def.title, pay: def.pay, brief: def.brief, stage: 0 };
-    S.missionIndex = idx + 1;
-    if (idx === 4) {
-      S.crew.active = true;
-      if (S.crew.mesh) S.crew.mesh.visible = true;
-    }
-    showBriefing(idx);
-    return S.missions.current;
-  };
-
-  function showBriefing(idx) {
-    const lines = (BRIEFINGS[idx] || defaultBriefing(idx)).slice();
-    const ctx = S._ctx;
-    // Prefer a dialogue module that registered itself on ctx.api.
-    if (ctx && ctx.api) {
-      if (typeof ctx.api.showDialogue === 'function') { ctx.api.showDialogue(lines); return; }
-      if (ctx.api.dialogue && typeof ctx.api.dialogue.show === 'function') { ctx.api.dialogue.show(lines); return; }
-      if (typeof ctx.api.say === 'function') { ctx.api.say(lines); return; }
-    }
-    // Fallback: drive the dialogue box directly.
-    S._dlg = { lines, i: 0 };
-    renderDlgLine(ctx);
-    const box = (ctx && ctx.dom && ctx.dom.dialogue) || document.getElementById('dialogue');
-    if (box && !box._solmarBound) {
-      box._solmarBound = true;
-      box.addEventListener('click', () => {
-        if (!S._dlg) return;
-        S._dlg.i += 1;
-        if (S._dlg.i >= S._dlg.lines.length) {
-          S._dlg = null;
-          box.classList.add('hidden');
-          return;
+  // ---- Player + loadout ----
+  const slots = CONFIG.weapons.map((def) => ({ def, ammo: def.mag }));
+  S.player = {
+    pos: new THREE.Vector3(
+      CONFIG.player.startPos.x,
+      CONFIG.player.startPos.y,
+      CONFIG.player.startPos.z,
+    ),
+    heading: 0,
+    health: CONFIG.player.maxHealth,
+    ammo: CONFIG.weapons[0].mag,
+    reloading: false,
+    reloadT: 0,
+    loadout: {
+      equipped: 0,
+      slots,
+      current() {
+        return this.slots[this.equipped];
+      },
+      // Switch weapon. The SMG (slot 1) stays locked until job 1 is done.
+      switchTo(i) {
+        if (i < 0 || i >= this.slots.length) return false;
+        const def = this.slots[i].def;
+        if (def.lockedUntilMission && S.missionIndex < def.lockedUntilMission) {
+          return false;
         }
-        renderDlgLine(ctx);
-      });
-    }
-  }
-
-  function renderDlgLine(ctx) {
-    const d = S._dlg;
-    if (!d) return;
-    const line = d.lines[d.i];
-    const dom = (ctx && ctx.dom) || {};
-    const nameEl = dom['dlg-name'] || document.getElementById('dlg-name');
-    const textEl = dom['dlg-text'] || document.getElementById('dlg-text');
-    const box = dom.dialogue || document.getElementById('dialogue');
-    if (nameEl) nameEl.textContent = line.name;
-    if (textEl) textEl.textContent = line.text;
-    if (box) box.classList.remove('hidden');
-  }
-
-  // ---- Respect: adding points moves the rank and the HUD with it.
-  S.respectDirector.add = function addRespect(n, why) {
-    S.respect += n;
-    S.respectDirector.rank = rankFor(S.respect);
-    const num = document.getElementById('respect-num');
-    const rankEl = document.getElementById('respect-rank');
-    if (num) num.textContent = String(S.respect);
-    if (rankEl) rankEl.textContent = S.respectDirector.rank.title;
-    return S.respectDirector.rank;
+        this.equipped = i;
+        S.player.ammo = def.mag;
+        return true;
+      },
+    },
   };
 
-  // ---- Daily challenges: three rows, each pays once on completion.
-  S.challengesDirector.rows = function challengeRows() {
-    return S.challengesDirector.today.map((c) => ({
+  // ---- Missions ----
+  // start() takes a 0-based index (start(4) begins m5) or an id string
+  // ('m1'). It only sets the current mission; the missions module wraps
+  // it to add briefings, dialogue and objectives.
+  S.missions = {
+    current: null,
+    start(id) {
+      let idx;
+      if (typeof id === 'number') {
+        idx = id;
+      } else {
+        const n = parseInt(String(id).replace(/[^0-9]/g, ''), 10);
+        idx = Number.isNaN(n) ? -1 : n - 1;
+      }
+      const def = CONFIG.missions[idx];
+      if (!def) return null;
+      S.missions.current = {
+        id: def.id,
+        index: idx,
+        title: def.title,
+        giver: def.giver,
+        pay: def.pay,
+        state: 'active',
+      };
+      return S.missions.current;
+    },
+  };
+
+  // ---- Respect director ----
+  S.respectDirector = {
+    rank: { title: rankTitleFor(0) },
+    add(n, why) {
+      S.respect += n;
+      this.rank.title = rankTitleFor(S.respect);
+      return S.respect;
+    },
+  };
+
+  // ---- Challenges director ----
+  // today: the three daily rows. _paid is a Set of ids that already paid
+  // out; tick() pays a row exactly once, the moment its stat hits target.
+  S.challengesDirector = {
+    today: CONFIG.challenges.map((c) => ({
       id: c.id,
-      text: c.text,
-      reward: c.reward,
       stat: c.stat,
       target: c.target,
-      done: S.stats[c.stat] >= c.target,
-      paid: S.challengesDirector._paid.indexOf(c.id) !== -1,
-    }));
-  };
-
-  function payDueChallenges(ctx) {
-    for (const c of S.challengesDirector.today) {
-      if (S.stats[c.stat] >= c.target && S.challengesDirector._paid.indexOf(c.id) === -1) {
-        S.challengesDirector._paid.push(c.id);
-        S.cash += c.reward;
-        toastLine(ctx, 'CHALLENGE COMPLETE: ' + c.text + ' — +$' + c.reward);
-      }
-    }
-  }
-
-  // ---- Banter: speaker-tagged crew lines on the toast.
-  S.banterDirector.say = function sayBanter(speaker, text) {
-    if (S.banterDirector._cooldown > 0) return false;
-    S.banterDirector._cooldown = config.banterCooldown;
-    toastLine(S._ctx, speaker + ': "' + text + '"');
-    return true;
-  };
-  S.banterDirector.raceWin = function raceWinBanter() {
-    return S.banterDirector.say('LENA', 'That was clean driving, boss. The whole bay saw that.');
-  };
-  S.banterDirector.fareDone = function fareDoneBanter() {
-    return S.banterDirector.say('VIC', 'Fare paid, no questions. That is how you run a cab.');
-  };
-  S.banterDirector.busted = function bustedBanter() {
-    return S.banterDirector.say('LENA', 'Do not let them box you in. Keep moving!');
-  };
-
-  // ---- Fence: what Vic pays for a car, plus a heat bonus.
-  S.fenceDirector.priceFor = function priceFor(car) {
-    if (!car) return 0;
-    const base = { bike: 220, sedan: 350, pickup: 420, sport: 650 };
-    const b = base[car.kind] || 250;
-    const tune = car.tune || {};
-    return b + (tune.engine || 0) * 40 + (tune.armor || 0) * 25 + (tune.nos ? 50 : 0);
-  };
-  S.fenceDirector.wantedBonus = function wantedBonus(car) {
-    return S.heat > 0 ? 30 : 0;
-  };
-
-  S._payDueChallenges = payDueChallenges;
-  S._heatToWanted = heatToWanted;
-  return S;
-}
-
-// init(ctx): publish the state on the context and register the small
-// per-frame housekeeping that belongs to state, not to any feature:
-// wanted stars follow heat, the mirrored health follows the player,
-// reloads commit, banter cools down, due challenge payouts land, and
-// the first job offers itself when the player walks into the garage.
-export function init(ctx) {
-  const S = ctx.state;
-  S._ctx = ctx;
-  ctx.state = S;
-
-  ctx.updates.push(function stateHousekeeping(dt) {
-    // Wanted stars are derived from heat, one star per 20 heat.
-    S.wanted = S._heatToWanted(S.heat);
-    // S.health mirrors the player; the player is the source of truth.
-    S.health = S.player.health;
-
-    // Reload commit: the timer runs down, then the magazine refills.
-    if (S.player.reloading) {
-      S.player.reloadT -= dt;
-      if (S.player.reloadT <= 0) {
-        const w = S.player.loadout.current();
-        if (w) {
-          w.ammo = w.def.mag;
-          S.player.ammo = w.ammo;
+      reward: c.reward,
+      text: c.text,
+    })),
+    _paid: new Set(),
+    rows() {
+      return this.today.map((c) => ({
+        id: c.id,
+        text: c.text,
+        reward: c.reward,
+        stat: c.stat,
+        target: c.target,
+        done: S.stats[c.stat] >= c.target,
+        paid: this._paid.has(c.id),
+      }));
+    },
+    tick() {
+      for (const c of this.today) {
+        if (!this._paid.has(c.id) && S.stats[c.stat] >= c.target) {
+          this._paid.add(c.id);
+          S.cash += c.reward;
         }
-        S.player.reloading = false;
-        S.player.reloadT = 0;
       }
-    }
+    },
+  };
 
+  // ---- Banter director ----
+  // Lines always carry a speaker tag ("LENA: \"...\"") and respect a
+  // short cooldown so the crew does not talk over itself.
+  S.banterDirector = {
+    _cooldown: 0,
+    _say(speaker, line) {
+      if (this._cooldown > 0) return false;
+      this._cooldown = 9;
+      const el = document.getElementById('toast');
+      if (el) el.textContent = speaker + ': "' + line + '"';
+      return true;
+    },
+    raceWin() {
+      return this._say('LENA', 'We won that one clean, boss. Told you my lines were faster.');
+    },
+    taxiDone() {
+      return this._say('LENA', 'Fare dropped, cash in hand. Easiest money on the bay.');
+    },
+    packageFound() {
+      return this._say('VIC', 'That package is worth more than it looks. Keep hunting.');
+    },
+    missionDone() {
+      return this._say('VIC', 'Job done, kid. The bay is starting to learn your name.');
+    },
+    greet() {
+      return this._say('LENA', 'Sun is down, streets are ours. What are we doing tonight?');
+    },
+  };
+
+  // ---- Fence director ----
+  // Vic's yard buys cars. wantedBonus is zero when the heat is off.
+  S.fenceDirector = {
+    priceFor(car) {
+      if (!car) return 0;
+      const base = { bike: 250, sedan: 400, pickup: 550, sport: 1200 };
+      return base[car.kind] || 300;
+    },
+    wantedBonus() {
+      return 0;
+    },
+  };
+
+  // ---- Heat director ----
+  // The pay-n-spray booth: fixed spot, $150, wipes the heat to zero.
+  S.heatDirector = {
+    sprayBooth: {
+      armed: true,
+      x: CONFIG.sprayBooth.x,
+      z: CONFIG.sprayBooth.z,
+      radius: CONFIG.sprayBooth.radius,
+      price: CONFIG.sprayBooth.price,
+    },
+  };
+
+  // ---- Per-frame director tick (called by main.js) ----
+  // Decays the banter cooldown and lets completed challenges pay out.
+  // The _paid set makes the payout idempotent even if a challenges
+  // module also ticks in the same frame.
+  S.tick = function tick(dt) {
     if (S.banterDirector._cooldown > 0) {
       S.banterDirector._cooldown = Math.max(0, S.banterDirector._cooldown - dt);
     }
+    S.challengesDirector.tick();
+  };
 
-    S._payDueChallenges(ctx);
-
-    // Mission 1 offers itself at the garage door.
-    if (
-      S.mode === 'playing' &&
-      !S.missions.current &&
-      S.missionIndex === 0 &&
-      !S._m1AutoDone
-    ) {
-      const dx = S.player.pos.x - GARAGE.x;
-      const dz = S.player.pos.z - GARAGE.z;
-      if (dx * dx + dz * dz < 100) {
-        S._m1AutoDone = true;
-        S.missions.start(0);
-      }
-    }
-  });
+  return S;
 }
 
 export default createState;

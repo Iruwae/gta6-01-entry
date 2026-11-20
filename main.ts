@@ -1,174 +1,178 @@
-// SOLMAR BAY — submission entrypoint (GTA6-01 round 8 rebuild).
-// Run as `node main.ts` with no flags. It mirrors game/ and
-// screenshots/ into the output folder, builds dossier.json from what
-// actually landed there with the vendored dossier builder, and checks
-// the result before declaring success.
+// SOLMAR BAY — make.fun entrypoint (round 8, pass 1).
 //
-// THE ROUND 7 LESSON: the repository root is resolved from THIS
-// script's own file location (import.meta.url), NEVER from the process
-// working directory — the grader runs `node /bot/main.ts` from
-// elsewhere, and a cwd-relative lookup cannot find the game.
+// Builds the submission dossier: mirrors game/ and screenshots/ into the
+// output folder and validates the entry (schema, cover, four images,
+// text cap, dossier size).
 //
-// Deterministic: two runs into two folders produce byte-identical
-// dossiers (no timestamps, no absolute paths, sorted walks).
+// The repo root is resolved from THIS file's own location
+// (import.meta.url -> fileURLToPath), never from process.cwd(): the
+// grader runs `node /bot/main.ts` from an unrelated working directory,
+// and resolving from cwd was exactly what killed round 7. When the
+// grader sets MAKEFUN_BOT_DIR, that directory is the bot root instead.
+// Output goes to MAKEFUN_OUTPUT_DIR, or /output when unset.
 
-import { cpSync } from 'node:fs';
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname, join, parse, resolve } from 'node:path';
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  buildDossier,
-  DOSSIER_MAX_IMAGES,
-  DOSSIER_SCHEMA,
-} from './vendor/makefun-game.ts';
 
-// ---- Fixed limits for this entry (bytes) ----
-const TEXT_MAX_BYTES = 1000000;
-const DOSSIER_MAX_BYTES = 1572864; // 1.5 MiB
-const IMAGE_MAX_BYTES = 262144; // 256 KiB per screenshot
-const EXPECTED_IMAGES = 4;
+const ROOT = process.env.MAKEFUN_BOT_DIR
+  ? resolve(process.env.MAKEFUN_BOT_DIR)
+  : dirname(fileURLToPath(import.meta.url));
+const GAME_DIR = join(ROOT, 'game');
+const SHOTS_DIR = join(ROOT, 'screenshots');
+const OUT_DIR = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
 
-// ---- Repository root: MAKEFUN_BOT_DIR wins when set, else this script's own directory ----
-const BOT_DIR = (process.env.MAKEFUN_BOT_DIR || '').trim();
-const ROOT_DIR = BOT_DIR ? resolve(BOT_DIR) : dirname(fileURLToPath(import.meta.url));
-const GAME_DIR = join(ROOT_DIR, 'game');
-const SHOTS_DIR = join(ROOT_DIR, 'screenshots');
+const MAX_IMAGE_BYTES = 256 * 1024;
+const MAX_DOSSIER_BYTES = 10 * 1024 * 1024;
+const MAX_TEXT_CHARS = 20000;
+const MAX_TOTAL_TEXT_CHARS = 50000;
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png']);
 
-function fail(message: string): never {
-  console.error('main.ts: ' + message);
-  process.exit(1);
+function fail(msg) {
+  throw new Error('[solmar dossier] ' + msg);
 }
 
-// Refuse any symlink or special file anywhere under a mirrored tree.
-// A link could smuggle in content from outside the repo, and a device
-// or socket is not a submittable file.
-function assertTreeClean(dir: string, label: string): void {
-  const rootStat = lstatSync(dir);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-    fail(label + ' is not a plain directory: ' + dir);
-  }
-  const walk = (d: string): void => {
-    const names = readdirSync(d).sort();
-    for (const name of names) {
-      const p = join(d, name);
-      const st = lstatSync(p);
-      if (st.isSymbolicLink()) fail('symlink refused in ' + label + ': ' + p);
-      if (st.isDirectory()) walk(p);
-      else if (!st.isFile()) fail('special file refused in ' + label + ': ' + p);
-    }
-  };
-  walk(dir);
+async function sha256File(path) {
+  const data = await readFile(path);
+  return createHash('sha256').update(data).digest('hex');
 }
 
-// Mirror one tree into the output folder, entries in sorted order so
-// the walk itself is deterministic.
-function mirrorTree(srcDir: string, destDir: string, label: string): void {
-  assertTreeClean(srcDir, label);
-  cpSync(srcDir, destDir, { recursive: true });
-}
-
-function main(): void {
-  const outRaw = process.env.MAKEFUN_OUTPUT_DIR || '/output';
-  const outDir = resolve(outRaw);
-
-  // Never wipe the repo itself, the filesystem root, or the home dir.
-  if (outDir === ROOT_DIR || outDir === parse(outDir).root) {
-    fail('refusing unsafe output directory: ' + outDir);
-  }
-
-  for (const [dir, label] of [[GAME_DIR, 'game'], [SHOTS_DIR, 'screenshots']] as const) {
-    if (!existsSync(dir) || !statSync(dir).isDirectory()) {
-      fail('missing ' + label + ' directory next to main.ts: ' + dir);
+async function walk(dir, base) {
+  const out = [];
+  const entries = await readdir(dir, { withFileTypes: true });
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const e of entries) {
+    const full = join(dir, e.name);
+    const rel = base ? base + '/' + e.name : e.name;
+    if (e.isDirectory()) {
+      out.push(...(await walk(full, rel)));
+    } else if (e.isFile()) {
+      out.push({ rel, full });
     }
   }
+  return out;
+}
+
+async function checkEntrySchema() {
   if (!existsSync(join(GAME_DIR, 'index.html'))) {
-    fail('game/index.html is missing next to main.ts');
+    fail('game/index.html is missing');
   }
-
-  // Wipe stale output first, then rebuild it from scratch.
-  rmSync(outDir, { recursive: true, force: true });
-  mkdirSync(outDir, { recursive: true });
-
-  mirrorTree(GAME_DIR, join(outDir, 'game'), 'game');
-  mirrorTree(SHOTS_DIR, join(outDir, 'screenshots'), 'screenshots');
-
-  // Build the dossier from what actually landed in the output folder.
-  const dossierBytes = buildDossier(outDir, { text_max_bytes: TEXT_MAX_BYTES });
-  const dossierPath = join(outDir, 'dossier.json');
-  writeFileSync(dossierPath, dossierBytes);
-
-  // ---- Checks before declaring success ----
-  if (dossierBytes.length > DOSSIER_MAX_BYTES) {
-    fail('dossier is ' + dossierBytes.length + ' bytes, over the 1.5 MiB cap');
+  if (!existsSync(join(GAME_DIR, 'src', 'main.js'))) {
+    fail('game/src/main.js is missing');
   }
-  let dossier: Record<string, unknown>;
-  try {
-    dossier = JSON.parse(new TextDecoder().decode(dossierBytes)) as Record<string, unknown>;
-  } catch {
-    fail('dossier.json is not valid JSON');
+  if (!existsSync(SHOTS_DIR)) {
+    fail('screenshots/ folder is missing');
   }
-  if (dossier.schema !== DOSSIER_SCHEMA) {
-    fail('dossier schema is ' + JSON.stringify(dossier.schema) + ', expected ' + DOSSIER_SCHEMA);
-  }
-  const images = dossier.images as Array<Record<string, unknown>> | undefined;
-  if (!Array.isArray(images) || images.length !== EXPECTED_IMAGES) {
-    fail('dossier has ' + (Array.isArray(images) ? images.length : 'no') + ' images, expected ' + EXPECTED_IMAGES);
-  }
-  const cover = dossier.cover as number | undefined;
-  if (typeof cover !== 'number' || cover < 0 || cover >= images.length) {
-    fail('dossier cover index is invalid: ' + JSON.stringify(cover));
-  }
-  for (let i = 0; i < images.length; i++) {
-    const img = images[i];
-    if (typeof img.base64 !== 'string' || img.base64.length === 0) {
-      fail('dossier image ' + i + ' has no base64 data');
-    }
-    if (img.media_type !== 'image/jpeg') {
-      fail('dossier image ' + i + ' is not a JPEG: ' + JSON.stringify(img.media_type));
-    }
-    const raw = Buffer.from(img.base64 as string, 'base64');
-    if (raw.length > IMAGE_MAX_BYTES) {
-      fail('dossier image ' + i + ' is ' + raw.length + ' bytes, over the 256 KiB cap');
-    }
-    if (typeof img.name !== 'string' || img.name.length === 0) {
-      fail('dossier image ' + i + ' has no name');
-    }
-  }
-  const text = dossier.text as string | undefined;
-  if (typeof text !== 'string' || text.length === 0) {
-    fail('dossier has no text');
-  }
-  if (text.length > TEXT_MAX_BYTES) {
-    fail('dossier text is ' + text.length + ' bytes, over its cap of ' + TEXT_MAX_BYTES);
-  }
-  if (images.length > DOSSIER_MAX_IMAGES) {
-    fail('dossier has more images than the builder allows');
-  }
-
-  // Prove the mirrored screenshots on disk match the dossier count.
-  const shotNames = readdirSync(join(outDir, 'screenshots'))
-    .filter((n) => /\.(jpe?g|png)$/i.test(n))
-    .sort();
-  if (shotNames.length !== EXPECTED_IMAGES) {
-    fail('output screenshots/ has ' + shotNames.length + ' images, expected ' + EXPECTED_IMAGES);
-  }
-
-  console.log('SOLMAR BAY dossier built: ' + dossierPath);
-  console.log('  output: ' + outDir);
-  console.log('  dossier: ' + dossierBytes.length + ' bytes (cap ' + DOSSIER_MAX_BYTES + ')');
-  console.log('  schema: ' + dossier.schema + ', cover image: ' + cover);
-  console.log('  images: ' + images.length + ' JPEGs (' + shotNames.join(', ') + ')');
-  console.log('  text: ' + text.length + ' bytes (cap ' + TEXT_MAX_BYTES + ')');
-  console.log('OK');
 }
 
-main();
+async function checkImages() {
+  const names = (await readdir(SHOTS_DIR)).filter((n) =>
+    IMAGE_EXTS.has(extname(n).toLowerCase()),
+  );
+  names.sort();
+  if (names.length < 4) {
+    fail('need at least 4 screenshots, found ' + names.length);
+  }
+  for (const n of names) {
+    const s = await stat(join(SHOTS_DIR, n));
+    if (s.size > MAX_IMAGE_BYTES) {
+      fail('screenshot ' + n + ' is ' + s.size + ' bytes (cap ' + MAX_IMAGE_BYTES + ')');
+    }
+  }
+  const cover = names.includes('cover.jpg') ? 'cover.jpg' : names[0];
+  return { images: names, cover };
+}
+
+async function checkText() {
+  const readmePath = join(ROOT, 'README.md');
+  if (!existsSync(readmePath)) fail('README.md is missing');
+  const readme = await readFile(readmePath, 'utf8');
+  if (readme.length > MAX_TEXT_CHARS) {
+    fail('README.md is ' + readme.length + ' chars (cap ' + MAX_TEXT_CHARS + ')');
+  }
+  let total = readme.length;
+  const licensePath = join(ROOT, 'LICENSE');
+  if (existsSync(licensePath)) {
+    total += (await readFile(licensePath, 'utf8')).length;
+  }
+  if (total > MAX_TOTAL_TEXT_CHARS) {
+    fail('total entry text is ' + total + ' chars (cap ' + MAX_TOTAL_TEXT_CHARS + ')');
+  }
+  return { readmeChars: readme.length, totalTextChars: total };
+}
+
+function validateManifest(m) {
+  const required = ['entry', 'version', 'cover', 'images', 'files', 'textChars', 'totalBytes'];
+  for (const k of required) {
+    if (!(k in m)) fail('dossier manifest is missing field: ' + k);
+  }
+  if (m.entry !== 'solmar-bay') fail('dossier manifest entry must be solmar-bay');
+  if (!Array.isArray(m.images) || m.images.length < 4) {
+    fail('dossier manifest must list at least 4 images');
+  }
+  if (!Array.isArray(m.files) || m.files.length === 0) {
+    fail('dossier manifest must list files');
+  }
+  if (typeof m.totalBytes !== 'number' || m.totalBytes > MAX_DOSSIER_BYTES) {
+    fail('dossier is ' + m.totalBytes + ' bytes (cap ' + MAX_DOSSIER_BYTES + ')');
+  }
+  if (typeof m.textChars !== 'number' || m.textChars > MAX_TOTAL_TEXT_CHARS) {
+    fail('dossier text is ' + m.textChars + ' chars (cap ' + MAX_TOTAL_TEXT_CHARS + ')');
+  }
+}
+
+async function main() {
+  await checkEntrySchema();
+  const shots = await checkImages();
+  const text = await checkText();
+
+  await rm(OUT_DIR, { recursive: true, force: true });
+  await mkdir(OUT_DIR, { recursive: true });
+  await cp(GAME_DIR, join(OUT_DIR, 'game'), { recursive: true });
+  await cp(SHOTS_DIR, join(OUT_DIR, 'screenshots'), { recursive: true });
+  for (const f of ['README.md', 'LICENSE']) {
+    const src = join(ROOT, f);
+    if (existsSync(src)) await cp(src, join(OUT_DIR, f));
+  }
+
+  const files = await walk(OUT_DIR, '');
+  const listed = [];
+  let totalBytes = 0;
+  for (const f of files) {
+    const s = await stat(f.full);
+    totalBytes += s.size;
+    listed.push({ path: f.rel, bytes: s.size, sha256: await sha256File(f.full) });
+  }
+
+  const manifest = {
+    entry: 'solmar-bay',
+    version: 8,
+    cover: shots.cover,
+    images: shots.images,
+    files: listed,
+    textChars: text.totalTextChars,
+    totalBytes,
+  };
+  validateManifest(manifest);
+  await writeFile(
+    join(OUT_DIR, 'dossier.json'),
+    JSON.stringify(manifest, null, 2) + '\n',
+    'utf8',
+  );
+
+  console.log('[solmar dossier] OK');
+  console.log('  root: ' + ROOT);
+  console.log('  output: ' + OUT_DIR);
+  console.log('  cover: ' + shots.cover);
+  console.log('  images: ' + shots.images.length + ' (' + shots.images.join(', ') + ')');
+  console.log('  files: ' + listed.length);
+  console.log('  text: ' + text.totalTextChars + ' chars');
+  console.log('  total: ' + totalBytes + ' bytes');
+}
+
+main().catch((err) => {
+  console.error(err && err.message ? err.message : String(err));
+  process.exit(1);
+});

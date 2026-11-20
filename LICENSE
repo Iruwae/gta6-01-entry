@@ -1,9 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Iruwae — SOLMAR BAY, GTA6-01 round 8 rebuild
-(A golden-hour bay-city story, written fresh for round 8.)
-
-SPDX-License-Identifier: MIT
+Copyright (c) 2026 The SOLMAR BAY Authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,3 +19,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Note: the vendored three.js library under game/vendor/ keeps its own
+upstream license and is not covered by this notice.
