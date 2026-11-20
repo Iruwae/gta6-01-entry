@@ -1,54 +1,55 @@
-// Solmar Bay — post effects (round 7 rebuild).
-// A cheap sunset colour grade done entirely through the renderer:
-// filmic tone mapping with an exposure that eases down as night
-// falls. No composer, no extra passes, no new render targets —
-// and every step is guarded, so a missing WebGL feature can only
-// ever leave the grade off, never break the frame.
+// SOLMAR BAY — post effects (round 8, written fresh from the spec).
+// A cheap sunset colour grade on the renderer: filmic tone mapping and
+// an exposure that eases down as night falls, plus a gentle push on the
+// sunset band overlay. Everything is guarded — if the renderer or a
+// WebGL feature is missing, this module silently does nothing and the
+// game keeps rendering.
 export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  const renderer = ctx.renderer;
-  const T = ctx.THREE;
+  const S = ctx.state;
+  let applied = false;
+  let lastNight = -1;
 
-  let exposure = 1.12;
-  let active = false;
-
-  function applyGrade(night) {
-    if (!renderer) return;
+  function grade(night) {
     try {
-      // Filmic tone mapping gives the sunset its warm roll-off.
-      const filmic = T && typeof T.ACESFilmicToneMapping !== 'undefined'
-        ? T.ACESFilmicToneMapping : 4;
-      if (renderer.toneMapping !== filmic) renderer.toneMapping = filmic;
-      const target = 1.12 - 0.3 * Math.max(0, Math.min(1, night));
-      exposure += (target - exposure) * 0.08;
-      renderer.toneMappingExposure = exposure;
-      active = true;
-    } catch (err) {
-      // A renderer that refuses the grade still renders the scene.
-      active = false;
-    }
+      const renderer = ctx.renderer;
+      if (!renderer) return;
+      const T = ctx.THREE;
+      // Filmic tone mapping for the warm sunset look, set once.
+      if (T && T.ACESFilmicToneMapping !== undefined && !applied) {
+        try { renderer.toneMapping = T.ACESFilmicToneMapping; } catch (e) { /* unsupported: skip */ }
+        applied = true;
+      }
+      // Exposure eases from golden hour down to night.
+      try {
+        const target = 1.06 - night * 0.18;
+        if (typeof renderer.toneMappingExposure === 'number') {
+          renderer.toneMappingExposure += (target - renderer.toneMappingExposure) * 0.2;
+        }
+      } catch (e) { /* exposure control unsupported: skip */ }
+    } catch (e) { /* renderer unavailable: nothing to grade */ }
+
+    try {
+      const band = (ctx.dom && ctx.dom['sunset-band']) || document.getElementById('sunset-band');
+      if (band) band.style.opacity = String(0.9 - night * 0.45);
+    } catch (e) { /* overlay missing: skip */ }
   }
 
-  // Try once up front so the very first frame is already graded.
-  try {
-    applyGrade(S.dayNight && typeof S.dayNight.night === 'number' ? S.dayNight.night : 0);
-  } catch (err) {
-    active = false;
-  }
-
-  const postfx = {
-    setGrade(night) {
-      try { applyGrade(night); } catch (err) { /* grade is optional */ }
-    },
-    get exposure() { return exposure; },
-    get active() { return active; },
+  ctx.api.postfx = {
+    grade,
+    apply(night) { grade(typeof night === 'number' ? night : 0); },
   };
-  ctx.api.postfx = postfx;
-  S.postfx = postfx;
 
-  ctx.updates.push(() => {
-    if (!renderer) return;
-    const night = S.dayNight && typeof S.dayNight.night === 'number' ? S.dayNight.night : 0;
-    try { applyGrade(night); } catch (err) { /* never break rendering */ }
+  ctx.updates.push(function postfxUpdate() {
+    let night = 0;
+    try {
+      night = (S && S.dayNight && S.dayNight.night) || 0;
+    } catch (e) { night = 0; }
+    night = Math.max(0, Math.min(1, night));
+    // Re-grade only when the night value has moved enough to matter,
+    // plus once at startup; the work itself is just a few assignments.
+    if (Math.abs(night - lastNight) > 0.01 || lastNight < 0) {
+      lastNight = night;
+      grade(night);
+    }
   });
 }

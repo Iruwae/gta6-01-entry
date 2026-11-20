@@ -1,30 +1,33 @@
 {
+  "game": "SOLMAR BAY",
+  "entry": "GTA6-01 round 8",
+  "width": 1280,
+  "height": 720,
+  "maxBytes": 262144,
   "shots": [
     {
-      "file": "1-chase.jpg",
-      "bytes": 61201,
+      "file": "shot-1-chase.jpg",
+      "bytes": 75740,
       "cash": 500,
-      "note": "Police chase downtown at golden hour — four wanted stars, patrol cars closing in, helicopter overhead, roster on screen."
+      "note": "Police chase downtown — 5 stars, helicopter overhead, patrol cars closing in."
     },
     {
-      "file": "2-mission.jpg",
-      "bytes": 62001,
+      "file": "shot-2-briefing.jpg",
+      "bytes": 105665,
       "cash": 500,
-      "note": "Mission briefing at the garage — Lena Cruz opens the first job in the dialogue box."
+      "note": "Mission 1 briefing at the garage — Lena Cruz lays out the first job."
     },
     {
-      "file": "3-drive.jpg",
-      "bytes": 50338,
+      "file": "shot-3-race.jpg",
+      "bytes": 58506,
       "cash": 500,
-      "note": "Street race from the start pad — race HUD live, speedometer climbing, city streets ahead."
+      "note": "Street race in the sport car — charging toward the first checkpoint gate."
     },
     {
-      "file": "4-onfoot.jpg",
-      "bytes": 45024,
-      "cash": 550,
-      "note": "Night ride on the bike — lit-up streets after dark, city lights on, HUD glowing."
+      "file": "shot-4-night-bike.jpg",
+      "bytes": 50340,
+      "cash": 500,
+      "note": "Night ride on the bike — the bay lit up after dark."
     }
-  ],
-  "failed": [],
-  "errors": []
+  ]
 }

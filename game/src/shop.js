@@ -1,57 +1,109 @@
-// SOLMAR BAY — the MART corner store (round 7 rebuild, builder D).
-// Press F near the MART to open the shop. Every row shows a name, a
-// price and a buy button; buying deducts cash and applies the effect on
-// the spot. The Burger is the cheap heal: $15 for 25 HP.
+// shop.js — SOLMAR BAY, round 8 rebuild.
+// The MART corner store at (-72, -60). Press F nearby to open it. Every
+// row shows a name, a price, and a buy button; buying takes the cash
+// off the player and applies the effect at once. Food heals, the medkit
+// heals a lot, and the ammo box refills the magazine of the weapon in
+// hand.
 
-const MART = { x: -72, z: -60 };
-const MART_RADIUS = 18;
+const MART = { x: -72, z: -60, r: 9 };
 
 const ITEMS = [
-  { name: 'Burger', price: 15, heal: 25, blurb: 'Hot, greasy, fixes what hurts.' },
-  { name: 'Soda', price: 5, heal: 10, blurb: 'Cold and sweet.' },
-  { name: 'Tacos', price: 10, heal: 15, blurb: 'Three of them. No questions.' },
-  { name: 'Energy Drink', price: 8, heal: 12, blurb: 'Tastes like a bad idea.' },
-  { name: 'Snack Bar', price: 6, heal: 8, blurb: 'For the road.' },
-  { name: 'Med Kit', price: 40, heal: 50, blurb: 'Bandages, pills, the works.' },
+  { name: 'Burger', price: 15, heal: 25, note: 'Hot, greasy, worth it.' },
+  { name: 'Soda', price: 5, heal: 8, note: 'Ice cold.' },
+  { name: 'Snack', price: 8, heal: 12, note: 'Salt and sugar.' },
+  { name: 'Coffee', price: 6, heal: 5, note: 'Keeps you awake.' },
+  { name: 'Medkit', price: 60, heal: 60, note: 'Patches you right up.' },
+  { name: 'Ammo Box', price: 40, ammo: true, note: 'A full magazine.' },
 ];
+
+function el(ctx, id) {
+  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
+  return document.getElementById(id);
+}
+
+function keyDown(ctx, code) {
+  const inp = ctx.input;
+  if (!inp) return false;
+  if (typeof inp.isDown === 'function') {
+    try { return !!inp.isDown(code); } catch (e) { /* fall through */ }
+  }
+  const k = inp.keys;
+  if (k) {
+    if (typeof k.has === 'function') return k.has(code);
+    if (Array.isArray(k)) return k.includes(code);
+    if (typeof k === 'object') return !!k[code];
+  }
+  if (typeof inp[code] !== 'undefined') return !!inp[code];
+  return false;
+}
+
+function dist2d(a, b) {
+  const dx = a.x - b.x;
+  const dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dz * dz);
+}
 
 export function init(ctx) {
   const S = ctx.state;
-  const pick = (id) => (ctx.dom && ctx.dom[id]) || document.getElementById(id);
-  const show = (id) => { const el = pick(id); if (el) el.classList.remove('hidden'); };
-  const hide = (id) => { const el = pick(id); if (el) el.classList.add('hidden'); };
-  const toast = (msg) => { try { if (ctx.api.showToast) ctx.api.showToast(msg); } catch (e) { /* silent */ } };
-  const click = () => { try { if (ctx.api.audio && ctx.api.audio.click) ctx.api.audio.click(); } catch (e) { /* silent */ } };
+  const prev = {};
+  const grab = (id) => el(ctx, id);
+
+  function toast(msg) {
+    if (ctx.api.toast) ctx.api.toast(msg);
+    else {
+      const t = grab('toast');
+      if (t) t.textContent = msg;
+    }
+  }
 
   function nearMart() {
     const p = S.player && S.player.pos;
     if (!p) return false;
-    return Math.hypot(p.x - MART.x, p.z - MART.z) < MART_RADIUS;
+    return dist2d(p, MART) < MART.r;
   }
 
-  function buyItem(item) {
+  function healPlayer(amount) {
+    if (!S.player) return;
+    S.player.health = Math.min(100, (S.player.health || 0) + amount);
+    if (typeof S.health === 'number') S.health = S.player.health;
+  }
+
+  function refillAmmo() {
+    if (!S.player || !S.player.loadout) return 0;
+    let mag = 12;
+    try {
+      const def = S.player.loadout.current().def;
+      if (def) mag = def.magSize || def.mag || def.capacity || 12;
+    } catch (e) { /* fall back to a pistol-sized mag */ }
+    S.player.ammo = mag;
+    return mag;
+  }
+
+  function buy(item) {
     if ((S.cash || 0) < item.price) {
       toast('Not enough cash for a ' + item.name + '.');
       return false;
     }
     S.cash -= item.price;
     if (item.heal) {
-      const hp = (S.player && typeof S.player.health === 'number') ? S.player.health : 100;
-      const next = Math.min(100, hp + item.heal);
-      if (S.player) S.player.health = next;
-      S.health = next;
+      healPlayer(item.heal);
       toast(item.name + ' — +' + item.heal + ' HP.');
+    } else if (item.ammo) {
+      const mag = refillAmmo();
+      toast('Ammo Box — magazine refilled to ' + mag + '.');
     } else {
       toast('Bought a ' + item.name + '.');
     }
-    try { if (ctx.api.audio && ctx.api.audio.pickup) ctx.api.audio.pickup(); } catch (e) { /* silent */ }
+    if (ctx.api.audio && typeof ctx.api.audio.pickup === 'function') {
+      try { ctx.api.audio.pickup(); } catch (e) { /* audio is best-effort */ }
+    }
     return true;
   }
 
-  function buildShop() {
-    const list = pick('shop-items');
-    if (!list) return;
-    while (list.firstChild) list.removeChild(list.firstChild);
+  function buildRows() {
+    const box = grab('shop-items');
+    if (!box) return;
+    box.innerHTML = '';
     for (const item of ITEMS) {
       const row = document.createElement('div');
       row.className = 'shop-row';
@@ -61,46 +113,45 @@ export function init(ctx) {
       const price = document.createElement('span');
       price.className = 'shop-price';
       price.textContent = '$' + item.price;
-      const buy = document.createElement('button');
-      buy.className = 'shop-buy';
-      buy.textContent = 'BUY';
-      buy.addEventListener('click', () => { click(); buyItem(item); });
+      const btn = document.createElement('button');
+      btn.className = 'shop-buy';
+      btn.textContent = 'BUY';
+      btn.addEventListener('click', () => buy(item));
       row.appendChild(name);
       row.appendChild(price);
-      row.appendChild(buy);
-      list.appendChild(row);
+      row.appendChild(btn);
+      box.appendChild(row);
     }
   }
 
   function openShop() {
-    buildShop();
-    show('shop-panel');
+    buildRows();
+    const panel = grab('shop-panel');
+    if (panel) panel.classList.remove('hidden');
   }
 
   function closeShop() {
-    hide('shop-panel');
+    const panel = grab('shop-panel');
+    if (panel) panel.classList.add('hidden');
   }
 
-  ctx.api.openShop = openShop;
-  ctx.api.closeShop = closeShop;
-  ctx.api.buyItem = buyItem;
-  ctx.api.shopItems = ITEMS;
-  ctx.api.martPos = MART;
+  function shopOpen() {
+    const panel = grab('shop-panel');
+    return !!panel && !panel.classList.contains('hidden');
+  }
 
-  const btnClose = pick('btn-close-shop');
-  if (btnClose) btnClose.addEventListener('click', () => { click(); closeShop(); });
+  const btnClose = grab('btn-close-shop');
+  if (btnClose) btnClose.addEventListener('click', closeShop);
 
-  window.addEventListener('keydown', (e) => {
-    if (e.repeat || e.code !== 'KeyF') return;
+  ctx.api.shop = { open: openShop, close: closeShop, buy, nearMart, items: ITEMS };
+
+  ctx.updates.push(() => {
+    const down = keyDown(ctx, 'KeyF');
+    const was = !!prev.KeyF;
+    prev.KeyF = down;
+    if (!down || was) return;
     if (S.mode !== 'playing') return;
-    const panel = pick('shop-panel');
-    const open = panel && !panel.classList.contains('hidden');
-    if (open) { click(); closeShop(); return; }
-    if (!nearMart()) {
-      toast('The MART is the corner store — get closer to shop.');
-      return;
-    }
-    click();
-    openShop();
+    if (shopOpen()) closeShop();
+    else if (nearMart()) openShop();
   });
 }

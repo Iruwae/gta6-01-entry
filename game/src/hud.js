@@ -1,366 +1,377 @@
-// SOLMAR BAY — HUD refresh (round 7 rebuild, builder D).
-// Owns one frame of every on-screen readout: cash, district, clock,
-// respect, health, radio, wanted stars, the police roster, the minimap,
-// weapon slots, the speedometer and the current objective. Toast text is
-// NOT rewritten here — other modules write toasts through
-// ctx.api.showToast, and this module never clobbers them.
+// hud.js — SOLMAR BAY, round 8 rebuild.
+// Owns every HUD readout and refreshes it from ctx.state each frame:
+// cash, district, day/time clock, respect, health bar, radio, wanted
+// stars, the police roster, the minimap canvas, weapon slots, the
+// speedometer, the objective line, and toast timing. It never writes a
+// toast line it did not set itself, so banter and mission toasts placed
+// by other modules stay on screen until they are meant to clear.
 
 const DISTRICT_NAMES = {
-  harbor: 'HARBOR', beach: 'BEACH', uptown: 'UPTOWN', strip: 'THE STRIP',
-  downtown: 'DOWNTOWN', marina: 'MARINA', oldtown: 'OLD TOWN',
+  harbor: 'HARBOR',
+  beach: 'BEACH',
+  uptown: 'UPTOWN',
+  strip: 'THE STRIP',
+  downtown: 'DOWNTOWN',
+  marina: 'MARINA',
+  palmrow: 'PALM ROW',
 };
 
-const MAP_SPOTS = [
-  { x: 120, z: 120, label: 'HARBOR' },
-  { x: 0, z: 165, label: 'BEACH' },
-  { x: 120, z: -90, label: 'UPTOWN' },
-  { x: 0, z: 135, label: 'STRIP' },
-  { x: 0, z: 0, label: 'DOWNTOWN' },
-  { x: -120, z: 60, label: 'MARINA' },
-  { x: 60, z: -120, label: 'OLD TOWN' },
+const FALLBACK_STATIONS = [
+  { name: 'SUNSET FM', track: 'Golden Hour Drive' },
+  { name: 'BAYLINE FM', track: 'Bayline Nights' },
+  { name: 'PALM TALK', track: 'The Morning Palms' },
+  { name: 'REEF RADIO', track: 'Undertow' },
+  { name: 'CORAL COAST', track: 'Coral Coastline' },
+  { name: 'DUSK DRIVE', track: 'Midnight Meridian' },
 ];
 
-const MAP_MARKS = [
-  { x: -72, z: -60, label: 'M' },
-  { x: -90, z: -66, label: 'G' },
-  { x: 120, z: -120, label: 'H' },
-  { x: 68, z: 60, label: 'T' },
-  { x: -60, z: -60, label: 'R' },
+const SLOT_NAMES = ['PISTOL', 'SMG', 'SHOTGUN', 'RIFLE'];
+
+const MINIMAP_ZONES = [
+  { key: 'harbor', x: 120, z: 120, color: '#e8873a' },
+  { key: 'beach', x: 0, z: 165, color: '#e8c85a' },
+  { key: 'uptown', x: 120, z: -90, color: '#7a6fd0' },
+  { key: 'strip', x: 0, z: 135, color: '#d06fa8' },
+  { key: 'downtown', x: 0, z: 0, color: '#5a8fd0' },
+  { key: 'marina', x: -120, z: 60, color: '#4fb3a9' },
+  { key: 'palmrow', x: -120, z: -120, color: '#8fb45a' },
 ];
 
-const SLOT_FALLBACK = ['PISTOL', 'SMG', 'SHOTGUN', 'RIFLE'];
-const CLOCK_BASE_MINUTES = 18 * 60 + 28; // day 1 opens at sunset, 18:28
-
-function pad2(n) {
-  return String(n).padStart(2, '0');
+function el(ctx, id) {
+  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
+  return document.getElementById(id);
 }
 
-function districtLabel(id) {
-  if (!id) return 'SOLMAR BAY';
-  const key = String(id).toLowerCase().replace(/[^a-z]/g, '');
+function money(n) {
+  const v = Math.floor(Number(n) || 0);
+  return '$' + v.toLocaleString('en-US');
+}
+
+function clockText(S) {
+  const t = Number(S.time) || 0;
+  const base = 18 * 60 + 28; // day 1 opens at sunset, 18:28
+  const total = base + t;
+  const day = (Number(S.day) || 1) + Math.floor(total / 1440);
+  const mins = ((total % 1440) + 1440) % 1440;
+  const hh = String(Math.floor(mins / 60)).padStart(2, '0');
+  const mm = String(mins % 60).padStart(2, '0');
+  let phase = S.dayNight && S.dayNight.phase;
+  if (!phase) {
+    const h = Math.floor(mins / 60);
+    if (h >= 21 || h < 5) phase = 'NIGHT';
+    else if (h >= 18) phase = 'SUNSET';
+    else phase = 'DAY';
+  }
+  return 'DAY ' + day + ' ' + hh + ':' + mm + ' ' + phase;
+}
+
+function districtDisplay(S) {
+  const raw = String(S.district || 'downtown');
+  const key = raw.toLowerCase().replace(/[^a-z]/g, '');
   if (DISTRICT_NAMES[key]) return DISTRICT_NAMES[key];
-  return String(id).toUpperCase();
+  return raw.toUpperCase();
+}
+
+function wantedLevel(S) {
+  if (typeof S.wanted === 'number') return Math.max(0, Math.min(5, S.wanted));
+  const heat = Number(S.heat) || 0;
+  if (heat <= 0) return 0;
+  if (heat < 20) return 1;
+  if (heat < 40) return 2;
+  if (heat < 60) return 3;
+  if (heat < 80) return 4;
+  return 5;
 }
 
 export function init(ctx) {
   const S = ctx.state;
-  const pick = (id) => (ctx.dom && ctx.dom[id]) || document.getElementById(id);
+  let toastUntil = 0;
+  let rosterT = 0;
+  let mapT = 0;
   let mapCtx = null;
-  let lastRosterAt = -10;
-  let lastRosterKey = '';
-  let toastTimer = null;
 
-  ctx.api.showToast = (msg, ms) => {
-    try {
-      const el = pick('toast');
-      if (!el) return;
-      el.textContent = String(msg);
-      el.classList.remove('hidden');
-      if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => {
-        try { el.textContent = ''; } catch (e) { /* ignore */ }
-      }, ms || 2800);
-    } catch (e) { /* never break the loop for a toast */ }
+  const grab = (id) => el(ctx, id);
+
+  // Toasts other modules raise through this call get an expiry; toasts
+  // written straight to the DOM by other modules are left alone.
+  ctx.api.toast = (msg, ms) => {
+    const t = grab('toast');
+    if (!t) return;
+    t.textContent = String(msg);
+    toastUntil = performance.now() + (ms || 2600);
   };
 
-  function wantedLevel() {
-    if (typeof S.wanted === 'number') return Math.max(0, Math.min(5, Math.round(S.wanted)));
-    const heat = typeof S.heat === 'number' ? S.heat : 0;
-    return Math.max(0, Math.min(5, Math.floor(heat / 20)));
-  }
-
-  function policeList() {
-    try {
-      if (Array.isArray(S.cops) && S.cops.length) return S.cops;
-    } catch (e) { /* fall through */ }
-    try {
-      if (Array.isArray(S.cars)) return S.cars.filter((c) => c && c.aiPolice);
-    } catch (e) { /* fall through */ }
-    return [];
-  }
-
-  function vehicleSpeed() {
-    const car = S.car;
-    if (!car) return 0;
-    if (typeof car.speed === 'number') return car.speed;
-    if (car.vel && typeof car.vel.length === 'function') return car.vel.length();
-    if (car.velocity && typeof car.velocity.length === 'function') return car.velocity.length();
-    const vx = car.vx || 0;
-    const vz = car.vz || 0;
-    return Math.hypot(vx, vz);
-  }
-
-  function slotInfo(i) {
-    let name = SLOT_FALLBACK[i] || 'WEAPON';
-    let ammo = '';
-    try {
-      const lo = S.player && S.player.loadout;
-      const w = lo && lo.weapons && lo.weapons[i];
-      if (w) {
-        if (w.def && w.def.name) name = w.def.name;
-        else if (w.name) name = w.name;
-        if (typeof w.ammo === 'number') ammo = String(w.ammo);
-      } else if (lo && typeof lo.current === 'function' && i === lo.equipped) {
-        const cur = lo.current();
-        if (cur && cur.def && cur.def.name) name = cur.def.name;
-      }
-      if (ammo === '' && lo && i === lo.equipped && S.player && typeof S.player.ammo === 'number') {
-        ammo = String(S.player.ammo);
-      }
-    } catch (e) { /* keep the fallback */ }
-    return { name, ammo };
-  }
-
   function drawMinimap() {
-    const canvas = pick('minimap');
-    if (!canvas || typeof canvas.getContext !== 'function') return;
-    if (!mapCtx) mapCtx = canvas.getContext('2d');
+    const canvas = grab('minimap');
+    if (!canvas) return;
+    if (!mapCtx) {
+      canvas.width = 180;
+      canvas.height = 180;
+      mapCtx = canvas.getContext('2d');
+    }
+    if (!mapCtx) return;
     const g = mapCtx;
-    if (!g) return;
-    const W = canvas.width || 180;
-    const H = canvas.height || 180;
-    const px = (x) => ((x + 180) / 360) * W;
-    const py = (z) => ((z + 180) / 360) * H;
-
-    g.clearRect(0, 0, W, H);
-    g.fillStyle = '#1d1230';
-    g.fillRect(0, 0, W, H);
-    // sea along the top edge
-    g.fillStyle = '#274b63';
-    g.fillRect(0, 0, W, H * 0.08);
-    // road grid
-    g.strokeStyle = 'rgba(255, 190, 120, 0.18)';
+    const W = 180;
+    const px = (x) => (x + 180) * 0.5;
+    const pz = (z) => (z + 180) * 0.5;
+    g.clearRect(0, 0, W, W);
+    g.fillStyle = '#14101f';
+    g.fillRect(0, 0, W, W);
+    // District blocks.
+    for (const zone of MINIMAP_ZONES) {
+      g.fillStyle = zone.color;
+      g.globalAlpha = 0.28;
+      g.fillRect(px(zone.x) - 23, pz(zone.z) - 15, 46, 30);
+      g.globalAlpha = 1;
+      g.fillStyle = '#f5e9d0';
+      g.font = '7px sans-serif';
+      g.textAlign = 'center';
+      g.fillText(DISTRICT_NAMES[zone.key], px(zone.x), pz(zone.z) + 3);
+    }
+    // Roads: a loose grid so the city reads as streets.
+    g.strokeStyle = 'rgba(245,233,208,0.16)';
     g.lineWidth = 1;
     for (let v = -120; v <= 120; v += 60) {
-      g.beginPath(); g.moveTo(px(v), 0); g.lineTo(px(v), H); g.stroke();
-      g.beginPath(); g.moveTo(0, py(v)); g.lineTo(W, py(v)); g.stroke();
+      g.beginPath(); g.moveTo(px(v), 0); g.lineTo(px(v), W); g.stroke();
+      g.beginPath(); g.moveTo(0, pz(v)); g.lineTo(W, pz(v)); g.stroke();
     }
-    // district dots + labels
-    g.font = '6px sans-serif';
-    g.textAlign = 'center';
-    for (const d of MAP_SPOTS) {
-      g.fillStyle = 'rgba(255, 190, 120, 0.55)';
-      g.beginPath(); g.arc(px(d.x), py(d.z), 2, 0, Math.PI * 2); g.fill();
-      g.fillStyle = 'rgba(255, 220, 170, 0.75)';
-      g.fillText(d.label, px(d.x), py(d.z) - 4);
-    }
-    // place markers (mart, garage, safehouse, taxi, race)
-    g.font = 'bold 7px sans-serif';
-    for (const m of MAP_MARKS) {
-      g.fillStyle = '#ffd166';
-      g.fillText(m.label, px(m.x), py(m.z));
-    }
-    // search zone around the last known position
-    if (S.lastKnown && (S.heat || 0) > 0) {
-      g.strokeStyle = 'rgba(255, 80, 80, 0.8)';
-      g.lineWidth = 1.5;
+    // Search zone around the last known position.
+    if (S.lastKnown) {
+      g.strokeStyle = '#ffb347';
+      g.setLineDash([4, 3]);
       g.beginPath();
-      g.arc(px(S.lastKnown.x || 0), py(S.lastKnown.z || 0), 13, 0, Math.PI * 2);
+      g.arc(px(S.lastKnown.x), pz(S.lastKnown.z), 11, 0, Math.PI * 2);
       g.stroke();
+      g.setLineDash([]);
     }
-    // uncollected packages
-    try {
-      if (Array.isArray(S.packages)) {
-        g.fillStyle = '#ffe066';
-        for (const p of S.packages) {
-          if (p && !p.taken) {
-            g.fillRect(px(p.x) - 1.5, py(p.z) - 1.5, 3, 3);
-          }
-        }
-      }
-    } catch (e) { /* minimap must not die on packages */ }
-    // traffic + police
-    try {
-      if (Array.isArray(S.cars)) {
-        for (const c of S.cars) {
-          if (!c || !c.pos) continue;
-          if (c.aiPolice) {
-            g.fillStyle = '#ff5252';
-            g.fillRect(px(c.pos.x) - 2, py(c.pos.z) - 2, 4, 4);
-          } else {
-            g.fillStyle = 'rgba(255, 255, 255, 0.75)';
-            g.beginPath(); g.arc(px(c.pos.x), py(c.pos.z), 1.6, 0, Math.PI * 2); g.fill();
-          }
-        }
-      }
-    } catch (e) { /* keep drawing */ }
-    // the player, always on top
-    try {
-      const p = S.player && S.player.pos;
-      if (p) {
-        g.fillStyle = '#ffb703';
-        g.beginPath(); g.arc(px(p.x), py(p.z), 3.5, 0, Math.PI * 2); g.fill();
-        g.strokeStyle = '#fff3d6';
-        g.lineWidth = 1;
-        g.beginPath(); g.arc(px(p.x), py(p.z), 5.5, 0, Math.PI * 2); g.stroke();
-      }
-    } catch (e) { /* keep drawing */ }
+    // Traffic cars.
+    const cars = Array.isArray(S.cars) ? S.cars : [];
+    for (const c of cars) {
+      if (!c || !c.pos || c.aiPolice) continue;
+      g.fillStyle = '#cfd6e4';
+      g.fillRect(px(c.pos.x) - 1.5, pz(c.pos.z) - 1.5, 3, 3);
+    }
+    // Police.
+    for (const c of cars) {
+      if (!c || !c.pos || !c.aiPolice) continue;
+      g.fillStyle = '#ff4d4d';
+      g.beginPath();
+      g.arc(px(c.pos.x), pz(c.pos.z), 3, 0, Math.PI * 2);
+      g.fill();
+    }
+    // Player arrow.
+    if (S.player && S.player.pos) {
+      const x = px(S.player.pos.x);
+      const y = pz(S.player.pos.z);
+      const heading = typeof S.player.heading === 'number' ? S.player.heading : 0;
+      g.save();
+      g.translate(x, y);
+      g.rotate(-heading);
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.moveTo(0, -6); g.lineTo(4.5, 5); g.lineTo(-4.5, 5); g.closePath();
+      g.fill();
+      g.restore();
+    }
   }
 
-  function refreshRoster(t) {
-    const rosterEl = pick('roster');
-    const rowsEl = pick('roster-rows');
-    const codeEl = pick('roster-code');
-    if (!rosterEl || !rowsEl) return;
-    const cops = policeList();
-    const w = wantedLevel();
-    const key = w + '|' + cops.map((c) => (c.callsign || '?') + ':' + ((c.brain && c.brain.tactic) || '')).join(',');
-    const visible = w > 0 || cops.length > 0;
-    rosterEl.classList.toggle('hidden', !visible);
-    if (!visible) return;
-    if (t - lastRosterAt < 0.25 && key === lastRosterKey) return;
-    lastRosterAt = t;
-    lastRosterKey = key;
-    if (codeEl) codeEl.textContent = 'CODE 10-90 — ' + cops.length + ' UNIT' + (cops.length === 1 ? '' : 'S') + ' RESPONDING';
-    const playerPos = S.player && S.player.pos;
-    while (rowsEl.firstChild) rowsEl.removeChild(rowsEl.firstChild);
+  function rebuildRoster() {
+    const roster = grab('roster');
+    const rowsBox = grab('roster-rows') || roster;
+    const codeEl = grab('roster-code');
+    if (!roster || !rowsBox) return;
+    const w = wantedLevel(S);
+    let cops = [];
+    if (Array.isArray(S.cops) && S.cops.length) cops = S.cops;
+    else if (Array.isArray(S.cars)) cops = S.cars.filter((c) => c && c.aiPolice);
+    if (w <= 0 && cops.length === 0) {
+      roster.classList.add('hidden');
+      rowsBox.innerHTML = '';
+      return;
+    }
+    roster.classList.remove('hidden');
+    if (codeEl) codeEl.textContent = 'DISPATCH 10-90 — ' + w + (w === 1 ? ' STAR' : ' STARS');
+    const pp = S.player && S.player.pos;
+    rowsBox.innerHTML = '';
     for (const cop of cops) {
       const row = document.createElement('div');
       row.className = 'roster-row';
-      let dist = '?';
-      try {
-        if (cop.pos && playerPos) dist = Math.round(Math.hypot(cop.pos.x - playerPos.x, cop.pos.z - playerPos.z)) + 'm';
-      } catch (e) { /* keep ? */ }
+      const callsign = cop.callsign || 'PD-??';
+      let dist = '—';
+      if (pp && cop.pos) {
+        const dx = cop.pos.x - pp.x;
+        const dz = cop.pos.z - pp.z;
+        dist = Math.round(Math.sqrt(dx * dx + dz * dz)) + 'm';
+      }
       const tactic = (cop.brain && (cop.brain.tactic || cop.brain.state)) || 'PURSUIT';
-      row.textContent = (cop.callsign || 'PD-??') + ' • ' + dist + ' • ' + tactic;
-      rowsEl.appendChild(row);
+      row.textContent = callsign + '  •  ' + dist + '  •  ' + tactic;
+      rowsBox.appendChild(row);
     }
   }
 
-  function objectiveText() {
-    try {
-      const race = S.sideActivities && S.sideActivities.race;
-      if (race && race.active) {
-        const total = (race.gates && race.gates.length) || 4;
-        return 'STREET RACE — hit gate ' + ((race.gateIndex || 0) + 1) + ' of ' + total;
-      }
-      const taxi = S.sideActivities && S.sideActivities.taxi;
-      if (taxi && taxi.active) return 'TAXI FARE — drive your passenger to the destination';
-      const cur = S.missions && S.missions.current;
-      if (cur) return cur.objective || cur.title || ('JOB: ' + String(cur.id || '').toUpperCase());
-      if ((S.missionIndex || 0) > 0) return 'Job done — press P and pick the next job';
-      return 'New in town — press P to see the job board';
-    } catch (e) {
-      return 'Explore Solmar Bay';
+  function updateWeapons() {
+    const box = grab('weapons');
+    if (!box) return;
+    const slots = box.querySelectorAll('.slot');
+    const L = S.player && S.player.loadout;
+    if (!L) return;
+    const list = L.weapons || L.slots || [];
+    slots.forEach((slot, i) => {
+      const w = list[i];
+      const nameEl = slot.querySelector('.slot-name');
+      const ammoEl = slot.querySelector('.slot-ammo');
+      const name = (w && w.def && w.def.name) || (w && w.name) || SLOT_NAMES[i];
+      if (nameEl) nameEl.textContent = name;
+      let ammo = '';
+      if (i === L.equipped) ammo = String(S.player.ammo);
+      else if (w && typeof w.ammo === 'number') ammo = String(w.ammo);
+      else if (w && typeof w.mag === 'number') ammo = String(w.mag);
+      if (ammoEl) ammoEl.textContent = ammo;
+      slot.classList.toggle('active', i === L.equipped);
+      slot.classList.toggle('locked', !!(w && w.locked));
+    });
+  }
+
+  function updateSpeedo() {
+    const numEl = grab('speed-num');
+    const gearEl = grab('speed-gear');
+    const carEl = grab('speed-car');
+    let speed = 0;
+    if (S.car) {
+      if (typeof S.car.speed === 'number') speed = S.car.speed;
+      else if (S.car.velocity) speed = Math.hypot(S.car.velocity.x || 0, S.car.velocity.z || 0);
+      else if (S.car.vel) speed = Math.hypot(S.car.vel.x || 0, S.car.vel.z || 0);
+    }
+    if (numEl) numEl.textContent = String(Math.round(Math.abs(speed)));
+    if (gearEl) {
+      if (!S.car) gearEl.textContent = 'N';
+      else if (speed < 0.5) gearEl.textContent = 'N';
+      else if (speed < 10) gearEl.textContent = '1';
+      else if (speed < 20) gearEl.textContent = '2';
+      else if (speed < 30) gearEl.textContent = '3';
+      else if (speed < 45) gearEl.textContent = '4';
+      else gearEl.textContent = '5';
+    }
+    if (carEl) {
+      carEl.textContent = S.car
+        ? String(S.car.name || S.car.kind || 'CAR').toUpperCase()
+        : 'ON FOOT';
     }
   }
 
-  ctx.updates.push((dt, t) => {
-    try {
-      // cash, formatted like $120
-      const cashEl = pick('cash');
-      if (cashEl) cashEl.textContent = '$' + Math.round(typeof S.cash === 'number' ? S.cash : 0);
+  function updateObjective() {
+    const o = grab('objective');
+    if (!o) return;
+    const race = S.sideActivities && S.sideActivities.race;
+    const taxi = S.sideActivities && S.sideActivities.taxi;
+    if (race && race.active) {
+      o.textContent = 'RACE — GATE ' + ((race.gate || 0) + 1) + ' / 4';
+      return;
+    }
+    if (taxi && taxi.active) {
+      o.textContent = 'TAXI — DROP OFF THE FARE';
+      return;
+    }
+    const cur = S.missions && S.missions.current;
+    if (cur) {
+      o.textContent = String(cur.objective || cur.title || 'COMPLETE THE JOB');
+      return;
+    }
+    if ((S.missionIndex || 0) === 0) {
+      o.textContent = 'NEXT JOB — SEE LENA AT THE GARAGE';
+      return;
+    }
+    o.textContent = 'EXPLORE SOLMAR BAY';
+  }
 
-      // district
-      const distEl = pick('district');
-      if (distEl) distEl.textContent = districtLabel(S.district);
+  ctx.updates.push((dt) => {
+    const cashEl = grab('cash');
+    if (cashEl) cashEl.textContent = money(S.cash);
 
-      // day / time — the clock starts at 18:28 and S.time counts minutes
-      const clockEl = pick('day-time');
-      if (clockEl) {
-        const total = CLOCK_BASE_MINUTES + (typeof S.time === 'number' ? S.time : 0);
-        const hh = Math.floor(total / 60) % 24;
-        const mm = Math.floor(total) % 60;
-        let label = 'SUNSET';
-        try {
-          if (S.dayNight && S.dayNight.phase) label = S.dayNight.phase;
-          else if (S.dayNight && typeof S.dayNight.night === 'number' && S.dayNight.night > 0.5) label = 'NIGHT';
-        } catch (e) { /* keep SUNSET */ }
-        clockEl.textContent = 'DAY ' + (S.day || 1) + ' ' + pad2(hh) + ':' + pad2(mm) + ' ' + label;
+    const dEl = grab('district');
+    if (dEl) dEl.textContent = districtDisplay(S);
+
+    const dtEl = grab('day-time');
+    if (dtEl) dtEl.textContent = clockText(S);
+
+    const rankTitle = (S.respectDirector && S.respectDirector.rank && S.respectDirector.rank.title)
+      || 'NOBODY';
+    const rNum = grab('respect-num');
+    if (rNum) rNum.textContent = String(S.respect || 0);
+    const rRank = grab('respect-rank');
+    if (rRank) rRank.textContent = rankTitle;
+    const rLine = grab('respect-line');
+    if (rLine) rLine.textContent = 'RESPECT ' + (S.respect || 0) + ' · ' + rankTitle;
+    // The line above replaces the line's children with plain text,
+    // which deletes the respect spans this HUD and the checks read —
+    // put them back whenever they are gone, carrying the live values.
+    // (The container itself is never removed, so it stays a good home.)
+    if (!document.getElementById('respect-num') || !document.getElementById('respect-rank')) {
+      const line = grab('respect-line');
+      if (line) {
+        line.innerHTML = '';
+        line.appendChild(document.createTextNode('RESPECT '));
+        const n = document.createElement('span');
+        n.id = 'respect-num';
+        n.textContent = String(S.respect || 0);
+        line.appendChild(n);
+        line.appendChild(document.createTextNode(' · '));
+        const r = document.createElement('span');
+        r.id = 'respect-rank';
+        r.textContent = rankTitle;
+        line.appendChild(r);
       }
+    }
 
-      // respect points + rank — the spans carry the numbers; never write
-      // textContent onto #respect-line itself, it would wipe those spans
-      // out of the DOM and the HUD numbers would vanish.
-      const rankTitle = (S.respectDirector && S.respectDirector.rank && S.respectDirector.rank.title) || 'NOBODY';
-      const numEl = pick('respect-num');
-      if (numEl) numEl.textContent = String(typeof S.respect === 'number' ? S.respect : 0);
-      const rankEl = pick('respect-rank');
-      if (rankEl) rankEl.textContent = rankTitle;
+    const hp = S.player ? (S.player.health ?? S.health ?? 100) : 100;
+    const fill = grab('health-fill');
+    if (fill) fill.style.width = Math.max(0, Math.min(100, hp)) + '%';
 
-      // health bar
-      const hp = (S.player && typeof S.player.health === 'number')
-        ? S.player.health
-        : (typeof S.health === 'number' ? S.health : 100);
-      const fillEl = pick('health-fill');
-      if (fillEl) fillEl.style.width = Math.max(0, Math.min(100, hp)) + '%';
-      const barEl = pick('health-bar');
-      if (barEl) barEl.setAttribute('data-hp', String(Math.round(hp)));
-
-      // radio station + track
-      const stationEl = pick('radio-station');
-      const trackEl = pick('radio-track');
-      let stationName = '';
-      let trackName = '';
+    const radioApi = ctx.api.radio;
+    const idx = typeof S.radioStation === 'number' ? S.radioStation : 0;
+    let stationName = FALLBACK_STATIONS[idx % FALLBACK_STATIONS.length].name;
+    let trackName = FALLBACK_STATIONS[idx % FALLBACK_STATIONS.length].track;
+    if (radioApi && typeof radioApi.current === 'function') {
       try {
-        const stations = ctx.api.radioStations;
-        if (Array.isArray(stations) && typeof S.radioStation === 'number' && stations[S.radioStation]) {
-          stationName = stations[S.radioStation].name || '';
-          trackName = (ctx.api.currentTrack && ctx.api.currentTrack()) || '';
-        } else if (typeof S.radioStation === 'string') {
-          stationName = S.radioStation;
+        const cur = radioApi.current();
+        if (cur) {
+          if (cur.name) stationName = cur.name;
+          if (cur.track) trackName = cur.track;
         }
-      } catch (e) { /* keep blank */ }
-      if (stationEl && stationName) stationEl.textContent = stationName;
-      if (trackEl && trackName) trackEl.textContent = trackName;
+      } catch (e) { /* keep fallback names */ }
+    }
+    const rsEl = grab('radio-station');
+    if (rsEl) rsEl.textContent = stationName;
+    const rtEl = grab('radio-track');
+    if (rtEl) rtEl.textContent = trackName;
 
-      // wanted stars
-      const wantedEl = pick('wanted');
-      const w = wantedLevel();
-      if (wantedEl) wantedEl.textContent = '★'.repeat(w) + '☆'.repeat(5 - w);
+    const w = wantedLevel(S);
+    const wEl = grab('wanted');
+    if (wEl) {
+      wEl.textContent = '★'.repeat(w) + '☆'.repeat(5 - w);
+      wEl.classList.toggle('hot', w >= 3);
+    }
 
-      // police roster
-      refreshRoster(t);
+    rosterT += dt;
+    if (rosterT >= 0.25) {
+      rosterT = 0;
+      rebuildRoster();
+    }
 
-      // minimap
+    mapT += dt;
+    if (mapT >= 0.12) {
+      mapT = 0;
       drawMinimap();
+    }
 
-      // weapon slots
-      try {
-        const slots = document.querySelectorAll('#weapons .slot');
-        const equipped = (S.player && S.player.loadout && typeof S.player.loadout.equipped === 'number')
-          ? S.player.loadout.equipped : 0;
-        slots.forEach((slot, i) => {
-          const info = slotInfo(i);
-          const nameEl = slot.querySelector('.slot-name');
-          if (nameEl) nameEl.textContent = info.name;
-          const ammoEl = slot.querySelector('.slot-ammo');
-          if (ammoEl) ammoEl.textContent = info.ammo;
-          slot.classList.toggle('active', i === equipped);
-        });
-      } catch (e) { /* slots are optional per frame */ }
+    updateWeapons();
+    updateSpeedo();
+    updateObjective();
 
-      // speedometer
-      const speed = vehicleSpeed();
-      const speedEl = pick('speed-num');
-      if (speedEl) speedEl.textContent = String(Math.round(speed));
-      const gearEl = pick('speed-gear');
-      if (gearEl) {
-        let gear = 'N';
-        if (S.car) {
-          if (speed >= 1 && speed < 25) gear = '1';
-          else if (speed < 50) gear = '2';
-          else if (speed < 75) gear = '3';
-          else if (speed < 100) gear = '4';
-          else if (speed >= 100) gear = '5';
-          else gear = '1';
-        }
-        gearEl.textContent = gear;
-      }
-      const carEl = pick('speed-car');
-      if (carEl) {
-        if (S.car) {
-          carEl.textContent = (S.car.displayName || S.car.name || ((S.car.kind || 'CAR').toUpperCase())).trim();
-        } else {
-          carEl.textContent = 'ON FOOT';
-        }
-      }
-
-      // objective
-      const objEl = pick('objective');
-      if (objEl) objEl.textContent = objectiveText();
-    } catch (e) {
-      // A HUD read must never throw into the main loop.
+    if (toastUntil && performance.now() > toastUntil) {
+      const t = grab('toast');
+      if (t) t.textContent = '';
+      toastUntil = 0;
     }
   });
 }

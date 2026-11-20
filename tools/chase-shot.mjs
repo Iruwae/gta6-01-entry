@@ -1,172 +1,101 @@
-// tools/chase-shot.mjs — SOLMAR BAY chase-shot helper (GTA6-01 round 7 rebuild).
+// chase-shot.mjs — chase-shot staging helper for the SOLMAR BAY
+// screenshot tool (GTA6-01 round 8 rebuild).
 //
-// A focused, standalone variant of tools/shots.mjs that captures ONLY
-// the hardest frame: the police chase with the helicopter in view, the
-// wanted level visible, and the roster showing.
+// Stages the downtown police chase used for showcase shot 1: the player
+// on foot at the city centre, wanted level cranked up, police closing in
+// and the helicopter circling overhead. The wanted level decays on its
+// own while the helicopter is still lining up, so this helper keeps
+// re-asserting the heat from the Node side every couple of seconds until
+// the shot is taken. The caller stops the re-assertion when it is done.
 //
-//   node tools/chase-shot.mjs     (run from the repo root)
-//
-// It serves game/ on its own port (8905, so it never clashes with the
-// full studio run), starts a fresh game, skips the intro, stages the
-// chase downtown at (0,0) — far from the pay-n-spray booth at (-90,-58)
-// — with the booth disarmed, the wallet topped to $500, and the heat
-// re-asserted every few seconds so the wanted level never decays while
-// the helicopter lines up overhead. Output: screenshots/1-chase.jpg
-// (1280x720 JPEG, quality 80, under 256 KiB).
-
-import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, extname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
-
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const GAME = join(ROOT, "game");
-const SHOT_DIR = join(ROOT, "screenshots");
-const PORT = 8905;
-const MAX_BYTES = 256 * 1024;
-
-const MIME = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-};
+// Only the public debug handle (window.__solmar) is used here, so this
+// helper never depends on the game's internals.
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const qaPkg = join(
-  process.env.HOME,
-  "workspace/makefun/qa-tools/node_modules/puppeteer-core/package.json",
-);
-const puppeteer = createRequire(existsSync(qaPkg) ? qaPkg : import.meta.url)(
-  "puppeteer-core",
-);
-const CHROME =
-  process.env.HOME +
-  "/.cache/ms-playwright/chromium_headless_shell-1148/chrome-linux/headless_shell";
+// Downtown staging spot: the middle of the city, far from the
+// pay-n-spray booth so the booth never fires mid-chase.
+const CHASE_SPOT = { x: 0, z: 0 };
+// Heat value that reads as four to five wanted stars.
+const CHASE_HEAT = 90;
+// Re-assert the heat this often so it never decays away.
+const REASSERT_MS = 2000;
+// Close enough to count as "overhead" for the photo.
+const OVERHEAD_DIST = 45;
 
-const server = createServer((req, res) => {
-  const p = decodeURIComponent(req.url.split("?")[0]);
-  const file = join(GAME, p === "/" ? "index.html" : p);
-  if (!file.startsWith(GAME) || !existsSync(file)) {
-    res.writeHead(404);
-    res.end("nf");
-    return;
-  }
-  res.writeHead(200, {
-    "Content-Type": MIME[extname(file)] || "application/octet-stream",
-  });
-  res.end(readFileSync(file));
-});
+/**
+ * Stage the downtown chase and wait until the helicopter is overhead.
+ *
+ * @param {object} page - a puppeteer page with the game loaded and
+ *   playing (new game started, cutscene skipped).
+ * @param {object} [opts]
+ * @param {number} [opts.timeoutMs=150000] - how long to wait for the heli.
+ * @returns {Promise<object>} { stop, heli, wanted } — call stop() to end
+ *   the heat re-assertion loop, heli is the helicopter position snapshot
+ *   ({x, y, z}) at capture time, wanted is the star count.
+ */
+export async function stageChaseShot(page, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 150000;
 
-async function holdKey(page, code, ms = 2000) {
-  await page.keyboard.down(code);
-  await sleep(ms);
-  await page.keyboard.up(code);
-  await sleep(400);
-}
-
-mkdirSync(SHOT_DIR, { recursive: true });
-await new Promise((r) => server.listen(PORT, r));
-console.log(`serving game/ on http://127.0.0.1:${PORT}`);
-
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: true,
-  args: [
-    "--no-sandbox",
-    "--disable-dev-shm-usage",
-    "--enable-unsafe-swiftshader",
-    "--use-angle=swiftshader",
-    "--window-size=1280,720",
-  ],
-  defaultViewport: { width: 1280, height: 720 },
-});
-
-try {
-  const page = await browser.newPage();
-  page.on("pageerror", (e) => console.warn("PAGEERROR:", String(e)));
-  page.on("console", (m) => {
-    if (m.type() === "error") console.warn("CONSOLE:", m.text());
-  });
-
-  await page.goto(`http://127.0.0.1:${PORT}/index.html`, {
-    waitUntil: "networkidle0",
-    timeout: 30000,
-  });
-  await sleep(2500);
-  await page.evaluate(() => {
-    localStorage.clear();
-  });
-  await page.reload({ waitUntil: "load", timeout: 60000 });
-  await sleep(2000);
-  await page.click("#btn-new");
-  await sleep(1500);
-  await holdKey(page, "KeyX");
-  await sleep(1500);
-
-  // Stage the chase: booth disarmed, wallet topped, player downtown.
-  await page.evaluate(() => {
+  // Park the player downtown, on foot, and light the heat up.
+  await page.evaluate((spot, heat) => {
     const S = window.__solmar.S;
-    S.cash = 500;
-    S.heat = 0;
-    if (typeof S.wanted === "number") S.wanted = 0;
-    const booth = S.heatDirector && S.heatDirector.sprayBooth;
-    if (booth) booth.armed = false;
-    S.player.pos.set(0, 0, 0);
-    S.heat = 90;
-  });
-
-  // Pin the heat: re-assert it every few seconds so the wanted level
-  // cannot decay while the helicopter lines up overhead.
-  const keepHot = setInterval(() => {
-    page
-      .evaluate(() => {
-        window.__solmar.S.heat = 90;
-      })
-      .catch(() => {});
-  }, 2500);
-
-  try {
-    // Wait for the full chase picture: helicopter up, roster populated,
-    // four or more wanted stars on the HUD.
-    const t0 = Date.now();
-    let ready = false;
-    while (Date.now() - t0 < 90000) {
-      ready = await page.evaluate(() => {
-        const S = window.__solmar.S;
-        const rows = document.querySelectorAll("#roster .roster-row").length;
-        return !!S.heli && rows >= 4 && S.wanted >= 4;
-      });
-      if (ready) break;
-      await sleep(1500);
+    if (S.car) {
+      // On foot for this shot: the chase reads better with the player
+      // running downtown than sitting in a car.
+      S.car = null;
     }
-    if (!ready) throw new Error("chase did not stage: no heli/roster/4 stars in 90 s");
-    await sleep(2500); // let the helicopter settle into frame
+    S.player.pos.set(spot.x, 0, spot.z);
+    S.heat = heat;
+  }, CHASE_SPOT, CHASE_HEAT);
 
-    const out = join(SHOT_DIR, "1-chase.jpg");
-    await page.screenshot({ path: out, type: "jpeg", quality: 80 });
-    let bytes = statSync(out).size;
-    if (bytes >= MAX_BYTES) {
-      console.log(`1-chase.jpg was ${bytes} bytes, retaking at quality 60`);
-      await page.screenshot({ path: out, type: "jpeg", quality: 60 });
-      bytes = statSync(out).size;
-    }
-    const cash = await page.evaluate(() => window.__solmar.S.cash);
-    console.log(`1-chase.jpg: ${bytes} bytes, cash $${cash}`);
-    if (bytes >= MAX_BYTES) {
-      throw new Error(`1-chase.jpg still ${bytes} bytes (>= 256 KiB)`);
-    }
-  } finally {
-    clearInterval(keepHot);
+  // Keep the wanted level pinned while the helicopter lines up.
+  // The game's heat decays over time; without this the stars fade
+  // before the heli arrives.
+  let stopped = false;
+  const timer = setInterval(() => {
+    if (stopped) return;
+    page.evaluate((heat) => {
+      const S = window.__solmar.S;
+      if (S.heat < heat - 10) S.heat = heat;
+    }, CHASE_HEAT).catch(() => {});
+  }, REASSERT_MS);
+  const stop = () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+
+  // Poll until the helicopter exists and is hovering over the player.
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await page.evaluate(() => {
+      const S = window.__solmar.S;
+      const p = S.player.pos;
+      const heli = S.heli;
+      if (!heli || !heli.pos) return { hasHeli: false };
+      const dx = heli.pos.x - p.x;
+      const dz = heli.pos.z - p.z;
+      return {
+        hasHeli: true,
+        dist: Math.hypot(dx, dz),
+        heli: { x: +heli.pos.x.toFixed(1), y: +heli.pos.y.toFixed(1), z: +heli.pos.z.toFixed(1) },
+        wanted: S.wanted,
+        cops: S.cars.filter((c) => c.aiPolice).length,
+      };
+    });
+    if (last.hasHeli && last.dist < OVERHEAD_DIST && last.cops >= 2) break;
+    await sleep(1000);
   }
-} finally {
-  await browser.close();
-  server.close();
+
+  if (!last || !last.hasHeli) {
+    stop();
+    throw new Error('chase staging timed out: no helicopter appeared within ' + timeoutMs + ' ms');
+  }
+  if (last.dist >= OVERHEAD_DIST) {
+    stop();
+    throw new Error('chase staging timed out: helicopter never came overhead (closest ' + last.dist.toFixed(0) + ' m)');
+  }
+
+  return { stop, heli: last.heli, wanted: last.wanted };
 }
-console.log("chase shot done");

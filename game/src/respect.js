@@ -1,61 +1,72 @@
-// respect.js — the respect ladder of Solmar Bay.
-// From NOBODY to bay legend, one job at a time.
-// Written fresh for round 7 from the shared spec; no repo code was read.
+// respect.js — the reputation ladder of Solmar Bay.
+//
+// Vic starts as a NOBODY. Respect comes in from jobs, races and
+// anything else that makes the bay talk, and every rung changes the
+// rank title on the HUD. Two hundred points from zero puts him on the
+// first real rung: STREET HUSTLER. The top of the ladder is BAY LEGEND.
 
 const LADDER = [
-  { at: 0, title: 'NOBODY' },
-  { at: 100, title: 'STREET HUSTLER' },
-  { at: 300, title: 'BAY RUNNER' },
-  { at: 600, title: 'CREW BOSS' },
-  { at: 1000, title: "VIC'S RIGHT HAND" },
-  { at: 1500, title: 'BAY LEGEND' },
+  { min: 0, title: 'NOBODY' },
+  { min: 200, title: 'STREET HUSTLER' },
+  { min: 450, title: 'CORNER KING' },
+  { min: 800, title: 'BLOCK CAPTAIN' },
+  { min: 1300, title: 'BAY RUNNER' },
+  { min: 2000, title: 'CREW LEADER' },
+  { min: 3200, title: 'UNDERBOSS' },
+  { min: 5000, title: 'BAY LEGEND' },
 ];
 
-function dom(ctx, id) {
-  if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
-  if (typeof document !== 'undefined') return document.getElementById(id);
-  return null;
+function el(ctx, id) {
+  return (ctx.dom && ctx.dom[id]) ||
+    (typeof document !== 'undefined' ? document.getElementById(id) : null);
 }
 
-function rankFor(points) {
-  let best = LADDER[0];
-  for (const rung of LADDER) if (points >= rung.at) best = rung;
-  return best;
+function showToast(ctx, msg) {
+  const api = ctx.api || {};
+  if (typeof api.toast === 'function') {
+    try { api.toast(msg); return; } catch (e) { /* fall through */ }
+  }
+  const box = el(ctx, 'toast');
+  if (box) box.textContent = msg;
 }
 
 export function init(ctx) {
   const S = ctx.state;
   if (typeof S.respect !== 'number') S.respect = 0;
 
-  const rank = { title: rankFor(S.respect).title, level: LADDER.indexOf(rankFor(S.respect)) };
+  function rankFor(pts) {
+    let cur = LADDER[0];
+    for (const r of LADDER) if (pts >= r.min) cur = r;
+    return cur;
+  }
+
+  const rank = { title: rankFor(S.respect).title, min: rankFor(S.respect).min };
 
   function refreshHud() {
-    const num = dom(ctx, 'respect-num');
-    if (num) num.textContent = String(S.respect);
-    const rankEl = dom(ctx, 'respect-rank');
-    if (rankEl) rankEl.textContent = rank.title;
-    // Never write textContent onto #respect-line itself: it is the
-    // container of the two spans above, and replacing its text would
-    // wipe them out of the DOM on every frame.
+    const numEl = el(ctx, 'respect-num');
+    if (numEl && numEl.textContent !== String(S.respect)) numEl.textContent = String(S.respect);
+    const rankEl = el(ctx, 'respect-rank');
+    if (rankEl && rankEl.textContent !== rank.title) rankEl.textContent = rank.title;
   }
 
-  function add(n, why) {
-    const before = rank.title;
-    S.respect = Math.max(0, S.respect + n);
-    const now = rankFor(S.respect);
-    rank.title = now.title;
-    rank.level = LADDER.indexOf(now);
+  const director = {
+    rank,
+    ladder: LADDER.map((r) => ({ min: r.min, title: r.title })),
+    add(n, reason) {
+      S.respect = Math.max(0, (S.respect || 0) + n);
+      const next = rankFor(S.respect);
+      rank.title = next.title;
+      rank.min = next.min;
+      refreshHud();
+      if (n > 0) showToast(ctx, 'RESPECT +' + n + ' — ' + rank.title);
+      return S.respect;
+    },
+  };
+  S.respectDirector = director;
+
+  ctx.updates.push((dt, t) => {
     refreshHud();
-    if (now.title !== before) {
-      const toast = dom(ctx, 'toast');
-      if (toast) toast.textContent = 'Respect up — you are now ' + now.title + (why ? ' (' + why + ')' : '') + '.';
-    }
-    return rank.title;
-  }
+  });
 
-  S.respectDirector = { rank, add, ladder: LADDER, rankFor };
-  ctx.api.respect = S.respectDirector;
-
-  refreshHud();
-  ctx.updates.push(() => { refreshHud(); });
+  ctx.api.respect = director;
 }

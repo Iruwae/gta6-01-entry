@@ -1,153 +1,192 @@
-// Solmar Bay — the seven districts (round 7 rebuild).
-// Four centres are fixed by the game contract; the other three are
-// invented here. Each district gets its own look through street
-// props, and a nearest-centre lookup answers "where am I?" for any
-// map position. S.district (the id) and the HUD name follow the
-// player as they move.
+// SOLMAR BAY — districts (round 8, written fresh from the spec).
+// Seven named districts, each with its own look. Four are fixed by the
+// contract: HARBOR (120,120), BEACH (0,165), UPTOWN (120,-90) and
+// THE STRIP (0,135). The other three are invented here. A lookup on
+// ctx.api answers "which district is this map position in", and the
+// player's current district is kept on S.district (lowercase id) with
+// the display name on the HUD district element.
 import * as THREE from '../vendor/three.module.min.js';
 
+const DISTRICTS = [
+  { id: 'downtown', name: 'DOWNTOWN', x: 0, z: 0, radius: 55,
+    tint: 0x8a6a3a, blurb: 'glass towers and the plaza' },
+  { id: 'harbor', name: 'HARBOR', x: 120, z: 120, radius: 48,
+    tint: 0x3a7a8a, blurb: 'cranes, containers and the bay' },
+  { id: 'beach', name: 'BEACH', x: 0, z: 165, radius: 42,
+    tint: 0xd9b380, blurb: 'sand, palms and the boardwalk' },
+  { id: 'uptown', name: 'UPTOWN', x: 120, z: -90, radius: 48,
+    tint: 0x7a8ab0, blurb: 'quiet avenues and tall apartments' },
+  { id: 'strip', name: 'THE STRIP', x: 0, z: 135, radius: 42,
+    tint: 0xff4ad8, blurb: 'neon signs and late-night crowds' },
+  { id: 'oldtown', name: 'OLD TOWN', x: -120, z: -60, radius: 52,
+    tint: 0xb08040, blurb: 'low brick rows and corner cafes' },
+  { id: 'palmrow', name: 'PALM ROW', x: -110, z: 90, radius: 50,
+    tint: 0x5a9a5a, blurb: 'palm-lined streets and small hotels' },
+];
+
+function districtAt(x, z) {
+  let best = DISTRICTS[0], bestD = Infinity;
+  for (const d of DISTRICTS) {
+    const dx = x - d.x, dz = z - d.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist < bestD) { bestD = dist; best = d; }
+  }
+  return best;
+}
+
+function makePalm(T, scene, x, z, s) {
+  const g = new T.Group();
+  const trunk = new T.Mesh(
+    new T.CylinderGeometry(0.12 * s, 0.2 * s, 2.6 * s, 6),
+    new T.MeshLambertMaterial({ color: 0x7a5a38 })
+  );
+  trunk.position.y = 1.3 * s; g.add(trunk);
+  const top = new T.Mesh(
+    new T.ConeGeometry(1.1 * s, 1.4 * s, 7),
+    new T.MeshLambertMaterial({ color: 0x3f8a4a })
+  );
+  top.position.y = 3.1 * s; g.add(top);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  return g;
+}
+
 export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  const scene = ctx.scene;
   const T = ctx.THREE || THREE;
-  const dom = ctx.dom || {};
+  const scene = ctx.scene;
+  const S = ctx.state;
 
-  const DISTRICTS = [
-    { id: 'harbor', name: 'HARBOR', x: 120, z: 120, look: 'cranes and stacked containers, rust and sea blue' },
-    { id: 'beach', name: 'BEACH', x: 0, z: 165, look: 'pale sand, palms, surf shacks' },
-    { id: 'uptown', name: 'UPTOWN', x: 120, z: -90, look: 'glass towers, manicured planters, quiet money' },
-    { id: 'strip', name: 'THE STRIP', x: 0, z: 135, look: 'neon frontage, crowds, loud colour' },
-    { id: 'downtown', name: 'DOWNTOWN', x: 0, z: 0, look: 'tall towers, plazas, office glass' },
-    { id: 'oldtown', name: 'OLD TOWN', x: -120, z: 120, look: 'brick rows, awnings, corner cafes' },
-    { id: 'westside', name: 'WESTSIDE', x: -120, z: -90, look: 'warehouses, chain fences, wide empty lots' },
-  ];
-
-  function districtAt(x, z) {
-    let best = DISTRICTS[4];
-    let bestD = Infinity;
-    for (const d of DISTRICTS) {
-      const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z);
-      if (dd < bestD) { bestD = dd; best = d; }
-    }
-    return best;
-  }
-  function districtById(id) {
-    return DISTRICTS.find((d) => d.id === id) || DISTRICTS[4];
+  // A soft ground tint per district so each area reads differently
+  // from the air and from the street.
+  for (const d of DISTRICTS) {
+    const tint = new T.Mesh(
+      new T.CircleGeometry(d.radius * 0.95, 24),
+      new T.MeshBasicMaterial({
+        color: d.tint, transparent: true, opacity: 0.13, depthWrite: false,
+      })
+    );
+    tint.rotation.x = -Math.PI / 2;
+    tint.position.set(d.x, 0.012, d.z);
+    scene.add(tint);
   }
 
-  // ---- per-district street props (cheap shared materials) ------------
-  const crateMatA = new T.MeshLambertMaterial({ color: 0x7a4a2b });
-  const crateMatB = new T.MeshLambertMaterial({ color: 0x2f5d7a });
-  const palmTrunk = new T.MeshLambertMaterial({ color: 0x6b4a2f });
-  const palmLeaf = new T.MeshLambertMaterial({ color: 0x2f7a4a });
-  const planterMat = new T.MeshLambertMaterial({ color: 0x3a5a3a });
-  const brickMat = new T.MeshLambertMaterial({ color: 0x8a4a3a });
-  const wareMat = new T.MeshLambertMaterial({ color: 0x5a5a60 });
-  const neonMats = [0xff4d8a, 0x2fd8ff, 0xffc23d].map(
-    (c) => new T.MeshBasicMaterial({ color: c })
+  // HARBOR: stacked shipping containers and a simple crane.
+  const contCols = [0xb0503a, 0x3a6ab0, 0x4a9a5a, 0xc9a03a];
+  for (let i = 0; i < 9; i++) {
+    const c = new T.Mesh(
+      new T.BoxGeometry(6, 2.6, 2.6),
+      new T.MeshLambertMaterial({ color: contCols[i % contCols.length] })
+    );
+    c.position.set(96 + (i % 3) * 14, 1.3 + (i >= 6 ? 2.6 : 0), 96 + Math.floor(i / 3) * 12);
+    c.rotation.y = (i % 2) * 0.12;
+    scene.add(c);
+  }
+  const craneLeg = new T.Mesh(
+    new T.BoxGeometry(2, 26, 2),
+    new T.MeshLambertMaterial({ color: 0xc9a03a })
   );
-  const unitBox = new T.BoxGeometry(1, 1, 1);
-  function box(x, y, z, w, h, d, mat) {
-    const m = new T.Mesh(unitBox, mat);
-    m.scale.set(w, h, d);
-    m.position.set(x, y, z);
-    scene.add(m);
-    return m;
-  }
-
-  // HARBOR: stacked containers + two crane masts
-  for (let i = 0; i < 8; i++) {
-    const cx = 105 + (i % 4) * 10;
-    const cz = 105 + Math.floor(i / 4) * 9;
-    box(cx, 1.2, cz, 8, 2.4, 2.6, i % 2 ? crateMatA : crateMatB);
-    if (i % 3 === 0) box(cx, 3.6, cz, 8, 2.4, 2.6, crateMatB);
-  }
-  box(138, 11, 108, 1.2, 22, 1.2, wareMat);
-  box(138, 21, 108, 14, 1.2, 1.2, wareMat);
-  box(102, 9, 138, 1.2, 18, 1.2, wareMat);
-
-  // BEACH: sand patch + a row of palms
-  const sand = new T.Mesh(
-    new T.PlaneGeometry(90, 26),
-    new T.MeshLambertMaterial({ color: 0xd8c49a })
+  craneLeg.position.set(140, 13, 100); scene.add(craneLeg);
+  const craneArm = new T.Mesh(
+    new T.BoxGeometry(22, 1.6, 1.6),
+    new T.MeshLambertMaterial({ color: 0xc9a03a })
   );
-  sand.rotation.x = -Math.PI / 2;
-  sand.position.set(0, 0.03, 168);
-  scene.add(sand);
-  for (let i = 0; i < 7; i++) {
-    const px = -42 + i * 14;
-    const pz = 158 + (i % 2) * 6;
-    const trunk = new T.Mesh(new T.CylinderGeometry(0.25, 0.4, 5, 6), palmTrunk);
-    trunk.position.set(px, 2.5, pz);
-    trunk.rotation.z = 0.15;
-    scene.add(trunk);
-    const top = new T.Mesh(new T.ConeGeometry(2.2, 1.6, 7), palmLeaf);
-    top.position.set(px + 0.7, 5.4, pz);
-    scene.add(top);
+  craneArm.position.set(132, 25, 100); scene.add(craneArm);
+
+  // BEACH + PALM ROW: palms and beach umbrellas.
+  for (const [x, z] of [[-24, 158], [-10, 164], [8, 158], [22, 164], [-38, 152], [36, 152]]) {
+    makePalm(T, scene, x, z, 1.1);
+  }
+  for (const [x, z] of [[-128, 78], [-96, 104], [-118, 112], [-88, 66]]) {
+    makePalm(T, scene, x, z, 1.0);
+  }
+  for (const [x, z, col] of [[-16, 170, 0xff6b6b], [14, 170, 0x37e6ff], [0, 174, 0xffb347]]) {
+    const um = new T.Mesh(
+      new T.ConeGeometry(2.4, 1.2, 8),
+      new T.MeshLambertMaterial({ color: col })
+    );
+    um.position.set(x, 2.2, z); scene.add(um);
+    const pole = new T.Mesh(
+      new T.CylinderGeometry(0.07, 0.07, 2.2, 5),
+      new T.MeshLambertMaterial({ color: 0xd8d0c0 })
+    );
+    pole.position.set(x, 1.1, z); scene.add(pole);
   }
 
-  // UPTOWN: planters and a glass slab
-  for (let i = 0; i < 6; i++) {
-    box(102 + (i % 3) * 18, 0.6, -102 + Math.floor(i / 3) * 16, 3, 1.2, 3, planterMat);
-  }
-  box(132, 8, -78, 6, 16, 6, new T.MeshLambertMaterial({ color: 0x9ab8d8 }));
-
-  // THE STRIP: neon totems along the frontage
-  for (let i = 0; i < 6; i++) {
-    const nx = -60 + i * 24;
-    const m = new T.Mesh(unitBox, neonMats[i % neonMats.length]);
-    m.scale.set(1.4, 6 + (i % 3) * 2, 1.4);
-    m.position.set(nx, 3 + (i % 3), 128);
-    scene.add(m);
+  // UPTOWN: a few tall pale apartment slabs.
+  for (const [x, z, h] of [[102, -108, 34], [138, -72, 28], [108, -66, 24]]) {
+    const t = new T.Mesh(
+      new T.BoxGeometry(14, h, 14),
+      new T.MeshLambertMaterial({ color: 0x9ab0c0, emissive: 0xffe9a8, emissiveIntensity: 0.12 })
+    );
+    t.position.set(x, h / 2, z); scene.add(t);
   }
 
-  // DOWNTOWN: plaza planters and benches
-  for (let i = 0; i < 4; i++) {
-    box(-12 + (i % 2) * 24, 0.5, -12 + Math.floor(i / 2) * 24, 4, 1, 1.4, planterMat);
+  // OLD TOWN: low warm brick rows.
+  for (const [x, z] of [[-138, -78], [-102, -42], [-138, -42], [-102, -84]]) {
+    const b = new T.Mesh(
+      new T.BoxGeometry(16, 7, 12),
+      new T.MeshLambertMaterial({ color: 0x8a5a44 })
+    );
+    b.position.set(x, 3.5, z); scene.add(b);
   }
 
-  // OLD TOWN: brick rows with awnings
+  // DOWNTOWN plaza: pale paving and benches around the centre.
+  const plaza = new T.Mesh(
+    new T.CircleGeometry(14, 20),
+    new T.MeshLambertMaterial({ color: 0x9a8a72 })
+  );
+  plaza.rotation.x = -Math.PI / 2; plaza.position.set(0, 0.014, 0);
+  scene.add(plaza);
+  for (const [x, z] of [[-10, -8], [10, 8], [-10, 8], [10, -8]]) {
+    const bench = new T.Mesh(
+      new T.BoxGeometry(3, 0.7, 1),
+      new T.MeshLambertMaterial({ color: 0x5a4632 })
+    );
+    bench.position.set(x, 0.35, z); scene.add(bench);
+  }
+
+  // THE STRIP: extra neon blocks (ambient.js flickers these).
+  const stripNeon = [];
+  const neonCols = [0xff4ad8, 0x37e6ff, 0xffb347];
   for (let i = 0; i < 5; i++) {
-    const ox = -138 + i * 9;
-    box(ox, 2.5, 108, 7, 5, 6, brickMat);
-    box(ox, 4.4, 105, 7.4, 0.5, 2, new T.MeshLambertMaterial({ color: 0xd8b23d }));
+    const mat = new T.MeshBasicMaterial({ color: neonCols[i % neonCols.length] });
+    const sign = new T.Mesh(new T.BoxGeometry(7, 1.2, 0.5), mat);
+    sign.position.set(-40 + i * 20, 12 + (i % 2) * 3, 142);
+    scene.add(sign); stripNeon.push(mat);
   }
 
-  // WESTSIDE: warehouses and a chain-fence run (posts only, cheap)
-  box(-132, 3, -102, 16, 6, 10, wareMat);
-  box(-108, 2.5, -78, 12, 5, 9, wareMat);
-  for (let i = 0; i < 8; i++) {
-    box(-140 + i * 5, 1, -70, 0.3, 2, 0.3, wareMat);
-  }
-
-  // ---- lookup + live tracking -----------------------------------------
+  const api = {
+    list: DISTRICTS,
+    at: districtAt,
+    getDistrict: districtAt,
+    byId(id) { return DISTRICTS.find((d) => d.id === id) || null; },
+    neonMaterials: stripNeon,
+  };
   ctx.api.districts = DISTRICTS;
   ctx.api.districtAt = districtAt;
-  ctx.api.districtById = districtById;
+  ctx.api.getDistrict = districtAt;
+  ctx.api.districtInfo = api;
+  if (S) S.districts = DISTRICTS;
 
-  function el(id) {
-    return dom[id] || document.getElementById(id);
+  // Starting district: downtown, until the player moves.
+  if (S && !S.district) S.district = 'downtown';
+
+  function dom(id) {
+    if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
+    try { return document.getElementById(id); } catch (e) { return null; }
   }
 
-  function refresh() {
-    let px = 0;
-    let pz = 0;
-    if (S.player && S.player.pos) {
-      px = S.player.pos.x;
-      pz = S.player.pos.z;
-    } else if (S.car && S.car.pos) {
-      px = S.car.pos.x;
-      pz = S.car.pos.z;
-    }
+  let lastId = null;
+  ctx.updates.push(function districtsUpdate() {
+    if (!S || !S.player || !S.player.pos) return;
+    let px = S.player.pos.x, pz = S.player.pos.z;
+    if (S.car && S.car.pos && px === 0 && pz === 0) { px = S.car.pos.x; pz = S.car.pos.z; }
     const d = districtAt(px, pz);
-    if (S.district !== d.id) {
-      S.district = d.id;
-      S.districtName = d.name;
-      const elD = el('district');
-      if (elD) elD.textContent = d.name;
+    S.district = d.id;
+    if (d.id !== lastId) {
+      lastId = d.id;
+      const el = dom('district');
+      if (el) el.textContent = d.name;
     }
-  }
-
-  refresh();
-  ctx.updates.push((dt) => refresh());
+  });
 }

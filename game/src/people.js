@@ -1,149 +1,188 @@
-// Solmar Bay — pedestrians (round 7 rebuild).
-// Simple walking figures on the sidewalks who wander from corner
-// to corner. When police close in or shots ring out nearby they
-// break into a run away from the trouble. Kept deliberately cheap:
-// shared geometry and materials, a couple of dozen figures, and
-// only a handful of distance checks per frame.
+// SOLMAR BAY — pedestrians (round 8, written fresh from the spec).
+// Simple walking figures on the sidewalks who wander the blocks and
+// run from gunfire and police. Cheap by design: shared geometries and
+// a handful of shared materials, a fixed small crowd, no per-ped
+// allocations inside the frame loop.
 import * as THREE from '../vendor/three.module.min.js';
 
+const COUNT = 26;
+const SHIRT_COLS = [0xd8b25e, 0x5e8ad8, 0xd85e6a, 0x6ad88a, 0xd8d8d8, 0x9a5ed8, 0x5ed8c9];
+const PANTS_COLS = [0x2e3440, 0x4a3a2e, 0x2e4a3a, 0x3a3a4a];
+
+function pick(arr, rnd) { return arr[(rnd() * arr.length) | 0]; }
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  const scene = ctx.scene;
   const T = ctx.THREE || THREE;
+  const scene = ctx.scene;
+  const S = ctx.state;
+  const rnd = mulberry32(4242);
 
-  const COUNT = 22;
-  const HALF = 170;
+  // Shared geometry/materials: every pedestrian reuses these.
+  const bodyGeo = new T.BoxGeometry(0.46, 0.85, 0.28);
+  const headGeo = new T.SphereGeometry(0.17, 8, 6);
+  const legsGeo = new T.BoxGeometry(0.4, 0.55, 0.26);
+  const skinMat = new T.MeshLambertMaterial({ color: 0xc98a64 });
+  const skinMat2 = new T.MeshLambertMaterial({ color: 0x8a5a3a });
+  const shirtMats = SHIRT_COLS.map((c) => new T.MeshLambertMaterial({ color: c }));
+  const pantsMats = PANTS_COLS.map((c) => new T.MeshLambertMaterial({ color: c }));
 
-  const bodyGeo = new T.BoxGeometry(0.55, 0.95, 0.32);
-  const headGeo = new T.SphereGeometry(0.22, 8, 6);
-  const shirtCols = [0xd84a4a, 0x4a7ad8, 0x3da35a, 0xe8c33d, 0xd84a9a, 0x8a6ad8, 0xeeeeee, 0x2f2f33];
-  const shirtMats = shirtCols.map((c) => new T.MeshLambertMaterial({ color: c }));
-  const skinMats = [0xe8b88a, 0xc98a5a, 0x8a5a3a, 0xf0c8a0].map(
-    (c) => new T.MeshLambertMaterial({ color: c })
-  );
-  const legMat = new T.MeshLambertMaterial({ color: 0x2a2a33 });
-
-  function sidewalkSpot(i) {
-    // Near a road line, offset onto the sidewalk.
-    const road = -150 + (i * 37) % 300;
-    const along = -160 + ((i * 91) % 320);
-    if (i % 2 === 0) return { x: road + 7, z: along };
-    return { x: along, z: road + 7 };
+  function randomSidewalkPoint() {
+    // Near a road line, offset onto the sidewalk, inside the bounds.
+    const city = ctx.api.city;
+    let x, z;
+    if (city && city.roadXs && city.roadXs.length) {
+      if (rnd() < 0.5) {
+        x = pick(city.roadXs, rnd) + (rnd() < 0.5 ? -6.5 : 6.5);
+        z = -170 + rnd() * 340;
+      } else {
+        z = pick(city.roadZs, rnd) + (rnd() < 0.5 ? -6.5 : 6.5);
+        x = -170 + rnd() * 340;
+      }
+    } else {
+      x = -170 + rnd() * 340;
+      z = -170 + rnd() * 340;
+    }
+    return {
+      x: Math.max(-175, Math.min(175, x)),
+      z: Math.max(-175, Math.min(175, z)),
+    };
   }
 
-  const people = [];
+  const peds = [];
   for (let i = 0; i < COUNT; i++) {
-    const grp = new T.Group();
-    const body = new T.Mesh(bodyGeo, shirtMats[i % shirtMats.length]);
-    body.position.y = 0.95;
-    grp.add(body);
-    const head = new T.Mesh(headGeo, skinMats[i % skinMats.length]);
-    head.position.y = 1.62;
-    grp.add(head);
-    const legs = new T.Mesh(new T.BoxGeometry(0.5, 0.5, 0.3), legMat);
-    legs.position.y = 0.25;
-    grp.add(legs);
-    const s = sidewalkSpot(i);
-    grp.position.set(s.x, 0, s.z);
-    scene.add(grp);
-    people.push({
-      mesh: grp,
-      x: s.x,
-      z: s.z,
-      tx: s.x + 20,
-      tz: s.z - 10,
-      heading: 0,
-      speed: 1 + (i % 5) * 0.25,
-      state: 'walk',
-      bob: Math.random() * 6,
-      retarget: 0,
+    const g = new T.Group();
+    const legs = new T.Mesh(legsGeo, pick(pantsMats, rnd));
+    legs.position.y = 0.28; g.add(legs);
+    const body = new T.Mesh(bodyGeo, pick(shirtMats, rnd));
+    body.position.y = 0.98; g.add(body);
+    const head = new T.Mesh(headGeo, rnd() < 0.5 ? skinMat : skinMat2);
+    head.position.y = 1.58; g.add(head);
+    const p = randomSidewalkPoint();
+    g.position.set(p.x, 0, p.z);
+    g.rotation.y = rnd() * Math.PI * 2;
+    scene.add(g);
+    const target = randomSidewalkPoint();
+    peds.push({
+      group: g, body, head, legs,
+      target, speed: 1.1 + rnd() * 0.9,
+      state: 'walk', fleeT: 0, bobPhase: rnd() * Math.PI * 2,
+      heading: g.rotation.y,
     });
   }
 
-  S.people = people;
-  S.pedestrians = people;
+  if (S) S.pedestrians = peds;
+  ctx.api.people = {
+    list: peds,
+    count: peds.length,
+    scatter(x, z) {
+      for (const p of peds) {
+        const dx = p.group.position.x - x, dz = p.group.position.z - z;
+        const d = Math.hypot(dx, dz) || 1;
+        p.target = { x: p.group.position.x + (dx / d) * 30, z: p.group.position.z + (dz / d) * 30 };
+        p.state = 'flee'; p.fleeT = 3;
+      }
+    },
+  };
 
-  function gunfireNear(x, z) {
-    // Combat modules may expose a last-shot position under a few
-    // possible names; honour whichever one is present and fresh.
-    const spots = [S.gunfirePos, S.lastShotPos, S.shotPos];
-    for (const p of spots) {
-      if (!p) continue;
-      const at = p.at ?? p.time ?? S.time;
-      if (typeof at === 'number' && S.time - at > 6) continue;
-      const dx = (p.x ?? 0) - x;
-      const dz = (p.z ?? 0) - z;
-      if (dx * dx + dz * dz < 22 * 22) return { x: p.x ?? 0, z: p.z ?? 0 };
-    }
-    return null;
+  function nearestThreat(px, pz) {
+    // Returns {x, z, d} for the closest police car, or null.
+    let best = null;
+    try {
+      const cars = (S && S.cars) || [];
+      for (const c of cars) {
+        if (!c || !c.aiPolice || !c.pos) continue;
+        const dx = c.pos.x - px, dz = c.pos.z - pz;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (!best || d < best.d) best = { x: c.pos.x, z: c.pos.z, d };
+      }
+    } catch (e) { /* police list is best-effort */ }
+    return best;
   }
 
-  function scatter(x, z) {
-    for (const p of people) {
-      const dx = p.x - x;
-      const dz = p.z - z;
-      const d = Math.hypot(dx, dz) || 1;
-      p.tx = Math.max(-HALF, Math.min(HALF, p.x + (dx / d) * 40));
-      p.tz = Math.max(-HALF, Math.min(HALF, p.z + (dz / d) * 40));
-      p.state = 'flee';
-    }
+  function gunfireNear(px, pz) {
+    // Several signals other modules may set; any one counts.
+    try {
+      if (S && S.player && S.player.firing) return true;
+      if (S && typeof S.lastGunshotAt === 'number' && Date.now() - S.lastGunshotAt < 2500) {
+        const gx = (S.lastGunshot && S.lastGunshot.x) || (S.player && S.player.pos.x) || 0;
+        const gz = (S.lastGunshot && S.lastGunshot.z) || (S.player && S.player.pos.z) || 0;
+        return Math.hypot(px - gx, pz - gz) < 30;
+      }
+      if (S && S.gunfire && S.gunfire.x !== undefined) {
+        return Math.hypot(px - S.gunfire.x, pz - S.gunfire.z) < 25;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
   }
 
-  ctx.api.people = { list: people, scatter, count: people.length };
+  ctx.updates.push(function peopleUpdate(dt) {
+    const step = Math.max(0, Math.min(dt, 0.1));
+    if (step === 0) return;
+    const playerPos = S && S.player && S.player.pos;
+    const heat = (S && (S.heat || 0)) || 0;
+    for (const p of peds) {
+      const gx = p.group.position.x, gz = p.group.position.z;
+      let run = false;
+      let awayX = 0, awayZ = 0;
 
-  ctx.updates.push((dt, t) => {
-    const cops = Array.isArray(S.cars) ? S.cars.filter((c) => c && c.aiPolice && c.pos) : [];
-    const px = S.player && S.player.pos ? S.player.pos.x : 0;
-    const pz = S.player && S.player.pos ? S.player.pos.z : 0;
-    for (const p of people) {
-      // --- decide: flee or stroll ---
-      let threat = null;
-      for (const c of cops) {
-        const dx = c.pos.x - p.x;
-        const dz = c.pos.z - p.z;
-        if (dx * dx + dz * dz < 15 * 15) { threat = c.pos; break; }
+      const threat = nearestThreat(gx, gz);
+      if (threat && threat.d < 18) {
+        run = true;
+        awayX = gx - threat.x; awayZ = gz - threat.z;
       }
-      if (!threat) {
-        const shot = gunfireNear(p.x, p.z);
-        if (shot) threat = shot;
+      if (!run && gunfireNear(gx, gz)) {
+        run = true;
+        if (playerPos) { awayX = gx - playerPos.x; awayZ = gz - playerPos.z; }
+        else { awayX = 1; awayZ = 0; }
       }
-      if (threat) {
-        if (p.state !== 'flee') {
-          const dx = p.x - threat.x;
-          const dz = p.z - threat.z;
-          const d = Math.hypot(dx, dz) || 1;
-          p.tx = Math.max(-HALF, Math.min(HALF, p.x + (dx / d) * 45));
-          p.tz = Math.max(-HALF, Math.min(HALF, p.z + (dz / d) * 45));
-          p.state = 'flee';
-        }
+      if (!run && heat >= 3 && playerPos) {
+        const d = Math.hypot(gx - playerPos.x, gz - playerPos.z);
+        if (d < 14) { run = true; awayX = gx - playerPos.x; awayZ = gz - playerPos.z; }
+      }
+
+      let speed = p.speed;
+      let tx = p.target.x, tz = p.target.z;
+      if (run) {
+        p.state = 'flee'; p.fleeT = 1.5;
+        const len = Math.hypot(awayX, awayZ) || 1;
+        tx = gx + (awayX / len) * 25;
+        tz = gz + (awayZ / len) * 25;
+        speed = 4.4;
       } else if (p.state === 'flee') {
-        p.state = 'walk';
-        p.retarget = 0;
+        p.fleeT -= step;
+        if (p.fleeT <= 0) { p.state = 'walk'; p.target = randomSidewalkPoint(); }
+        else { speed = 3.2; tx = p.target.x; tz = p.target.z; }
       }
 
-      // --- retarget when arrived or bored ---
-      const dxT = p.tx - p.x;
-      const dzT = p.tz - p.z;
-      const distT = Math.hypot(dxT, dzT);
-      p.retarget -= dt;
-      if ((distT < 2 || p.retarget <= 0) && p.state === 'walk') {
-        p.tx = Math.max(-HALF, Math.min(HALF, p.x + (Math.random() * 70 - 35)));
-        p.tz = Math.max(-HALF, Math.min(HALF, p.z + (Math.random() * 70 - 35)));
-        p.retarget = 6 + Math.random() * 8;
+      const dx = tx - gx, dz = tz - gz;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 1.2) {
+        if (p.state === 'walk') p.target = randomSidewalkPoint();
+        continue;
       }
-
-      // --- move ---
-      const speed = p.state === 'flee' ? 3.6 : p.speed;
-      if (distT > 0.4) {
-        const step = Math.min(distT, speed * dt);
-        p.x += (dxT / distT) * step;
-        p.z += (dzT / distT) * step;
-        p.heading = Math.atan2(dxT, dzT);
-      }
-      p.bob += dt * (p.state === 'flee' ? 11 : 6);
-      p.mesh.position.set(p.x, Math.abs(Math.sin(p.bob)) * 0.06, p.z);
-      p.mesh.rotation.y = p.heading;
-      void px; void pz; void t;
+      const vx = dx / dist, vz = dz / dist;
+      p.group.position.x = Math.max(-178, Math.min(178, gx + vx * speed * step));
+      p.group.position.z = Math.max(-178, Math.min(178, gz + vz * speed * step));
+      const wantHeading = Math.atan2(vx, vz);
+      let dh = wantHeading - p.heading;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      p.heading += dh * Math.min(1, step * 8);
+      p.group.rotation.y = p.heading;
+      // Little walk bob so they read as walking, not sliding.
+      p.bobPhase += step * (p.state === 'flee' ? 11 : 7);
+      p.body.position.y = 0.98 + Math.abs(Math.sin(p.bobPhase)) * 0.05;
+      p.legs.position.y = 0.28 + Math.abs(Math.cos(p.bobPhase)) * 0.04;
     }
   });
 }

@@ -1,77 +1,97 @@
-// Solmar Bay — screen juice (round 7 rebuild).
+// SOLMAR BAY — screen juice (round 8, written fresh from the spec).
 // Muzzle flash, vignette pulses and camera shake on impacts and
-// explosions. Deliberately tiny: a few numbers decaying each frame
-// and two DOM elements fading out. No gameplay logic lives here.
+// explosions. Small and cheap, no gameplay logic: other modules call
+// the api, this module just plays the effect and lets it decay.
 export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  const dom = ctx.dom || {};
-  const camera = ctx.camera;
+  const S = ctx.state;
+  let trauma = 0;       // 0..1 camera shake energy
+  let flashA = 0;       // muzzle-flash overlay opacity 0..1
+  let pulseA = 0;       // vignette pulse 0..1
+  let lastOff = { x: 0, y: 0, z: 0 };
 
-  let flashA = 0;
-  let shakeAmt = 0;
-  let pulseA = 0;
-
-  function flashEl() {
-    return dom.flash || document.getElementById('flash');
-  }
-  function vignetteEl() {
-    return dom.vignette || document.getElementById('vignette');
+  function el(id) {
+    if (ctx.dom && ctx.dom[id]) return ctx.dom[id];
+    try { return document.getElementById(id); } catch (e) { return null; }
   }
 
   const juice = {
-    flash(strength) {
-      flashA = Math.max(flashA, typeof strength === 'number' ? strength : 0.85);
-      const el = flashEl();
-      if (el) el.style.opacity = String(Math.min(1, flashA));
-    },
-    muzzle() { this.flash(0.7); },
+    get trauma() { return trauma; },
+    flash() { flashA = 1; },
+    muzzleFlash() { flashA = 1; },
+    flashMuzzle() { flashA = 1; },
     shake(amount) {
-      shakeAmt = Math.min(1.2, shakeAmt + (typeof amount === 'number' ? amount : 0.4));
+      trauma = Math.max(0, Math.min(1, trauma + (amount || 0.4)));
     },
+    addShake(amount) { this.shake(amount); },
     cameraShake(amount) { this.shake(amount); },
     pulse(amount) {
-      pulseA = Math.max(pulseA, typeof amount === 'number' ? amount : 0.5);
+      pulseA = Math.max(0, Math.min(1, pulseA + (amount || 0.6)));
     },
     vignettePulse(amount) { this.pulse(amount); },
-    impact(amount) {
-      this.shake(typeof amount === 'number' ? amount : 0.35);
+    impact(power) {
+      this.shake(0.25 + (power || 0) * 0.2);
       this.pulse(0.4);
     },
-    explosion() {
-      this.flash(1);
-      this.shake(0.9);
-      this.pulse(0.8);
+    explode(pos, power) {
+      this.shake(0.55 + (power || 0) * 0.15);
+      this.flash();
+      this.pulse(1);
+      if (S) S.lastExplosion = { x: (pos && pos.x) || 0, z: (pos && pos.z) || 0, at: Date.now() };
     },
-    get shaking() { return shakeAmt; },
   };
 
-  S.juice = juice;
+  if (S) S.juice = juice;
   ctx.api.juice = juice;
+  ctx.api.cameraShake = function (a) { juice.shake(a); };
+  ctx.api.muzzleFlash = function () { juice.flash(); };
+  ctx.api.screenShake = juice;
 
-  ctx.updates.push((dt) => {
-    // Flash fades fast.
-    if (flashA > 0) {
-      flashA = Math.max(0, flashA - dt * 3.2);
-      const el = flashEl();
-      if (el) el.style.opacity = flashA > 0.01 ? String(flashA) : '';
-    }
-    // Vignette pulse fades, then hands the element back to its CSS.
-    if (pulseA > 0) {
-      pulseA = Math.max(0, pulseA - dt * 1.4);
-      const el = vignetteEl();
-      if (el) el.style.opacity = pulseA > 0.01 ? String(0.25 + pulseA * 0.55) : '';
-    }
-    // Camera shake: a small random offset that decays away.
-    if (shakeAmt > 0.001 && camera) {
-      shakeAmt = Math.max(0, shakeAmt - dt * 1.6);
-      const s = shakeAmt * 0.35;
-      camera.position.x += (Math.random() - 0.5) * s;
-      camera.position.y += (Math.random() - 0.5) * s * 0.6;
-      if (camera.rotation) {
-        camera.rotation.z += (Math.random() - 0.5) * shakeAmt * 0.02;
+  ctx.updates.push(function juiceUpdate(dt) {
+    const step = Math.max(0, Math.min(dt, 0.1));
+    trauma = Math.max(0, trauma - step * 1.6);
+    flashA = Math.max(0, flashA - step * 5);
+    pulseA = Math.max(0, pulseA - step * 1.4);
+
+    // Muzzle flash overlay.
+    try {
+      const f = el('flash');
+      if (f) {
+        if (flashA > 0.01) f.style.opacity = String(flashA);
+        else if (f.style.opacity) f.style.opacity = '';
       }
-    } else {
-      shakeAmt = 0;
-    }
+    } catch (e) { /* overlay is cosmetic */ }
+
+    // Vignette pulse.
+    try {
+      const v = el('vignette');
+      if (v) {
+        if (pulseA > 0.01) v.style.opacity = String(0.3 + 0.7 * pulseA);
+        else if (v.style.opacity) v.style.opacity = '';
+      }
+    } catch (e) { /* overlay is cosmetic */ }
+
+    // Camera shake: subtract last frame's offset, add a fresh one, so
+    // the offset never accumulates into a permanent drift.
+    try {
+      const cam = ctx.camera;
+      if (cam && cam.position) {
+        cam.position.x -= lastOff.x;
+        cam.position.y -= lastOff.y;
+        cam.position.z -= lastOff.z;
+        if (trauma > 0.001) {
+          const mag = trauma * trauma * 0.35;
+          lastOff = {
+            x: (Math.random() * 2 - 1) * mag,
+            y: (Math.random() * 2 - 1) * mag * 0.6,
+            z: (Math.random() * 2 - 1) * mag,
+          };
+          cam.position.x += lastOff.x;
+          cam.position.y += lastOff.y;
+          cam.position.z += lastOff.z;
+        } else {
+          lastOff = { x: 0, y: 0, z: 0 };
+        }
+      }
+    } catch (e) { /* camera is owned by the follow logic; skip */ }
   });
 }

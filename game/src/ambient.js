@@ -1,111 +1,130 @@
-// Solmar Bay — ambient life (round 7 rebuild).
-// Birds circling the bay, flags waving over the Strip, neon signs
-// flickering, and a slow harbour haze of gulls. Pure flavour: no
-// gameplay, no collisions, a few dozen cheap meshes and a light
-// per-frame update.
+// SOLMAR BAY — ambient life (round 8, written fresh from the spec).
+// Birds circling overhead, flags waving, neon signs flickering —
+// things that make the city feel alive without touching gameplay.
+// Deliberately cheap: a few objects, a little sine math, no allocations
+// in the frame loop.
 import * as THREE from '../vendor/three.module.min.js';
 
-export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  const scene = ctx.scene;
-  const T = ctx.THREE || THREE;
+const NEON_COLS = [0xff4ad8, 0x37e6ff, 0xffb347, 0x7dff5e];
 
-  // ---- birds: dark dart shapes circling high over the city -----------
-  const birdMat = new T.MeshBasicMaterial({ color: 0x1a1a22 });
-  const wingGeo = new T.BoxGeometry(1.6, 0.06, 0.35);
+export function init(ctx) {
+  const T = ctx.THREE || THREE;
+  const scene = ctx.scene;
+  const S = ctx.state;
+
+  // ---- birds: small dark darts circling high over the city ----
+  const birdMat = new THREE.MeshBasicMaterial({ color: 0x1a1620 });
+  const birdGeo = new THREE.ConeGeometry(0.35, 1.6, 4);
+  birdGeo.rotateX(Math.PI / 2);
   const birds = [];
   for (let i = 0; i < 6; i++) {
-    const grp = new T.Group();
-    const left = new T.Mesh(wingGeo, birdMat);
-    left.position.x = -0.8;
-    grp.add(left);
-    const right = new T.Mesh(wingGeo, birdMat);
-    right.position.x = 0.8;
-    grp.add(right);
-    scene.add(grp);
+    const b = new THREE.Mesh(birdGeo, birdMat);
+    scene.add(b);
     birds.push({
-      mesh: grp, left, right,
-      r: 60 + i * 22,
-      h: 42 + (i % 3) * 12,
-      a: (i / 6) * Math.PI * 2,
-      speed: 0.05 + (i % 3) * 0.015,
-      cx: -40 + (i % 3) * 40,
-      cz: 20 - (i % 2) * 60,
+      mesh: b,
+      cx: -40 + i * 18, cz: -30 + (i % 3) * 45,
+      r: 34 + i * 7, h: 42 + (i % 4) * 9,
+      a: i * 1.1, speed: 0.14 + (i % 3) * 0.05,
     });
   }
 
-  // ---- flags over the Strip and downtown ------------------------------
-  const flagCols = [0xff5a7a, 0x2fb3c9, 0xffc23d, 0x7a4ad8];
+  // ---- flags on poles near the Strip and the beach ----
   const flags = [];
-  for (let i = 0; i < 8; i++) {
-    const fx = -70 + i * 20;
-    const fz = i % 2 === 0 ? 128 : -8;
-    const pole = new T.Mesh(
-      new T.CylinderGeometry(0.08, 0.1, 7, 6),
-      new T.MeshLambertMaterial({ color: 0x3a3a40 })
+  const flagCols = [0xff6b6b, 0xffb347, 0x37e6ff, 0x7dff5e, 0xff4ad8];
+  for (let i = 0; i < 5; i++) {
+    const x = -50 + i * 25, z = i % 2 === 0 ? 120 : 158;
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.09, 7, 6),
+      new THREE.MeshLambertMaterial({ color: 0x3a3840 })
     );
-    pole.position.set(fx, 3.5, fz);
-    scene.add(pole);
-    const cloth = new T.Mesh(
-      new T.PlaneGeometry(2.6, 1.4),
-      new T.MeshLambertMaterial({ color: flagCols[i % flagCols.length], side: T.DoubleSide })
+    pole.position.set(x, 3.5, z); scene.add(pole);
+    const flag = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 1.5),
+      new THREE.MeshBasicMaterial({ color: flagCols[i % flagCols.length], side: THREE.DoubleSide })
     );
-    cloth.position.set(fx + 1.35, 6.2, fz);
-    scene.add(cloth);
-    flags.push({ cloth, phase: i * 0.9 });
+    flag.position.set(x + 1.35, 6.2, z);
+    scene.add(flag);
+    flags.push({ mesh: flag, phase: i * 1.3 });
   }
 
-  // ---- neon signs: bright boxes that flicker on the Strip -------------
-  const neonCols = [0xff4d8a, 0x2fd8ff, 0xffc23d, 0x3dd68c];
-  const signs = [];
+  // ---- neon signs on the Strip that flicker ----
+  const neons = [];
   for (let i = 0; i < 6; i++) {
-    const mat = new T.MeshBasicMaterial({ color: neonCols[i % neonCols.length] });
-    const sign = new T.Mesh(new T.BoxGeometry(5 + (i % 3), 1, 0.3), mat);
-    sign.position.set(-60 + i * 24, 8 + (i % 2) * 2, 131);
+    const mat = new THREE.MeshBasicMaterial({
+      color: NEON_COLS[i % NEON_COLS.length], transparent: true, opacity: 1,
+    });
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(6, 1.1, 0.5), mat);
+    sign.position.set(-55 + i * 22, 7 + (i % 3) * 3, 118);
     scene.add(sign);
-    signs.push({ mesh: sign, mat, seed: i * 1.7 });
+    const pole = new THREE.Mesh(
+      new THREE.BoxGeometry(0.4, 7, 0.4),
+      new THREE.MeshLambertMaterial({ color: 0x222028 })
+    );
+    pole.position.set(-58 + i * 22, 3.5, 118);
+    scene.add(pole);
+    neons.push({ mat, phase: i * 2.1 });
   }
 
-  // ---- harbour gulls: two slow dots out over the water edge -----------
-  const gullMat = new T.MeshBasicMaterial({ color: 0xdddddd });
-  const gulls = [];
-  for (let i = 0; i < 3; i++) {
-    const g = new T.Mesh(new T.SphereGeometry(0.5, 6, 4), gullMat);
-    g.scale.set(2.2, 0.5, 0.6);
-    scene.add(g);
-    gulls.push({ mesh: g, a: i * 2.1, r: 30 + i * 8 });
+  // A few drifting paper specks low over the streets.
+  const speckMat = new THREE.MeshBasicMaterial({ color: 0xd8c9a8, transparent: true, opacity: 0.7 });
+  const specks = [];
+  for (let i = 0; i < 8; i++) {
+    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.35), speckMat);
+    s.position.set(-100 + i * 28, 1 + (i % 3), -80 + (i * 31) % 160);
+    scene.add(s);
+    specks.push({ mesh: s, phase: i * 0.9, speed: 0.5 + (i % 3) * 0.2 });
   }
 
-  ctx.api.ambient = { birds, flags, signs, gulls };
-  S.ambient = ctx.api.ambient;
+  ctx.api.ambient = {
+    birds: birds.map((b) => b.mesh),
+    flags: flags.map((f) => f.mesh),
+    neonMaterials: neons.map((n) => n.mat),
+  };
 
-  ctx.updates.push((dt, t) => {
+  function flickerNeonList(list, time, glow, rate, step) {
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      m.transparent = true;
+      const stutter = Math.sin(time * 7 + i * step) > 0.96 ? 0.25 : 1;
+      m.opacity = glow * (0.85 + 0.15 * Math.sin(time * rate + i * 1.7)) * stutter;
+    }
+  }
+
+  ctx.updates.push(function ambientUpdate(dt, t) {
+    const night = (S && S.dayNight && S.dayNight.night) || 0;
+    const time = t || 0;
+
     for (const b of birds) {
       b.a += b.speed * dt;
-      const x = b.cx + Math.cos(b.a) * b.r;
-      const z = b.cz + Math.sin(b.a) * b.r;
-      b.mesh.position.set(x, b.h + Math.sin(t * 0.7 + b.a) * 2, z);
-      b.mesh.rotation.y = -b.a;
-      const flap = Math.sin(t * 7 + b.a * 3) * 0.55;
-      b.left.rotation.z = flap;
-      b.right.rotation.z = -flap;
+      b.mesh.position.set(
+        b.cx + Math.cos(b.a) * b.r,
+        b.h + Math.sin(time * 0.7 + b.a * 2) * 2.5,
+        b.cz + Math.sin(b.a) * b.r
+      );
+      b.mesh.rotation.y = Math.atan2(-Math.sin(b.a), -Math.cos(b.a)) + Math.PI / 2;
     }
+
     for (const f of flags) {
-      f.cloth.rotation.y = Math.sin(t * 1.6 + f.phase) * 0.45;
-      f.cloth.rotation.z = Math.sin(t * 2.3 + f.phase) * 0.08;
+      f.mesh.rotation.y = Math.sin(time * 2.2 + f.phase) * 0.45;
+      f.mesh.scale.x = 1 + Math.sin(time * 3.1 + f.phase) * 0.12;
     }
-    for (const s of signs) {
-      // Mostly steady, with an occasional buzz-dip.
-      const wob = Math.sin(t * 3.1 + s.seed) * Math.sin(t * 0.7 + s.seed * 2);
-      const bright = wob > 0.86 ? 0.35 : 1;
-      s.mat.color.setHex(neonCols[Math.floor(s.seed) % neonCols.length]);
-      s.mesh.visible = bright > 0.5 || Math.sin(t * 9 + s.seed) > -0.4;
-      s.mesh.scale.y = bright;
-    }
-    for (const g of gulls) {
-      g.a += dt * 0.08;
-      g.mesh.position.set(150 + Math.cos(g.a) * g.r, 26 + Math.sin(g.a * 2) * 2, 150 + Math.sin(g.a) * g.r);
-      g.mesh.rotation.y = -g.a;
+
+    // Neon burns brighter at night and stutters now and then.
+    const glow = 0.45 + night * 0.55;
+    flickerNeonList(neons.map((n) => n.mat), time, glow, 3.7, 2.1);
+    try {
+      const extra = ctx.api.districtInfo && ctx.api.districtInfo.neonMaterials;
+      flickerNeonList(extra, time, glow, 4.3, 1.7);
+      const cityNeon = ctx.api.city && ctx.api.city.neonMaterials;
+      flickerNeonList(cityNeon, time, glow, 3.9, 2.3);
+    } catch (e) { /* neon is cosmetic; never break the frame */ }
+
+    for (const s of specks) {
+      s.mesh.position.x += s.speed * dt;
+      s.mesh.position.y = 1 + Math.sin(time * 1.4 + s.phase) * 0.6;
+      s.mesh.rotation.z = time * 0.8 + s.phase;
+      if (s.mesh.position.x > 180) s.mesh.position.x = -180;
     }
   });
 }

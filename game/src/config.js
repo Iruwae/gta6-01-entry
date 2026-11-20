@@ -1,118 +1,119 @@
-// SOLMAR BAY — tuning constants for the GTA6-01 round 7 rebuild.
-// One place for every number the game balances on, so a tweak here
-// retunes the whole bay without hunting through the modules.
+// SOLMAR BAY — tuning constants (GTA6-01 round 8 rebuild).
+// One place for every number the game balances on: city size, movement,
+// money, timings and wanted thresholds. Values here are the single source
+// of truth; modules read them through ctx.config, never hard-code them.
 
 export const config = {
-  // The city is a square of streets, 360 units across, centred on 0,0.
+  // The city is a square centred on (0, 0); halfExtent is the distance
+  // from the centre to each edge in metres.
+  cityHalfExtent: 180,
   citySize: 360,
-  worldBound: 180,
-  blockSize: 30,
-  roadWidth: 10,
+  streetSpacing: 30,
+  blockSize: 24,
 
-  // On-foot movement, units per second.
+  // Movement (metres per second).
   walkSpeed: 6,
-  runSpeed: 9.5,
-  playerTurnSpeed: 7,
-
-  // Driving. Top speeds are units per second; accel is units/s^2.
-  carTopSpeed: 34,
+  runSpeed: 9,
+  driveAccel: 14,
+  driveTopSpeed: 34,
+  driveReverseSpeed: 10,
+  driveBrake: 26,
+  driveTurn: 2.1,
   bikeTopSpeed: 38,
-  pickupTopSpeed: 30,
-  sportTopSpeed: 46,
-  carAccel: 16,
-  carBrake: 30,
-  carReverseSpeed: 12,
+  heliSpeed: 22,
 
-  // Clock. The game opens at golden hour and the clock counts minutes
-  // forward from that sunset moment.
-  sunsetStartMinutes: 1108, // 18:28
-  nightStartOffset: 200, // 200 minutes after sunset -> 21:48
-  dayLengthMinutes: 1440,
-  minutesPerSecond: 0.12,
+  // The player.
+  startCash: 120,
+  startHealth: 100,
+  startDay: 1,
+  // Clock starts at sunset: time counts minutes since 18:28.
+  startClockMinutes: 18 * 60 + 28,
+  minutesPerSecond: 0.45,
+  nightHour: 21,
+  dawnHour: 5,
 
   // Money.
-  startCash: 120,
   packageReward: 50,
-  racePrize: 300,
+  raceWinReward: 300,
   taxiFareMin: 80,
   taxiFareMax: 160,
-  missionPay: [250, 300, 350, 400, 600, 450, 500, 550, 700, 1200],
   sprayCost: 150,
   burgerPrice: 15,
   burgerHeal: 25,
+  challengePackageReward: 100,
+  challengeRaceReward: 150,
+  challengeTaxiReward: 120,
 
-  // Wanted / heat. Heat runs 0-100; every 20 heat is one star.
+  // Wanted / heat. One star per 20 heat, capped at five stars.
   heatPerStar: 20,
-  maxHeat: 100,
   maxWanted: 5,
+  heliMinWanted: 3,
   heatDecayPerSecond: 0.6,
-  heliStars: 3,
+  heatPerCrime: 25,
   maxCops: 6,
 
-  // Health and combat.
-  maxHealth: 100,
+  // Weapons: magazine sizes.
+  magPistol: 12,
+  magSmg: 30,
+  magShotgun: 6,
+  magRifle: 30,
   reloadSeconds: 1.2,
-  pistolMag: 12,
-  smgMag: 30,
-  shotgunMag: 6,
-  rifleMag: 30,
 
-  // Respect ranks. Titles unlock at these point totals.
-  respectRanks: [
-    { min: 0, title: 'NOBODY' },
-    { min: 200, title: 'STREET HUSTLER' },
-    { min: 500, title: 'BAY RUNNER' },
-    { min: 900, title: 'CREW BOSS' },
-    { min: 1500, title: 'BAY LEGEND' },
-  ],
+  // Timings (seconds).
+  banterCooldown: 9,
+  rosterRefresh: 0.25,
+  copDecideInterval: 0.4,
+  lastKnownStaleSeconds: 8,
+  cutsceneLength: 14,
+  toastSeconds: 4,
+  saveKey: 'solmar-save',
 
-  // Daily challenges: stat, target, cash reward.
-  challenges: [
-    { id: 'ch-packages', stat: 'packages', target: 3, reward: 100, text: 'Collect 3 packages' },
-    { id: 'ch-race', stat: 'racesWon', target: 1, reward: 150, text: 'Win 1 street race' },
-    { id: 'ch-taxi', stat: 'faresDone', target: 1, reward: 120, text: 'Finish 1 taxi fare' },
-  ],
-
-  // Radio stations, in cycle order. The first one is the sunset station.
-  radioStations: [
-    { name: 'SUNSET 88', track: 'Golden Hour — The Palms' },
-    { name: 'BAYLINE FM', track: 'Neon Tide — Coastline Drive' },
-    { name: 'PALM TALK', track: 'Evening Call — Marina Nights' },
-    { name: 'CORAL 104', track: 'Salt Air — The Breakers' },
-    { name: 'DUSK ROCK', track: 'Red Light Run — V8 Sunset' },
-    { name: 'TIDE HOUSE', track: 'Low Tide — Sunset Set' },
-  ],
-
-  // Fixed map spots the game and the screenshot staging rely on.
-  sprayBooth: { x: -90, z: -58, radius: 9, cost: 150 },
-  garageDoor: { x: -90, z: -66 },
-  martDoor: { x: -72, z: -60 },
+  // World anchors (map x, z in metres).
+  garage: { x: -90, z: -66 },
+  mart: { x: -72, z: -60 },
   safehouse: { x: 120, z: -120 },
-  racePad: { x: -60, z: -60 },
-  taxiStand: { x: 68, z: 60 },
+  sprayBooth: { x: -90, z: -58, radius: 9 },
   fenceYard: { x: 110, z: 138 },
+  taxiStand: { x: 68, z: 60 },
+  racePad: { x: -60, z: -60 },
   sportParked: { x: -102, z: -64 },
   bikeParked: { x: -88, z: -64 },
-  packageSpot: { x: -120, z: 120 },
 
-  // Districts: id, display name, and the map point that defines them.
-  districts: [
-    { id: 'downtown', name: 'DOWNTOWN', x: 0, z: 0 },
-    { id: 'harbor', name: 'HARBOR', x: 120, z: 120 },
-    { id: 'beach', name: 'BEACH', x: 0, z: 165 },
-    { id: 'uptown', name: 'UPTOWN', x: 120, z: -90 },
-    { id: 'strip', name: 'THE STRIP', x: 0, z: 135 },
-    { id: 'marina', name: 'MARINA', x: -120, z: 60 },
-    { id: 'oldtown', name: 'OLD TOWN', x: -120, z: -120 },
+  // Radio stations, in Q-cycle order. Station 0 is the sunset station.
+  stations: [
+    { name: 'SUNSET 88', track: 'Golden Hour — The Palms' },
+    { name: 'BAYLINE FM', track: 'Neon Coast — Mira Sol' },
+    { name: 'PALM TALK', track: 'Bay Voices — Evening Call' },
+    { name: 'TIDE 101', track: 'Low Tide — The Breakers' },
+    { name: 'DUST RADIO', track: 'Dusty Miles — Roamer' },
+    { name: 'NIGHT DRIVE', track: 'Afterglow — Cassie Vale' },
   ],
 
-  packageCount: 12,
-  saveKey: 'solmar-save',
+  // Respect ranks: first rank whose minimum the player has reached wins.
+  respectRanks: [
+    { min: 0, title: 'NOBODY' },
+    { min: 100, title: 'STREET HUSTLER' },
+    { min: 300, title: 'CREW LEADER' },
+    { min: 600, title: 'BAY BOSS' },
+    { min: 1000, title: 'BAY LEGEND' },
+  ],
+
+  // The seven districts: id, HUD name, centre and radius.
+  districts: [
+    { id: 'downtown', name: 'DOWNTOWN', x: 0, z: 0, radius: 55 },
+    { id: 'harbor', name: 'HARBOR', x: 120, z: 120, radius: 45 },
+    { id: 'beach', name: 'BEACH', x: 0, z: 165, radius: 40 },
+    { id: 'uptown', name: 'UPTOWN', x: 120, z: -90, radius: 45 },
+    { id: 'strip', name: 'THE STRIP', x: 0, z: 135, radius: 30 },
+    { id: 'marina', name: 'MARINA', x: -120, z: 90, radius: 40 },
+    { id: 'oldtown', name: 'OLD TOWN', x: -120, z: -90, radius: 45 },
+  ],
 };
 
 export default config;
 
-// Called first by the boot hub so every later module can read ctx.config.
+// Every game/src module exports an init(ctx). The config module just
+// publishes the tuning object onto the shared context.
 export function init(ctx) {
   ctx.config = config;
 }

@@ -1,82 +1,104 @@
-// SOLMAR BAY — keyboard and mouse input for the GTA6-01 round 7 rebuild.
-//
-// The held-keys set is the important part: at headless speed the game
-// runs near one frame a second, so a key must stay "held" from the
-// keydown event until its keyup, however many frames pass in between.
-// A quick press that falls between two frames still counts, because
-// the set is read on the next frame rather than on the event itself.
+// SOLMAR BAY — keyboard and mouse state (GTA6-01 round 8 rebuild).
+// One held-keys set, fed by real keydown/keyup events. The set is never
+// cleared per frame: at headless speed a frame can take two seconds, so
+// a key held for two seconds must still read as held when the next
+// frame finally runs. Edge presses (just pressed this frame) live in a
+// separate set that main.js clears after each update pass.
 
-export function createInput() {
-  return {
-    keys: new Set(),
-    mouse: { x: 0, y: 0, down: false, buttons: new Set() },
-    isDown(code) {
-      return this.keys.has(code);
-    },
-    anyDown(codes) {
-      for (const c of codes) if (this.keys.has(c)) return true;
-      return false;
-    },
-  };
-}
+const GAME_KEYS = new Set([
+  'KeyW', 'KeyA', 'KeyS', 'KeyD',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'KeyX', 'KeyR', 'KeyE', 'KeyQ', 'KeyF', 'KeyH', 'KeyG',
+  'KeyT', 'KeyY', 'KeyV', 'KeyP',
+  'Digit1', 'Digit2', 'Digit3', 'Digit4',
+  'Space', 'ShiftLeft', 'ShiftRight', 'Enter', 'Escape',
+]);
 
-export function init(ctx) {
-  const input = createInput();
-  ctx.input = input;
-
-  const GAME_KEYS = new Set([
-    'KeyW', 'KeyA', 'KeyS', 'KeyD',
-    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-    'Space', 'ShiftLeft', 'ShiftRight',
-  ]);
+function makeInput() {
+  const keys = new Set();
+  const pressed = new Set();
+  const mouse = { x: 0, y: 0, down: false, pressed: false, button: 0 };
 
   function onKeyDown(e) {
+    if (e.repeat) return;
+    keys.add(e.code);
+    pressed.add(e.code);
     if (GAME_KEYS.has(e.code)) e.preventDefault();
-    input.keys.add(e.code);
   }
 
   function onKeyUp(e) {
-    input.keys.delete(e.code);
-  }
-
-  function onMouseMove(e) {
-    input.mouse.x = e.clientX;
-    input.mouse.y = e.clientY;
-  }
-
-  function onMouseDown(e) {
-    input.mouse.down = true;
-    input.mouse.buttons.add(e.button);
-    input.mouse.x = e.clientX;
-    input.mouse.y = e.clientY;
-  }
-
-  function onMouseUp(e) {
-    input.mouse.down = false;
-    input.mouse.buttons.delete(e.button);
+    keys.delete(e.code);
   }
 
   function onBlur() {
-    input.keys.clear();
-    input.mouse.down = false;
-    input.mouse.buttons.clear();
+    // A lost window must not leave a phantom held key behind.
+    keys.clear();
   }
 
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mousedown', onMouseDown);
-  window.addEventListener('mouseup', onMouseUp);
-  window.addEventListener('blur', onBlur);
+  function onMouseMove(e) {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  }
 
-  input._detach = () => {
-    window.removeEventListener('keydown', onKeyDown);
-    window.removeEventListener('keyup', onKeyUp);
-    window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mousedown', onMouseDown);
-    window.removeEventListener('mouseup', onMouseUp);
-    window.removeEventListener('blur', onBlur);
+  function onMouseDown(e) {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    mouse.down = true;
+    mouse.pressed = true;
+    mouse.button = e.button;
+  }
+
+  function onMouseUp(e) {
+    mouse.down = false;
+    mouse.button = e.button;
+  }
+
+  const input = {
+    keys,
+    pressed,
+    mouse,
+    // True while the key is physically held down.
+    down(code) {
+      return keys.has(code);
+    },
+    // True once for the frame in which the key went down; consumes it.
+    consume(code) {
+      if (pressed.has(code)) {
+        pressed.delete(code);
+        return true;
+      }
+      return false;
+    },
+    // Any of the movement keys held.
+    moving() {
+      return keys.has('KeyW') || keys.has('KeyA') || keys.has('KeyS') ||
+        keys.has('KeyD') || keys.has('ArrowUp') || keys.has('ArrowDown') ||
+        keys.has('ArrowLeft') || keys.has('ArrowRight');
+    },
+    // Called by the boot hub after every update pass.
+    endFrame() {
+      pressed.clear();
+      mouse.pressed = false;
+    },
+    attach() {
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
+      window.addEventListener('blur', onBlur);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mouseup', onMouseUp);
+    },
   };
+
+  return input;
 }
 
-export default init;
+export const input = makeInput();
+
+export default input;
+
+// Wire the listeners and publish the input state onto the context.
+export function init(ctx) {
+  ctx.input = input;
+  input.attach();
+}

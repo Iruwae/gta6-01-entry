@@ -1,134 +1,114 @@
-// SOLMAR BAY — sound (round 7 rebuild, builder D).
-// Synthesized WebAudio only: beeps, tones and a noise burst for gunfire.
-// No audio files, no network. Everything is guarded, so a browser with
-// no audio (or a headless one) never throws. The audio context is only
-// created after a real user gesture, and the engine hum follows the car.
+// audio.js — SOLMAR BAY, round 8 rebuild.
+// All sound is synthesized with WebAudio: short oscillator blips for
+// the UI and pickups, a square-wave bark for gunshots, and a low
+// sawtooth hum whose pitch follows the car for the engine. No audio
+// files, no network. Every call is guarded, so a browser without audio
+// — or a headless one — simply hears nothing and the game never throws.
+// Nothing starts until the player interacts: the context is created and
+// resumed on the first pointer or key gesture.
 
 export function init(ctx) {
   const S = ctx.state;
-  let audioCtx = null;
-  let master = null;
+  let ac = null;
   let engineOsc = null;
   let engineGain = null;
   let engineOn = false;
 
   function ensure() {
-    if (audioCtx) return audioCtx;
+    if (ac) return true;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      audioCtx = new AC();
-      master = audioCtx.createGain();
-      master.gain.value = 0.16;
-      master.connect(audioCtx.destination);
-      return audioCtx;
+      if (!AC) return false;
+      ac = new AC();
+      engineOsc = ac.createOscillator();
+      engineOsc.type = 'sawtooth';
+      engineOsc.frequency.value = 55;
+      engineGain = ac.createGain();
+      engineGain.gain.value = 0;
+      engineOsc.connect(engineGain);
+      engineGain.connect(ac.destination);
+      engineOsc.start();
+      engineOn = true;
+      return true;
     } catch (e) {
-      audioCtx = null;
-      return null;
+      ac = null;
+      engineOsc = null;
+      engineGain = null;
+      return false;
     }
   }
 
-  // First gesture unlocks audio; nothing is created before this.
-  const unlock = () => { try { ensure(); } catch (e) { /* silent */ } };
-  window.addEventListener('pointerdown', unlock, { once: true });
-  window.addEventListener('keydown', unlock, { once: true });
+  function unlock() {
+    try {
+      if (ensure() && ac.state === 'suspended') ac.resume();
+    } catch (e) { /* audio is best-effort */ }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+  }
 
   function tone(freq, dur, type, vol, slideTo) {
     try {
-      const ac = ensure();
-      if (!ac || !master) return;
-      if (ac.state === 'suspended') ac.resume().catch(() => {});
+      if (!ensure()) return;
+      if (ac.state === 'suspended') return;
       const osc = ac.createOscillator();
       const gain = ac.createGain();
       osc.type = type || 'sine';
       osc.frequency.setValueAtTime(freq, ac.currentTime);
-      if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, ac.currentTime + dur);
-      gain.gain.setValueAtTime(vol || 0.5, ac.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), ac.currentTime + dur);
+      gain.gain.setValueAtTime(vol || 0.1, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(ac.destination);
       osc.start();
-      osc.stop(ac.currentTime + dur);
-    } catch (e) { /* sound must never throw */ }
+      osc.stop(ac.currentTime + dur + 0.02);
+    } catch (e) { /* never let a blip break the game */ }
   }
 
-  function noiseBurst(dur, vol) {
+  function click() {
+    tone(1250, 0.05, 'square', 0.06);
+  }
+
+  function pickup() {
+    tone(880, 0.09, 'sine', 0.12);
     try {
-      const ac = ensure();
-      if (!ac || !master) return;
-      if (ac.state === 'suspended') ac.resume().catch(() => {});
-      const len = Math.max(1, Math.floor(ac.sampleRate * dur));
-      const buffer = ac.createBuffer(1, len, ac.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-      const src = ac.createBufferSource();
-      src.buffer = buffer;
-      const gain = ac.createGain();
-      gain.gain.value = vol || 0.7;
-      src.connect(gain);
-      gain.connect(master);
-      src.start();
-    } catch (e) { /* sound must never throw */ }
+      setTimeout(() => tone(1318, 0.12, 'sine', 0.12), 90);
+    } catch (e) { /* one blip is enough */ }
   }
 
-  function setEngine(on, speed) {
+  function gunshot() {
+    tone(170, 0.14, 'square', 0.16, 55);
+  }
+
+  function engineSet(speed) {
     try {
-      if (!on) {
-        if (engineGain) engineGain.gain.value = 0;
-        engineOn = false;
-        return;
-      }
-      const ac = ensure();
-      if (!ac || !master) return;
-      if (ac.state === 'suspended') ac.resume().catch(() => {});
-      if (!engineOsc) {
-        engineOsc = ac.createOscillator();
-        engineOsc.type = 'sawtooth';
-        engineGain = ac.createGain();
-        engineGain.gain.value = 0;
-        engineOsc.connect(engineGain);
-        engineGain.connect(master);
-        engineOsc.start();
-      }
-      const mph = typeof speed === 'number' ? speed : 0;
-      engineOsc.frequency.setValueAtTime(48 + mph * 1.4, ac.currentTime);
-      engineGain.gain.value = 0.05;
-      engineOn = true;
-    } catch (e) { /* sound must never throw */ }
+      if (!ac || !engineOsc || !engineGain || !engineOn) return;
+      if (ac.state === 'suspended') return;
+      const sp = Math.max(0, Number(speed) || 0);
+      const freq = 52 + Math.min(95, sp * 2.2);
+      engineOsc.frequency.setTargetAtTime(freq, ac.currentTime, 0.1);
+      const target = S.car ? 0.04 : 0.0;
+      engineGain.gain.setTargetAtTime(target, ac.currentTime, 0.2);
+    } catch (e) { /* the hum is cosmetic */ }
   }
 
-  const sfx = {
-    click() { tone(880, 0.06, 'square', 0.25); },
-    shot() { noiseBurst(0.14, 0.8); tone(160, 0.1, 'square', 0.35, 60); },
-    pickup() { tone(660, 0.09, 'sine', 0.4); setTimeout(() => tone(990, 0.12, 'sine', 0.4), 70); },
-    coin() { tone(1320, 0.08, 'sine', 0.35); setTimeout(() => tone(1760, 0.14, 'sine', 0.3), 80); },
-    denied() { tone(220, 0.16, 'square', 0.3, 160); },
-    engine(on, speed) { setEngine(on, speed); },
+  ctx.api.audio = {
+    ensure,
+    unlock,
+    click,
+    pickup,
+    gunshot,
+    tone,
+    engineSet,
   };
 
-  ctx.api.audio = sfx;
-  ctx.api.sfx = sfx;
-  ctx.api.playClick = () => sfx.click();
-  ctx.api.playShot = () => sfx.shot();
-  ctx.api.playPickup = () => sfx.pickup();
-  ctx.api.setEngineSound = (on, speed) => sfx.engine(on, speed);
-
-  // The engine hum follows the car; it stays silent until audio was
-  // unlocked by a gesture, and setEngine no-ops until then.
   ctx.updates.push(() => {
-    try {
-      if (!audioCtx) return;
-      if (S.mode !== 'playing') {
-        if (engineOn) setEngine(false, 0);
-        return;
-      }
-      const car = S.car;
-      let speed = 0;
-      if (car) {
-        if (typeof car.speed === 'number') speed = car.speed;
-        else if (car.vel && typeof car.vel.length === 'function') speed = car.vel.length();
-      }
-      setEngine(!!car, speed);
-    } catch (e) { /* sound must never break the loop */ }
+    if (!ac) return;
+    const speed = S.car
+      ? (typeof S.car.speed === 'number' ? S.car.speed : 0)
+      : 0;
+    engineSet(speed);
   });
 }

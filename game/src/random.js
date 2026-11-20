@@ -1,9 +1,24 @@
-// SOLMAR BAY — small random helpers for the GTA6-01 round 7 rebuild.
-// Plain functions, no state of their own except an optional seeded
-// generator for anything that needs a repeatable shuffle.
+// SOLMAR BAY — small random helpers (GTA6-01 round 8 rebuild).
+// A tiny seeded generator plus the everyday picks the world modules use
+// for traffic, pedestrians, banter and loot. Nothing here touches the
+// DOM or the game state; it is pure number-shaping.
+
+export function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// A module-level stream for casual use; deterministic per page load.
+const stream = mulberry32(0x5eed1234);
 
 export function rand(min = 0, max = 1) {
-  return min + Math.random() * (max - min);
+  return min + stream() * (max - min);
 }
 
 export function randInt(min, max) {
@@ -11,11 +26,23 @@ export function randInt(min, max) {
 }
 
 export function pick(list) {
-  return list[Math.floor(Math.random() * list.length)];
+  if (!list || list.length === 0) return undefined;
+  return list[Math.floor(stream() * list.length)];
 }
 
 export function chance(p) {
-  return Math.random() < p;
+  return stream() < p;
+}
+
+export function shuffle(list) {
+  const out = list.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(stream() * (i + 1));
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
 }
 
 export function clamp(v, lo, hi) {
@@ -26,33 +53,18 @@ export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-// A tiny deterministic generator (mulberry32) for seeded shuffles.
-export function seeded(seed) {
-  let a = seed >>> 0;
-  return function next() {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+export function dist2d(ax, az, bx, bz) {
+  const dx = ax - bx;
+  const dz = az - bz;
+  return Math.sqrt(dx * dx + dz * dz);
 }
 
-export function shuffle(list, rng = Math.random) {
-  const out = list.slice();
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const tmp = out[i];
-    out[i] = out[j];
-    out[j] = tmp;
-  }
-  return out;
-}
+export const random = { mulberry32, rand, randInt, pick, chance, shuffle, clamp, lerp, dist2d };
 
-export const random = { rand, randInt, pick, chance, clamp, lerp, seeded, shuffle };
 export default random;
 
-// The boot hub calls this early so modules can reach the helpers on ctx.
+// Publish the helpers onto the shared context so any module can call
+// ctx.random.pick(...) without importing this file.
 export function init(ctx) {
   ctx.random = random;
 }

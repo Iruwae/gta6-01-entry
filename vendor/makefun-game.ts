@@ -1,3 +1,8 @@
+// SOLMAR BAY — vendored dossier-builder library (GTA6-01 round 8 rebuild).
+// This file is the make.fun game-dossier builder, vendored unchanged into
+// this entry so main.ts can build dossier.json from the mirrored game.
+// The library code below is unmodified; only this header comment block
+// was added for the round 8 rebuild.
 /* SOLMAR BAY — vendored dossier-builder library (make.fun game library).
    GTA6-01 round 7 rebuild. The library below is unmodified; this header
    is the only line added for this entry. */

@@ -1,115 +1,135 @@
-// SOLMAR BAY — radio (round 7 rebuild, builder D).
-// Six invented stations, no licensed music, no audio files: the HUD
-// shows the station name and the current track. Q cycles to the next
-// station. S.radioStation is the station index (0–5); the first station
-// is the sunset station, SUNSET FM.
+// radio2.js — SOLMAR BAY, round 8 rebuild.
+// Six original radio stations, all invented names and tracks. Q cycles
+// to the next station; the first is the sunset station the game opens
+// on. The current station lives on S.radioStation as an index (0-5),
+// the HUD reads the name and track through ctx.api.radio, and the track
+// rolls on to the next one in the list every little while on its own.
 
 const STATIONS = [
   {
     name: 'SUNSET FM',
-    tag: 'the sunset station',
-    tracks: ['Golden Hour Drive', 'Amber Skyline', 'Last Light Lovers'],
+    tracks: [
+      'Golden Hour Drive — Marisol Vega',
+      'Amber Skyline — The Palmettos',
+      'Last Light — Cora Del Mar',
+      'Dusk on the Bay — Sol Reyes',
+    ],
   },
   {
     name: 'BAYLINE FM',
-    tag: 'harbor talk and tides',
-    tracks: ['Harbor Lights', 'Tidewater Blues', 'Ferry Song'],
+    tracks: [
+      'Bayline Nights — DJ Marlo',
+      "Cruisin' Coral — The Tides",
+      'Harbor Lights — Lena Vale',
+      'Freeway Hearts — Nico Sands',
+    ],
   },
   {
-    name: 'PALM SHADE RADIO',
-    tag: 'slow songs for hot days',
-    tracks: ['Shade Tree Shuffle', 'Coconut Radio', 'Slow Palm Sunday'],
+    name: 'PALM TALK',
+    tracks: [
+      'The Morning Palms — talk radio',
+      'Bay City Sports Desk — talk radio',
+      'Night Owls Call-In — talk radio',
+    ],
   },
   {
-    name: 'SOLMAR SOUL',
-    tag: 'smooth bay soul',
-    tracks: ['Bayfront Groove', 'Velvet Dusk', 'Marina Nights'],
+    name: 'REEF RADIO',
+    tracks: [
+      'Undertow — Blue Current',
+      'Salt Air — Marina Skye',
+      'Reef Runner — The Breakers',
+    ],
   },
   {
-    name: 'TROPICANA 88',
-    tag: 'island rhythms',
-    tracks: ['Mango Tango', 'Island Static', 'Sunset Salsa'],
+    name: 'CORAL COAST',
+    tracks: [
+      'Coral Coastline — Isla Dawn',
+      'Seaside Static — The Waveriders',
+      'Pink Horizon — Alba Mar',
+    ],
   },
   {
-    name: 'NIGHT DRIVE FM',
-    tag: 'after-dark cruising',
-    tracks: ['Coastline After Dark', 'Headlights Home', 'Midnight Marina'],
+    name: 'DUSK DRIVE',
+    tracks: [
+      'Midnight Meridian — Vega Noir',
+      'Purple Hour — The Duskers',
+      'Afterglow — Sol Marlow',
+    ],
   },
 ];
 
-const TRACK_SECONDS = 40;
+const TRACK_SECONDS = 45;
+
+function keyDown(ctx, code) {
+  const inp = ctx.input;
+  if (!inp) return false;
+  if (typeof inp.isDown === 'function') {
+    try { return !!inp.isDown(code); } catch (e) { /* fall through */ }
+  }
+  const k = inp.keys;
+  if (k) {
+    if (typeof k.has === 'function') return k.has(code);
+    if (Array.isArray(k)) return k.includes(code);
+    if (typeof k === 'object') return !!k[code];
+  }
+  if (typeof inp[code] !== 'undefined') return !!inp[code];
+  return false;
+}
 
 export function init(ctx) {
   const S = ctx.state;
-  const pick = (id) => (ctx.dom && ctx.dom[id]) || document.getElementById(id);
-  let trackIndex = 0;
-  let trackTimer = 0;
+  const prev = {};
+  let trackIdx = 0;
+  let trackT = 0;
 
-  if (typeof S.radioStation !== 'number' || S.radioStation < 0 || S.radioStation > 5) {
-    S.radioStation = 0;
+  // The station is an index. If state ever holds a name instead, map it.
+  if (typeof S.radioStation !== 'number') {
+    let idx = 0;
+    if (typeof S.radioStation === 'string') {
+      const found = STATIONS.findIndex(
+        (s) => s.name.toLowerCase() === String(S.radioStation).toLowerCase()
+      );
+      if (found >= 0) idx = found;
+    }
+    S.radioStation = idx;
   }
 
-  function currentStation() {
-    return STATIONS[S.radioStation] || STATIONS[0];
+  function current() {
+    const st = STATIONS[S.radioStation] || STATIONS[0];
+    const track = st.tracks[trackIdx % st.tracks.length];
+    return { name: st.name, track };
   }
 
-  function currentTrack() {
-    const station = currentStation();
-    return station.tracks[trackIndex % station.tracks.length];
+  function next() {
+    S.radioStation = ((S.radioStation | 0) + 1) % STATIONS.length;
+    trackIdx = 0;
+    trackT = 0;
+    const cur = current();
+    if (ctx.api.toast) ctx.api.toast(cur.name + ' — ' + cur.track);
+    if (ctx.api.audio && typeof ctx.api.audio.click === 'function') {
+      try { ctx.api.audio.click(); } catch (e) { /* audio is best-effort */ }
+    }
   }
 
-  function paintHud() {
-    try {
-      const stationEl = pick('radio-station');
-      if (stationEl) stationEl.textContent = currentStation().name;
-      const trackEl = pick('radio-track');
-      if (trackEl) trackEl.textContent = currentTrack();
-    } catch (e) { /* the HUD module repaints these too */ }
-  }
+  ctx.api.radio = {
+    stations: STATIONS,
+    current,
+    next,
+    index: () => S.radioStation,
+    track: () => current().track,
+  };
 
-  function nextStation() {
-    S.radioStation = (S.radioStation + 1) % STATIONS.length;
-    trackIndex = 0;
-    trackTimer = 0;
-    paintHud();
-    try { if (ctx.api.audio && ctx.api.audio.click) ctx.api.audio.click(); } catch (e) { /* silent */ }
-    return S.radioStation;
-  }
-
-  function setStation(i) {
-    const n = ((Math.floor(i) % STATIONS.length) + STATIONS.length) % STATIONS.length;
-    S.radioStation = n;
-    trackIndex = 0;
-    trackTimer = 0;
-    paintHud();
-    return S.radioStation;
-  }
-
-  ctx.api.radioStations = STATIONS;
-  ctx.api.nextStation = nextStation;
-  ctx.api.setStation = setStation;
-  ctx.api.currentStation = currentStation;
-  ctx.api.stationName = () => currentStation().name;
-  ctx.api.currentTrack = currentTrack;
-
-  paintHud();
-
-  window.addEventListener('keydown', (e) => {
-    if (e.repeat || e.code !== 'KeyQ') return;
-    if (S.mode !== 'playing') return;
-    nextStation();
-  });
-
-  // Tracks roll on while driving; the HUD always shows the current one.
   ctx.updates.push((dt) => {
-    try {
-      trackTimer += dt || 0;
-      if (trackTimer >= TRACK_SECONDS) {
-        trackTimer = 0;
-        const station = currentStation();
-        trackIndex = (trackIndex + 1) % station.tracks.length;
-        paintHud();
-      }
-    } catch (e) { /* radio must never break the loop */ }
+    const down = keyDown(ctx, 'KeyQ');
+    const was = !!prev.KeyQ;
+    prev.KeyQ = down;
+    if (down && !was && S.mode === 'playing') next();
+
+    const st = STATIONS[S.radioStation] || STATIONS[0];
+    trackT += dt;
+    if (trackT >= TRACK_SECONDS) {
+      trackT = 0;
+      trackIdx = (trackIdx + 1) % st.tracks.length;
+    }
   });
 }

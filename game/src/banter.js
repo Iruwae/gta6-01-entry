@@ -1,123 +1,122 @@
-// Solmar Bay — crew banter (round 7 rebuild).
-// Speaker-tagged one-liners from Lena, Vic, Marco and the street,
-// shown in the toast area as e.g. LENA: "...". A 9 game-second
-// cooldown keeps the chatter from stacking; direct calls (race
-// wins, mission beats) can force a line through.
-export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  const dom = ctx.dom || {};
+// SOLMAR BAY — banter (round 8, written fresh from the spec).
+// Crew and street chatter with speaker tags, shown in the toast /
+// dialogue area. The director guards on a 9 game-second cooldown
+// between lines so the toast never becomes a spam feed; a direct call
+// with the cooldown cleared always lands immediately.
+const COOLDOWN = 9;
 
-  const LINES = {
-    raceWin: [
-      { speaker: 'LENA', text: 'Told you — nobody outruns us on the Strip.' },
-      { speaker: 'LENA', text: 'That was clean. Vic is going to love this one.' },
-      { speaker: 'VIC', text: 'You drive like that, the whole bay hears about it.' },
-      { speaker: 'MARCO', text: 'I had money on you. Easy money, too.' },
-    ],
-    raceLose: [
-      { speaker: 'LENA', text: 'Shake it off. We go again, and this time we win.' },
-      { speaker: 'MARCO', text: 'That one stung. Do not let it happen twice.' },
-    ],
-    taxiDone: [
-      { speaker: 'LENA', text: 'Fare delivered, cash in hand. The bay pays when you move.' },
-      { speaker: 'VIC', text: 'Small money, steady money. Keep the wheels turning.' },
-    ],
-    packageFound: [
-      { speaker: 'LENA', text: 'Nice spot. That package was just sitting there for us.' },
-      { speaker: 'MARCO', text: 'Fifty bucks for a pickup. I will take that all day.' },
-    ],
-    missionStart: [
-      { speaker: 'VIC', text: 'Listen close. This job pays, but only if you keep your head.' },
-      { speaker: 'LENA', text: 'I am riding with you on this one. Do not make me regret it.' },
-    ],
-    missionComplete: [
-      { speaker: 'VIC', text: 'Job done. The money is yours, and so is my respect.' },
-      { speaker: 'LENA', text: 'We did that. The bay is starting to know our names.' },
-    ],
-    heatUp: [
-      { speaker: 'LENA', text: 'Cops are on us! Drive like you mean it!' },
-      { speaker: 'VIC', text: 'Lay low or lose them — your call, but make it fast.' },
-    ],
-    heatDown: [
-      { speaker: 'LENA', text: 'We are clear. Breathe. The bay is ours again.' },
-      { speaker: 'MARCO', text: 'Clean getaway. That is how you stay free out here.' },
-    ],
-    fence: [
-      { speaker: 'VIC', text: 'Pleasure doing business. Bring me the next one.' },
-      { speaker: 'LENA', text: 'Sold. That car was never ours anyway.' },
-    ],
-    idle: [
-      { speaker: 'LENA', text: 'Sun is going down. The bay looks good tonight, huh?' },
-      { speaker: 'LENA', text: 'Vic has work if you want it. Just say the word.' },
-      { speaker: 'MARCO', text: 'Heard the Strip is crawling tonight. Could be fun.' },
-      { speaker: 'VIC', text: 'A quiet bay is a bay waiting to be taken. Keep moving.' },
-      { speaker: 'PED', text: 'You see that sunset? The bay never misses.' },
-    ],
-  };
+const LENA_LINES = [
+  'Sun is going down and the bay is ours. Drive like you mean it.',
+  'Vic says the job pays if we are quiet. So be quiet and quick.',
+  'I have seen worse plans than this one. Not many, but some.',
+  'Keep the engine warm. When I say go, we go.',
+  'You drive, I watch the mirrors. That is how we stay free.',
+  'One more score and we are out of the small leagues, hustler.',
+];
+
+const LENA_RACE_WIN = [
+  'That was clean! They never even saw the last corner coming.',
+  'Told you my line through the plaza was faster. Pay up, bay.',
+  'Winner\'s circle looks good on us. Again, same time tomorrow?',
+];
+
+const LENA_RACE_LOSE = [
+  'Shake it off. We learn the corner, we take it next time.',
+  'That one stung, but the bay still owes us. Rematch.',
+];
+
+const VIC_LINES = [
+  'Business is business. You bring the car, I bring the cash.',
+  'The yard is open. Do not bring me anything with a tracker.',
+  'Word on the street is the heat is watching the Strip tonight.',
+  'You want respect in this bay, you earn it one job at a time.',
+];
+
+const MARCO_LINES = [
+  'Easy, hustler. The garage stays neutral ground, understand?',
+  'I tuned that engine myself. Treat her like she is borrowed.',
+  'If the cops ask, you were never here. Same as always.',
+];
+
+const PED_LINES = [
+  'Did you see the sunset tonight? The whole bay was on fire.',
+  'Traffic on the Strip is a nightmare after dark.',
+  'I heard the harbor cranes run all night now.',
+  'Best tacos in the bay are two blocks from the beach, trust me.',
+];
+
+function pickOne(list) {
+  return list[(Math.random() * list.length) | 0];
+}
+
+export function init(ctx) {
+  const S = ctx.state;
 
   function toastEl() {
-    return dom.toast || document.getElementById('toast');
-  }
-
-  let toastTimer = 0;
-  let idleTimer = 18;
-
-  function pick(list) {
-    return list[Math.floor(Math.random() * list.length)];
+    if (ctx.dom && ctx.dom.toast) return ctx.dom.toast;
+    try { return document.getElementById('toast'); } catch (e) { return null; }
   }
 
   const director = {
     _cooldown: 0,
-    lines: LINES,
-    show(speaker, text, force) {
-      if (!force && this._cooldown > 0) return false;
+    _last: null,
+    lines: { LENA: LENA_LINES, VIC: VIC_LINES, MARCO: MARCO_LINES, PED: PED_LINES },
+
+    // Show a speaker-tagged line in the toast area. Returns true when
+    // the line actually displayed, false while cooling down.
+    say(speaker, text) {
+      if (this._cooldown > 0) return false;
+      const tag = String(speaker || 'LENA').toUpperCase();
+      const line = tag + ': "' + text + '"';
       const el = toastEl();
-      if (!el) return false;
-      el.textContent = speaker + ': "' + text + '"';
-      if (el.classList) el.classList.remove('hidden');
-      this._cooldown = 9;
-      toastTimer = 6;
+      if (el) {
+        el.textContent = line;
+        el.classList.remove('hidden');
+      }
+      this._last = { speaker: tag, text, at: Date.now() };
+      this._cooldown = COOLDOWN;
       return true;
     },
-    say(speaker, text, force) {
-      return this.show(speaker, text, force);
+    // Same as say, for callers that think in "show a line" terms.
+    show(speaker, text) { return this.say(speaker, text); },
+    line(speaker, text) { return this.say(speaker, text); },
+
+    lena() { return this.say('LENA', pickOne(LENA_LINES)); },
+    vic() { return this.say('VIC', pickOne(VIC_LINES)); },
+    marco() { return this.say('MARCO', pickOne(MARCO_LINES)); },
+    pedestrian() { return this.say('PED', pickOne(PED_LINES)); },
+
+    raceWin() { return this.say('LENA', pickOne(LENA_RACE_WIN)); },
+    raceLose() { return this.say('LENA', pickOne(LENA_RACE_LOSE)); },
+    missionStart() { return this.say('LENA', pickOne(LENA_LINES)); },
+    missionComplete() {
+      return this.say('VIC', 'Job done, money moved. Same again tomorrow, hustler.');
     },
-    line(kind, force) {
-      const list = LINES[kind] || LINES.idle;
-      const l = pick(list);
-      return this.show(l.speaker, l.text, force);
+    taxiPickup() { return this.say('LENA', 'Fare is waiting. Smooth ride, no drama, good tip.'); },
+    fareDone() { return this.say('LENA', 'Fare delivered. The meter loved you today.'); },
+    packageFound() { return this.say('VIC', 'A package, right where I said it would be. Nice.'); },
+    chaseStart() { return this.say('LENA', 'Cops on our tail! Lose them or lose the night.'); },
+    lowHealth() { return this.say('LENA', 'You are bleeding out here. Get to the safehouse, now.'); },
+    fenceSale(amount) {
+      return this.say('VIC', 'Pleasure doing business. $' + amount + ' for that one, no questions.');
     },
-    raceWin() { return this.line('raceWin'); },
-    raceLose() { return this.line('raceLose'); },
-    taxiDone() { return this.line('taxiDone'); },
-    packageFound() { return this.line('packageFound'); },
-    missionStart() { return this.line('missionStart'); },
-    missionComplete() { return this.line('missionComplete'); },
-    heatUp() { return this.line('heatUp'); },
-    heatDown() { return this.line('heatDown'); },
-    fenceSold() { return this.line('fence'); },
-    idle() { return this.line('idle'); },
-    random() { return this.line('idle'); },
+    random() {
+      const roll = Math.random();
+      if (roll < 0.45) return this.lena();
+      if (roll < 0.7) return this.vic();
+      if (roll < 0.85) return this.marco();
+      return this.pedestrian();
+    },
   };
 
-  S.banterDirector = director;
+  if (S) S.banterDirector = director;
   ctx.api.banter = director;
   ctx.api.banterDirector = director;
 
-  ctx.updates.push((dt) => {
-    if (director._cooldown > 0) director._cooldown = Math.max(0, director._cooldown - dt);
-    if (toastTimer > 0) {
-      toastTimer -= dt;
-      if (toastTimer <= 0) {
-        const el = toastEl();
-        if (el && el.classList) el.classList.add('hidden');
-      }
-    }
-    // Occasional idle chatter while playing, never during cutscenes.
-    idleTimer -= dt;
-    if (idleTimer <= 0) {
-      idleTimer = 22 + Math.random() * 14;
-      if (S.mode === 'playing' && !S.cutscene) director.idle();
+  // Tick the cooldown down in game seconds.
+  ctx.updates.push(function banterUpdate(dt) {
+    if (director._cooldown > 0) {
+      director._cooldown = Math.max(0, director._cooldown - Math.max(0, dt));
     }
   });
 }
