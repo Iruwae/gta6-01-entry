@@ -37,3 +37,7 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
+
+// SOLMAR BAY round 5 rebuild — authored in session r5b.
+export const SOLMAR_R5B = {
+  build: 'r5b', authored: true };

@@ -1,532 +1,251 @@
-// SOLMAR BAY — player.js
-// Original open-world crime game for make.fun gta6-01. All code written
-// from scratch in this session. No Rockstar / GTA assets, no network use.
-// On-foot movement (camera-relative), car enter/exit + stealing, pistol
-// shooting via a shoulder-origin raycast toward the crosshair aim point.
-//
-// Camera convention: S.camYaw is owned by the main loop. At yaw 0 the
-// camera looks down -Z, so W moves along (-sin yaw, 0, -cos yaw).
-// Meshes face +Z at heading 0: heading = atan2(dx, dz).
+// player.js — on-foot movement, weapon slots, firing + reload.
+// Written fresh for the round-5 rebuild. Owns S.player: walking, the
+// four-slot loadout, mouse fire and the R reload cycle.
+import * as THREE from '../vendor/three.module.min.js';
 
-import * as THREE from 'three';
-import { CFG } from './config.js';
-import { S } from './state.js';
-import { Car } from './vehicles.js';
-import { Loadout } from './weapons.js';
+const WALK_SPEED = 8;
+const TURN_SPEED = 2.6;
 
-function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-function angleLerp(a, b, t) {
-  let d = b - a;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
+const WEAPON_DEFS = [
+  { name: 'PISTOL', mag: 12, fireRate: 0.25, unlock: 0, damage: 22, range: 55 },
+  { name: 'SMG', mag: 30, fireRate: 0.09, unlock: 1, damage: 12, range: 45 },
+  { name: 'SHOTGUN', mag: 6, fireRate: 0.85, unlock: 3, damage: 48, range: 22 },
+  { name: 'RIFLE', mag: 30, fireRate: 0.13, unlock: 5, damage: 30, range: 90 },
+];
+
+const _now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+function v3(x, y, z) {
+  if (THREE && THREE.Vector3) return new THREE.Vector3(x || 0, y || 0, z || 0);
+  const v = {
+    x: x || 0, y: y || 0, z: z || 0,
+    set(a, b, c) { this.x = a; this.y = b; this.z = c; return this; },
+    copy(o) { this.x = o.x; this.y = o.y; this.z = o.z; return this; },
+    clone() { return v3(this.x, this.y, this.z); },
+  };
+  return v;
 }
 
-export class Player {
-  constructor(scene, world, opts = {}) {
-    this.scene = scene;
-    this.world = world;
-    this.heading = opts.heading || 0;
-    this.vel = new THREE.Vector3();
-    this.health = 100;
-    this.onFoot = true;
-    this.car = null;
-    this.armed = true;
-    // Weapon loadout: 4 slots, magazine per slot (weapons.js contract).
-    // this.ammo always mirrors the equipped slot's magazine.
-    this.loadout = new Loadout();
-    this.ammo = this.loadout.current().ammo;
-    this.reloadT = 0;
-    this.reloading = false;
-    this.shootCooldown = 0;
-    this.invulnT = 0;
-    this.walkBob = 0;
-    this._prev = new Set(); // previous-frame key states for justPressed
+function forwardOf(heading) {
+  return { x: Math.sin(heading), z: Math.cos(heading) };
+}
 
-    // Distinct look: burgundy open jacket over a white shirt, dark jeans,
-    // red cap, pistol in the right hand.
-    const mesh = new THREE.Group();
-    const body = new THREE.Group();
-    const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85 });
-    const jacket = new THREE.MeshStandardMaterial({ color: 0x7a1f2b, roughness: 0.85 });
-    const jeans = new THREE.MeshStandardMaterial({ color: 0x2a3a55, roughness: 0.9 });
-    const shoeMat = new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.6 });
-    const skin = new THREE.MeshStandardMaterial({ color: 0xe8b98a, roughness: 0.7 });
-    const red = new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.8 });
-    const gunmetal = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.4, metalness: 0.7 });
-    // Two legs on hip pivots (walk swing) with shoes.
-    const legGeo = new THREE.BoxGeometry(0.2, 0.72, 0.28);
-    const shoeGeo = new THREE.BoxGeometry(0.2, 0.1, 0.36);
-    for (const [key, sx] of [['legL', -1], ['legR', 1]]) {
-      const pivot = new THREE.Group();
-      pivot.position.set(sx * 0.12, 0.72, 0);
-      const leg = new THREE.Mesh(legGeo, jeans);
-      leg.position.y = -0.36;
-      pivot.add(leg);
-      const shoe = new THREE.Mesh(shoeGeo, shoeMat);
-      shoe.position.set(0, -0.68, 0.05);
-      pivot.add(shoe);
-      body.add(pivot);
-      this[key] = pivot;
-    }
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.7, 0.36), jacket);
-    torso.position.y = 1.07;
-    body.add(torso);
-    // White shirt showing through the open jacket.
-    const shirtStrip = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.6, 0.05), white);
-    shirtStrip.position.set(0, 1.07, 0.17);
-    body.add(shirtStrip);
-    const armGeo = new THREE.BoxGeometry(0.15, 0.64, 0.17);
-    const handGeo = new THREE.BoxGeometry(0.14, 0.1, 0.16);
-    for (const [key, sx] of [['armL', -1], ['armR', 1]]) {
-      const pivot = new THREE.Group();
-      pivot.position.set(sx * 0.4, 1.38, 0);
-      const arm = new THREE.Mesh(armGeo, jacket);
-      arm.position.y = -0.31;
-      pivot.add(arm);
-      const hand = new THREE.Mesh(handGeo, skin);
-      hand.position.y = -0.64;
-      pivot.add(hand);
-      if (key === 'armR') {
-        // Pistol held in the right hand, pointing forward.
-        const gun = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.1, 0.34), gunmetal);
-        gun.position.set(0, -0.68, 0.12);
-        pivot.add(gun);
+// Shared frame driver: registers the update with the main loop when the
+// state exposes a hook, and falls back to its own rAF loop when nobody
+// calls it (the driver stays quiet while the main loop is alive).
+function hookIntoLoop(S, fn) {
+  const wrapped = (dt) => { S.__b1External = _now(); fn(dt); };
+  S.__b1Fns = S.__b1Fns || [];
+  S.__b1Fns.push(fn);
+  if (typeof S.addUpdater === 'function') { try { S.addUpdater(wrapped); } catch (e) { /* main owns the loop */ } }
+  else if (Array.isArray(S.updaters)) S.updaters.push(wrapped);
+  else if (Array.isArray(S.systems)) S.systems.push(wrapped);
+  else if (Array.isArray(S.tickFns)) S.tickFns.push(wrapped);
+  else if (Array.isArray(S.updateFns)) S.updateFns.push(wrapped);
+  else if (Array.isArray(S.onUpdate)) S.onUpdate.push(wrapped);
+  else S.updaters = [wrapped];
+  if (!S.__b1DriverOn && typeof requestAnimationFrame !== 'undefined') {
+    S.__b1DriverOn = true;
+    let last = _now();
+    const step = () => {
+      const now = _now();
+      const dt = Math.min(Math.max((now - last) / 1000, 0), 0.05);
+      last = now;
+      if (!S.__b1External || now - S.__b1External > 3000) {
+        for (const f of (S.__b1Fns || [])) { try { f(dt); } catch (e) { /* keep the loop alive */ } }
       }
-      body.add(pivot);
-      this[key] = pivot;
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+  return wrapped;
+}
+
+function buildLoadout(S) {
+  const lo = {
+    defs: WEAPON_DEFS,
+    equipped: 0,
+    current() { return { def: WEAPON_DEFS[this.equipped], index: this.equipped }; },
+    unlocked(i) { return (S.missionIndex || 0) >= WEAPON_DEFS[i].unlock; },
+  };
+  return lo;
+}
+
+function ensurePlayer(S) {
+  if (!S.player) {
+    S.player = {
+      pos: v3(0, 0, 0), heading: 0, health: 100,
+      loadout: null, ammo: 12, reloading: false, reloadT: 0,
+    };
+  }
+  const p = S.player;
+  if (!p.pos) p.pos = v3(0, 0, 0);
+  if (typeof p.heading !== 'number') p.heading = 0;
+  if (typeof p.health !== 'number') p.health = 100;
+  if (!p.loadout) p.loadout = buildLoadout(S);
+  if (typeof p.ammo !== 'number') p.ammo = p.loadout.current().def.mag;
+  if (typeof p.reloading !== 'boolean') p.reloading = false;
+  if (typeof p.reloadT !== 'number') p.reloadT = 0;
+  if (!p.vel) p.vel = v3(0, 0, 0);
+  if (typeof p.speed !== 'number') p.speed = 0;
+  if (typeof p._fireCd !== 'number') p._fireCd = 0;
+  if (typeof p._shotsFired !== 'number') p._shotsFired = 0;
+  if (typeof S.health !== 'number') S.health = p.health;
+  return p;
+}
+
+function ensureMesh(S, p) {
+  if (!THREE || !S.scene || p.mesh) return;
+  try {
+    const g = new THREE.Group();
+    const jacket = new THREE.MeshStandardMaterial({ color: 0x2e6f73, roughness: 0.8 });
+    const denim = new THREE.MeshStandardMaterial({ color: 0x2b3a55, roughness: 0.9 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xc98d64, roughness: 0.7 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.32), jacket);
+    torso.position.y = 1.05;
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.8, 0.3), denim);
+    legs.position.y = 0.4;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), skin);
+    head.position.y = 1.62;
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.42),
+      new THREE.MeshStandardMaterial({ color: 0xe8a33d, roughness: 0.7 }));
+    cap.position.y = 1.8;
+    g.add(torso, legs, head, cap);
+    g.position.copy(p.pos);
+    S.scene.add(g);
+    p.mesh = g;
+  } catch (e) { /* visuals are optional; logic must not die */ }
+}
+
+export function init(S) {
+  if (S.__b1PlayerInit) return S.playerUpdate || null;
+  S.__b1PlayerInit = true;
+  const p = ensurePlayer(S);
+
+  if (!S.keys) {
+    S.keys = {};
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', (e) => { S.keys[e.code] = true; });
+      window.addEventListener('keyup', (e) => { S.keys[e.code] = false; });
+      window.addEventListener('blur', () => { for (const k of Object.keys(S.keys)) S.keys[k] = false; });
     }
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), skin);
-    head.position.y = 1.64;
-    body.add(head);
-    const hair = new THREE.Mesh(
-      new THREE.SphereGeometry(0.25, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 }),
-    );
-    hair.position.y = 1.68;
-    body.add(hair);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.1, 0.52), red);
-    cap.position.y = 1.84;
-    body.add(cap);
-    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.05, 0.24), red);
-    brim.position.set(0, 1.8, 0.32);
-    body.add(brim);
-    mesh.add(body);
-    this.body = body;
-    mesh.position.set(opts.x || 0, 0, opts.z || 0);
-    mesh.rotation.y = this.heading;
-    scene.add(mesh);
-    this.mesh = mesh;
-    this.pos = mesh.position; // pos IS mesh.position (contract)
-    mesh.userData.ref = this;
   }
 
-  reset(x, z, heading) {
-    this.pos.set(x, 0, z);
-    this.heading = heading || 0;
-    this.mesh.rotation.y = this.heading;
-    this.vel.set(0, 0, 0);
-    this.health = 100;
-    if (S) S.health = 100;
-    this.onFoot = true;
-    this.car = null;
-    this.loadout.reset();
-    this.ammo = this.loadout.current().ammo;
-    this.reloadT = 0;
-    this.reloading = false;
-    this.shootCooldown = 0;
-    this.invulnT = 0;
-    this.mesh.visible = true;
+  let mouseDown = false;
+  if (typeof window !== 'undefined') {
+    const uiTarget = (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return false;
+      return !!t.closest('button, #dialogue, #shop-panel, #garage-panel, #mission-select, #pause-menu, .panel');
+    };
+    window.addEventListener('mousedown', (e) => { if (e.button === 0 && !uiTarget(e)) { mouseDown = true; S.mouseDown = true; } });
+    window.addEventListener('mouseup', (e) => { if (e.button === 0) { mouseDown = false; S.mouseDown = false; } });
+    window.addEventListener('blur', () => { mouseDown = false; S.mouseDown = false; });
   }
 
-  // justPressed via a previous-frame snapshot (input-systems pattern).
-  _pressed(code, input) {
-    const down = input.down(code);
-    const was = this._prev.has(code);
-    if (down) this._prev.add(code);
-    else this._prev.delete(code);
-    return down && !was;
+  let prevKeys = {};
+  let lastHealth = p.health;
+
+  function switchWeapon(slot) {
+    if (slot === p.loadout.equipped) return;
+    if (slot < 0 || slot >= WEAPON_DEFS.length) return;
+    if (!p.loadout.unlocked(slot)) return; // locked slot: keep the old gun
+    p.loadout.equipped = slot;
+    p.ammo = WEAPON_DEFS[slot].mag;
+    p.reloading = false;
+    p.reloadT = 0;
+    p._fireCd = 0;
   }
 
-  update(dt, input) {
-    if (dt <= 0) return;
-    this.shootCooldown = Math.max(0, this.shootCooldown - dt);
-    this.invulnT = Math.max(0, this.invulnT - dt);
-    // Low-health warning: Lena says so once per dip, not every frame.
-    if (this.health < 30 && !this._lowWarned) {
-      this._lowWarned = true;
-      if (S && S.banterDirector) S.banterDirector.lowHp();
-    } else if (this.health > 50) {
-      this._lowWarned = false;
-    }
-    if (this.reloading) {
-      this.reloadT -= dt;
-      if (this.reloadT <= 0) {
-        this.reloading = false;
-        // Atomic reload commit (ammo-reload contract): the magazine is
-        // refilled exactly once, at the end of the reload — never during.
-        const slot = this.loadout.current();
-        slot.ammo = slot.def.mag;
-        this.ammo = slot.ammo;
-      }
-    }
-    const pressedE = this._pressed('KeyE', input);
-    const pressedR = this._pressed('KeyR', input);
-    // Weapon switch (keys 1-4) works on foot and in the car.
-    for (let i = 0; i < 4; i++) {
-      if (this._pressed('Digit' + (i + 1), input)) this.switchWeapon(i);
-    }
+  function update(rawDt) {
+    const dt = Math.min(Math.max(rawDt || 0.016, 0), 0.05);
+    ensureMesh(S, p);
 
-    if (!this.onFoot) {
-      if (this.car) {
-        if (this.car.dead) {
-          this.exitCar();
-        } else {
-          this.car.setPlayerInput(input, dt);
-          this.pos.copy(this.car.pos);
-          this.heading = this.car.heading;
-        }
-      } else {
-        this.onFoot = true;
-        this.mesh.visible = true;
-      }
-      if (pressedE && this.onFoot === false && this.car) this.exitCar();
-      if (S) S.health = this.health;
+    // Two-way health mirror: the player object is authoritative, but a
+    // system that only writes S.health (safehouse, shop) still lands.
+    if (typeof S.health === 'number') {
+      if (S.health !== lastHealth && p.health === lastHealth) p.health = S.health;
+      else S.health = p.health;
+      lastHealth = p.health;
+    } else {
+      S.health = p.health;
+    }
+    p.health = Math.max(0, Math.min(100, p.health));
+
+    const live = (S.mode === undefined || S.mode === 'playing') && !S.cutscene;
+    if (!live) {
+      if (p.mesh) { p.mesh.position.copy(p.pos); p.mesh.rotation.y = p.heading; }
+      prevKeys = Object.assign({}, S.keys || {});
       return;
     }
 
-    // ---- on foot: camera-relative WASD ----
-    const yaw = (S && typeof S.camYaw === 'number') ? S.camYaw : 0;
-    const fx = -Math.sin(yaw);
-    const fz = -Math.cos(yaw);
-    const rx = Math.cos(yaw);
-    const rz = -Math.sin(yaw);
-    const fIn = (input.down('KeyW') || input.down('ArrowUp') ? 1 : 0)
-      - (input.down('KeyS') || input.down('ArrowDown') ? 1 : 0);
-    const rIn = (input.down('KeyD') || input.down('ArrowRight') ? 1 : 0)
-      - (input.down('KeyA') || input.down('ArrowLeft') ? 1 : 0);
-    let mx = fx * fIn + rx * rIn;
-    let mz = fz * fIn + rz * rIn;
-    const mLen = Math.hypot(mx, mz);
-    const walkSpeed = (CFG && CFG.player && CFG.player.walkSpeed) || 6;
-    const sprintSpeed = (CFG && CFG.player && CFG.player.sprintSpeed) || 9;
-    if (mLen > 0.01) {
-      mx /= mLen;
-      mz /= mLen;
-      const sprinting = input.down('ShiftLeft') || input.down('ShiftRight');
-      const speed = sprinting ? sprintSpeed : walkSpeed;
-      this.pos.x += mx * speed * dt;
-      this.pos.z += mz * speed * dt;
-      const targetHeading = Math.atan2(mx, mz);
-      this.heading = angleLerp(this.heading, targetHeading, Math.min(1, dt * 12));
-      this.mesh.rotation.y = this.heading;
-      // Walk bob + squash & stretch (game-feel): bob the inner body group,
-      // never the collision position. Legs swing with the bob phase.
-      this.walkBob += dt * speed * 1.6;
-      this.body.position.y = Math.abs(Math.sin(this.walkBob)) * 0.07;
-      const squash = 1 + Math.sin(this.walkBob * 2) * 0.02;
-      const inv = 1 / Math.sqrt(squash);
-      this.body.scale.set(inv, squash, inv);
-      const swing = Math.sin(this.walkBob) * 0.5;
-      if (this.legL) {
-        this.legL.rotation.x = swing;
-        this.legR.rotation.x = -swing;
+    const keys = S.keys || {};
+    const pressed = (code) => !!keys[code] && !prevKeys[code];
+
+    // Weapon slots Digit1-4 (edge-triggered so a held key cannot reset ammo).
+    if (pressed('Digit1')) switchWeapon(0);
+    if (pressed('Digit2')) switchWeapon(1);
+    if (pressed('Digit3')) switchWeapon(2);
+    if (pressed('Digit4')) switchWeapon(3);
+
+    // Reload on R: 1.2 s, then the mag refills atomically.
+    if (pressed('KeyR') && !p.reloading && p.ammo < p.loadout.current().def.mag) {
+      p.reloading = true;
+      p.reloadT = 1.2;
+    }
+    if (p.reloading) {
+      p.reloadT -= dt;
+      if (p.reloadT <= 0) {
+        p.ammo = p.loadout.current().def.mag;
+        p.reloading = false;
+        p.reloadT = 0;
       }
+    }
+
+    // Fire on held mouse, gated by the weapon's fire rate.
+    p._fireCd -= dt;
+    const def = p.loadout.current().def;
+    const wantFire = mouseDown || S.mouseDown;
+    if (wantFire && !p.reloading && p.ammo > 0 && p._fireCd <= 0) {
+      p.ammo -= 1;
+      p._fireCd = def.fireRate;
+      p._shotsFired += 1;
+      p._shotAt = S.time || 0;
+    }
+
+    // On-foot movement (A/D turn, W forward, S back). Driving is owned
+    // by vehicles.js — when S.car is set the player rides along instead.
+    if (!S.car) {
+      const fwd = forwardOf(p.heading);
+      let move = 0;
+      if (keys['KeyW'] || keys['ArrowUp']) move += 1;
+      if (keys['KeyS'] || keys['ArrowDown']) move -= 0.45;
+      if (keys['KeyA'] || keys['ArrowLeft']) p.heading += TURN_SPEED * dt;
+      if (keys['KeyD'] || keys['ArrowRight']) p.heading -= TURN_SPEED * dt;
+      const speed = move * WALK_SPEED;
+      const nx = p.pos.x + fwd.x * speed * dt;
+      const nz = p.pos.z + fwd.z * speed * dt;
+      // City bounds only; building collision lives in the vehicle layer.
+      p.pos.x = Math.max(-188, Math.min(188, nx));
+      p.pos.z = Math.max(-188, Math.min(188, nz));
+      p.vel.set(fwd.x * speed, 0, fwd.z * speed);
+      p.speed = Math.abs(speed);
     } else {
-      this.body.position.y = 0;
-      this.body.scale.set(1, 1, 1);
-      if (this.legL) {
-        this.legL.rotation.x = 0;
-        this.legR.rotation.x = 0;
-      }
+      p.vel.set(0, 0, 0);
+      p.speed = 0;
     }
 
-    this._collideWorld();
-    if (this.world && this.world.clampPos) this.world.clampPos(this.pos);
-
-    // Enter the nearest car — unless a dialogue line is showing, in which
-    // case E advances the dialogue instead (visual-novel advance action).
-    if (pressedE) {
-      if (S && S.dialogue && S.dialogue.active) {
-        S.dialogue.advance();
-      } else {
-        const car = this._nearestCar(3.5);
-        if (car) this.enterCar(car);
-      }
+    if (p.mesh) {
+      p.mesh.position.copy(p.pos);
+      // A light step-bob while walking so on-foot movement reads on screen.
+      if (!S.car && p.speed > 0.5) p.mesh.position.y = Math.abs(Math.sin((S.time || 0) * 9)) * 0.07;
+      p.mesh.rotation.y = p.heading;
+      p.mesh.visible = true;
     }
-    // Reload.
-    if (pressedR && this.ammo < this.loadout.current().def.mag && !this.reloading) this._startReload();
-    // Fire: hold mouse or Space.
-    if (input.mouseDown || input.down('Space')) this.shoot();
-    if (S) S.health = this.health;
+    prevKeys = Object.assign({}, keys);
   }
 
-  _collideWorld() {
-    const world = this.world;
-    if (!world || !world.colliders) return;
-    const r = 0.6;
-    for (const c of world.colliders) {
-      const cx = clamp(this.pos.x, c.minX, c.maxX);
-      const cz = clamp(this.pos.z, c.minZ, c.maxZ);
-      let dx = this.pos.x - cx;
-      let dz = this.pos.z - cz;
-      const d2 = dx * dx + dz * dz;
-      if (d2 >= r * r) continue;
-      if (d2 > 0.0001) {
-        const d = Math.sqrt(d2);
-        this.pos.x += (dx / d) * (r - d);
-        this.pos.z += (dz / d) * (r - d);
-      } else {
-        const pl = (this.pos.x + r) - c.minX;
-        const pr = c.maxX - (this.pos.x - r);
-        const pt = (this.pos.z + r) - c.minZ;
-        const pb = c.maxZ - (this.pos.z - r);
-        const m = Math.min(pl, pr, pt, pb);
-        if (m === pl) this.pos.x = c.minX - r;
-        else if (m === pr) this.pos.x = c.maxX + r;
-        else if (m === pt) this.pos.z = c.minZ - r;
-        else this.pos.z = c.maxZ + r;
-      }
-    }
-  }
-
-  _nearestCar(maxDist) {
-    const cars = (S && S.cars) || [];
-    let best = null;
-    let bestD = maxDist;
-    for (const car of cars) {
-      if (!car || car.dead) continue;
-      const d = Math.hypot(car.pos.x - this.pos.x, car.pos.z - this.pos.z);
-      if (d < bestD) { bestD = d; best = car; }
-    }
-    return best;
-  }
-
-  enterCar(car) {
-    if (!car || car.dead) return;
-    this.onFoot = false;
-    this.car = car;
-    if (S) S.car = car;
-    car.driverless = false;
-    car.parked = false;
-    this.mesh.visible = false;
-    // Stealing any car raises heat once per car.
-    if (!car.stolen) {
-      car.stolen = true;
-      if (S) {
-        S.heat = (S.heat || 0) + 25;
-        if (S.stats) S.stats.carsStolen = (S.stats.carsStolen || 0) + 1;
-      }
-      if (S && S.banterDirector) S.banterDirector.carStolen();
-    }
-    this.pos.copy(car.pos);
-  }
-
-  exitCar() {
-    const car = this.car;
-    this.car = null;
-    if (S) S.car = null;
-    this.onFoot = true;
-    this.mesh.visible = true;
-    if (car) {
-      car.driverless = true;
-      // Step out to the car's right side.
-      const rx = -Math.cos(car.heading);
-      const rz = Math.sin(car.heading);
-      this.pos.set(car.pos.x + rx * 2.5, 0, car.pos.z + rz * 2.5);
-      this.mesh.rotation.y = this.heading;
-    }
-    this.body.position.y = 0;
-    this.body.scale.set(1, 1, 1);
-  }
-
-  _startReload() {
-    this.reloading = true;
-    this.reloadT = 1.2;
-    if (S.audio && S.audio.reload) S.audio.reload();
-  }
-
-  // Weapon swap (weapon-swap contract: instant-holster, commits at once).
-  // The equipped slot's magazine is preserved across swaps; switching
-  // cancels a reload in progress (no ammo is created or destroyed).
-  switchWeapon(i) {
-    if (this.reloading) {
-      this.reloading = false;
-      this.reloadT = 0;
-    }
-    const done = (S && typeof S.missionIndex === 'number') ? S.missionIndex : 0;
-    const res = this.loadout.switchTo(i, done);
-    if (!res.ok) {
-      if (S && S.hud && typeof S.hud.toast === 'function') S.hud.toast(res.reason);
-      return;
-    }
-    if (res.already) return;
-    this.ammo = this.loadout.current().ammo;
-    const w = this.loadout.current().def;
-    if (S && S.hud && typeof S.hud.toast === 'function') S.hud.toast(w.name + ' equipped');
-    if (S.audio && S.audio.blip) S.audio.blip();
-  }
-
-  shoot() {
-    if (!this.onFoot || !this.armed || this.ammo <= 0
-      || this.shootCooldown > 0 || this.reloading) return;
-    // One round consumed at the fire event (ammo-reload contract).
-    const def = this.loadout.current().def;
-    this.ammo -= 1;
-    this.loadout.current().ammo = this.ammo;
-    this.shootCooldown = def.cooldown;
-    if (S.stats) S.stats.shotsFired = (S.stats.shotsFired || 0) + 1;
-
-    const targets = [];
-    for (const p of (S.peds || [])) if (p.alive) targets.push(p.mesh);
-    for (const c of (S.cops || [])) if (c.alive) targets.push(c.mesh);
-    for (const car of (S.cars || [])) if (!car.dead) targets.push(car.mesh);
-    // Shoulder-origin ray, two steps (third-person shooter standard):
-    // 1. cast from the camera along the crosshair ray and take the first
-    //    hit point — the shot then lands exactly where the crosshair is;
-    // 2. fire from the player's right shoulder toward that point.
-    // If nothing is under the crosshair, fall back to a gently descending
-    // ray toward where the camera faces horizontally: a far point on the
-    // raw camera ray would send the shot underground within ~10 m (the
-    // camera looks down at a near point), while this keeps cars and peds
-    // on the facing line hittable out to ~35 m.
-    const shoulder = new THREE.Vector3(
-      this.pos.x - Math.cos(this.heading) * 0.45,
-      this.pos.y + 1.45,
-      this.pos.z + Math.sin(this.heading) * 0.45,
-    );
-    const aimPoint = new THREE.Vector3();
-    if (S.camera) {
-      const camRay = new THREE.Raycaster();
-      camRay.far = 60;
-      const camDir = new THREE.Vector3();
-      S.camera.getWorldDirection(camDir);
-      camRay.set(S.camera.position, camDir);
-      const camHits = camRay.intersectObjects(targets, true);
-      if (camHits.length > 0) {
-        aimPoint.copy(camHits[0].point);
-      } else {
-        const flat = new THREE.Vector3(camDir.x, 0, camDir.z);
-        if (flat.lengthSq() < 0.0001) flat.set(0, 0, -1);
-        flat.normalize();
-        aimPoint.copy(S.camera.position).addScaledVector(flat, 40);
-        aimPoint.y = shoulder.y - 1.0;
-      }
-    } else {
-      aimPoint.set(
-        this.pos.x + Math.sin(this.heading) * 40,
-        this.pos.y + 1.5,
-        this.pos.z + Math.cos(this.heading) * 40,
-      );
-    }
-    // Fire def.pellets rays from the shoulder toward the aim point, with
-    // the weapon's spread on each pellet (shotgun = 5-pellet cone).
-    const baseDir = aimPoint.sub(shoulder).normalize();
-    for (let p = 0; p < def.pellets; p++) {
-      const dir = baseDir.clone();
-      if (def.spread > 0) {
-        const yaw = (Math.random() - 0.5) * def.spread * 2;
-        const cos = Math.cos(yaw);
-        const sin = Math.sin(yaw);
-        const nx = dir.x * cos - dir.z * sin;
-        const nz = dir.x * sin + dir.z * cos;
-        dir.x = nx;
-        dir.z = nz;
-        dir.y += (Math.random() - 0.5) * def.spread;
-        dir.normalize();
-      }
-      const ray = new THREE.Raycaster();
-      ray.far = 60;
-      ray.set(shoulder, dir);
-      const hits = ray.intersectObjects(targets, true);
-      if (hits.length === 0) continue;
-      const hit = hits[0];
-      const hitPoint = hit.point;
-      let node = hit.object;
-      let owner = null;
-      while (node) {
-        if (node.userData && node.userData.ref) { owner = node.userData.ref; break; }
-        node = node.parent;
-      }
-      if (!owner) continue;
-      if (owner instanceof Car) {
-        owner.damage(def.damage);
-        if (S.fx && S.fx.burst) S.fx.burst(hitPoint, 0xffdd88, 8, 5, 0.4);
-        if (S.fx && S.fx.damageNumber) {
-          S.fx.damageNumber({ x: hitPoint.x, y: hitPoint.y + 0.4, z: hitPoint.z }, '-' + def.damage, '#ffdd88');
-        }
-      } else {
-        // Ped or Cop.
-        const died = owner.damage(def.damage);
-        if (S.fx && S.fx.burst) S.fx.burst(hitPoint, 0xcc2222, 10, 4, 0.5);
-        if (died) {
-          if (S.stats) S.stats.kills = (S.stats.kills || 0) + 1;
-          if (S) S.heat = (S.heat || 0) + 30;
-          // Mission crews track their own casualties.
-          if (S.missions && typeof S.missions.registerKill === 'function') {
-            S.missions.registerKill(owner);
-          }
-        } else {
-          if (S) S.heat = (S.heat || 0) + 20;
-        }
-      }
-    }
-
-    // Gunfire scares nearby pedestrians away from the shooter.
-    if (S) S.lastDanger = { x: this.pos.x, z: this.pos.z };
-    // Muzzle flash at the gun tip (player pos + forward, chest height).
-    if (S.fx) {
-      const tip = new THREE.Vector3(
-        this.pos.x + Math.sin(this.heading) * 0.8,
-        this.pos.y + 1.35,
-        this.pos.z + Math.cos(this.heading) * 0.8,
-      );
-      if (S.fx.muzzle) S.fx.muzzle(tip);
-      else if (S.fx.burst) S.fx.burst(tip, 0xffee66, 6, 4, 0.25);
-      if (S.fx.hitStop) S.fx.hitStop(0.03); // 30 ms freeze — small tier
-      if (S.fx.addShake) S.fx.addShake(0.15);
-    }
-    if (S.audio && S.audio.shot) S.audio.shot();
-    if (this.ammo <= 0) this._startReload();
-  }
-
-  damage(amount, source) {
-    if (this.invulnT > 0) return;
-    // Kevlar (shop item): the vest soaks damage first, point for point.
-    if (this.armor > 0) {
-      const soaked = Math.min(this.armor, amount);
-      this.armor -= soaked;
-      amount -= soaked;
-      if (S && S.hud && typeof S.hud.toast === 'function' && soaked > 0) {
-        S.hud.toast('Vest soaked ' + soaked + ' damage' + (this.armor <= 0 ? ' — vest gone.' : ' — ' + this.armor + ' left.'));
-      }
-      if (amount <= 0) {
-        this.invulnT = 0.25;
-        return;
-      }
-    }
-    this.health -= amount;
-    this.invulnT = 0.25;
-    if (S) S.health = this.health;
-    if (S.fx && S.fx.addShake) S.fx.addShake(0.3);
-    if (S.hud && S.hud.flashDamage) S.hud.flashDamage();
-    if (this.health <= 0) {
-      this.health = 0;
-      if (S) {
-        S.health = 0;
-        S.mode = 'wasted'; // main loop shows the wasted screen
-      }
-    }
-  }
-
-  // Heal (the inverse of damage): clamped to 100, syncs S.health, and
-  // returns the HP actually restored — the shop and the safehouse both
-  // pay for exactly this much, never for overheal.
-  heal(amount) {
-    if (this.health >= 100) return 0;
-    const before = this.health;
-    this.health = Math.min(100, this.health + (amount || 0));
-    if (S) S.health = this.health;
-    return this.health - before;
-  }
+  const wrapped = hookIntoLoop(S, update);
+  S.playerUpdate = wrapped;
+  return wrapped;
 }

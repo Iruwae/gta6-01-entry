@@ -1,18 +1,30 @@
-[
-  {
-    "name": "1-chase.jpg",
-    "scene": "Police chase at 3 stars: driving the stolen sport car with police cars on the tail, wanted stars + minimap + mission objective on the HUD"
-  },
-  {
-    "name": "2-mission.jpg",
-    "scene": "Mission 5 Payday at the Pier: Vic Torres briefing with portrait, crew member Lena following on foot at the harbor"
-  },
-  {
-    "name": "3-drive.jpg",
-    "scene": "Street race side activity: driving the ring road toward a gold checkpoint gate, race timer and $300 prize on the HUD"
-  },
-  {
-    "name": "4-onfoot.jpg",
-    "scene": "Night ride on the street bike: day/night cycle at 21:48, lit windows, headlights and district name on the HUD"
-  }
-]
+{
+  "shots": [
+    {
+      "file": "1-chase.jpg",
+      "bytes": 78261,
+      "cash": 500,
+      "note": "heli in frame {\"x\":0.17,\"y\":0.69,\"z\":1}, car {\"x\":0,\"y\":-0.57,\"z\":0.98}, wanted 5, 4 cops, roster 4"
+    },
+    {
+      "file": "2-mission.jpg",
+      "bytes": 83201,
+      "cash": 500,
+      "note": "dialogue LENA CRUZ, Lena in frame: false"
+    },
+    {
+      "file": "3-drive.jpg",
+      "bytes": 61149,
+      "cash": 500,
+      "note": "race active, car {\"x\":-0.21,\"y\":-0.29,\"z\":0.98}, gate1 {\"x\":0.72,\"y\":0.33,\"z\":1}"
+    },
+    {
+      "file": "4-onfoot.jpg",
+      "bytes": 96864,
+      "cash": 500,
+      "note": "night NIGHT 0.6, bike downtown"
+    }
+  ],
+  "failed": [],
+  "errors": []
+}

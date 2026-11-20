@@ -1,3 +1,12 @@
-out/
 node_modules/
-gta6-r5-shots-test/
+.DS_Store
+*.log
+.env
+.env.*
+dist/
+build/
+.vscode/
+.idea/
+*.tmp
+*.swp
+coverage/

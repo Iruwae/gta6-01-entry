@@ -81,3 +81,5 @@ createServer((request, response) => {
 }).listen(port, '127.0.0.1', () => {
   console.log(`game/ is on http://localhost:${port}`);
 });
+// r5b: QA screenshot staging runs through window.__solmar — see tools/shots.mjs.
+// r5b: the shots script serves game/ on :8903 with its own static server.

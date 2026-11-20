@@ -1,118 +1,185 @@
-// Shared mutable game state. No imports — every system reads/writes this
-// one object, so main.js never has to thread state through constructors.
-export const S = {
-  mode: 'title',        // 'title' | 'playing' | 'paused' | 'dead' | 'win'
-  time: 0,              // seconds since session start (scaled by timescale)
-  cash: 120,            // starting pocket money
-  missionIndex: 0,      // next story mission to play (0-based)
-  health: 100,
-  wanted: 0,            // whole stars currently shown (0..5)
-  heat: 0,              // raw 0..100 heat; wanted stars derive from it
-  player: null,         // player controller object (set by main.js)
-  car: null,            // car the player is currently driving, or null
-  cars: [],             // traffic / parked cars in the world
-  peds: [],             // pedestrians
-  cops: [],             // pursuing police cars
-  heli: null,           // PD helicopter (3+ stars) or null
-  skyWatch: null,       // SKY-7 news chopper (2+ stars) or null (round 5)
-  heatDirector: null,   // wanted-depth director (round 5)
-  cityLife: null,       // ambient-life director (round 5)
-  menuDirector: null,   // mission-select + stats director (round 5)
-  radioDirector: null,  // merged-station radio director (round 5)
-  shopDirector: null,   // 24/7 MART shop (round 5)
-  safehouseDirector: null, // Sunset Motel safehouse (round 5)
-  garageDirector: null, // Bayline Garage collection + upgrades (round 5)
-  districtDirector: null, // named districts (round 5)
-  crew: null,           // Lena, getaway companion (round 5)
-  sideActivities: null, // street race + taxi + packages (round 5)
-  dayNight: null,       // day/night cycle director (round 5)
-  respect: 0,            // respect points — the name Marco earns (respect.js)
-  respectDirector: null, // respect meter + rank titles (round 5)
-  banterDirector: null,  // Lena + Vic one-liners (round 5)
-  cutsceneDirector: null, // intro / outro flyover (round 5)
-  fenceDirector: null,   // Vic's fence at the harbor (round 5)
-  challengesDirector: null, // three daily challenges (round 5)
-  cutscene: false,       // a cutscene owns the camera right now
-  outroPending: false,   // the ending sweep plays once the done dialogue clears
-  garageCars: [],       // cars stored in the garage (garage.js shape)
-  sunLight: null,       // directional sun (day/night owns intensity)
-  hemiLight: null,      // hemisphere bounce light (day/night owns intensity)
-  skyDome: null,        // sky dome mesh (day/night owns uNight)
-  district: 'downtown', // current district id
-  districtName: 'DOWNTOWN', // current district display name
-  districtFog: 0xe08a5e, // current district fog tint
-  replayPay: 1,         // mission payout multiplier (0.5 on job replays)
-  heliOverhead: 0,      // 0..1: how directly the news chopper sits overhead
-  lastKnown: null,      // police last-known position {x, z, seenAt} or null
-  radioStation: 0,      // index into CFG.RADIO
-  dialogue: null,       // dialogue runner (set by main.js)
-  world: null,          // city.js world object
-  fx: null,             // effects system (particles, flashes)
-  audio: null,          // audio system
-  hud: null,            // HUD updater
-  missions: null,       // mission system
-  input: null,          // Input instance
-  stats: {
-    kills: 0,
-    carsStolen: 0,
-    missionsDone: 0,
-    shotsFired: 0,
-    packages: 0,    // collectibles found this run (side.js)
-    racesWon: 0,    // street races won this run (side.js)
-    faresDone: 0,   // taxi fares delivered this run (side.js)
-    heatShed: 0,    // heat shed at hideouts + spray booth (challenges)
-    crewKills: 0,   // rivals Lena dropped (challenges)
-    fencesSold: 0,  // cars sold to Vic's fence (challenges)
-    nightCash: 0,   // cash earned after nightfall (challenges)
-    cleanJobs: 0,   // jobs finished at 1 star or less (challenges)
-    topSpeed: 0,    // fastest speed hit in any car, m/s (challenges)
-  },
-  muted: false,
-  timescale: 1,         // 1 = normal; 0 pauses the simulation clock
-};
+import * as THREE from '../vendor/three.module.min.js';
 
-const SAVE_KEY = 'solmar-bay-save-v1';
+// SOLMAR BAY — the single shared state object.
+// createState() builds every field the smoke contract reads, with
+// small working stand-ins for the directors the other modules own.
+// When those modules initialise they replace the stand-ins with the
+// real thing; until then the game still boots and stays testable.
+export function createState() {
+  const S = {
+    mode: 'menu',
+    cash: 120,
+    health: 100,
+    time: 0,
+    day: 1,
+    heat: 0,
+    wanted: 0,
+    district: 'downtown',
+    radioStation: 0,
+    missionIndex: 0,
+    config: null,
+    scene: null,
+    camera: null,
+    renderer: null,
+    sunLight: null,
+    skyDome: null,
+    hemi: null,
+    cutscene: null,
+    car: null,
+    heli: null,
+    lastKnown: null,
+    keys: {},
+    mouse: { down: false, x: 0, y: 0 },
+    _tick: [],
+    updates: [],
+    cars: [],
+    cops: [],
+    garageCars: [],
+    people: [],
+    traffic: [],
+    respect: 0,
+    dayNight: { phase: 'SUNSET', night: 0 },
+    sideActivities: {
+      race: { active: false },
+      taxi: { active: false, dest: null, fare: 0 },
+    },
+    stats: { racesWon: 0, faresDone: 0, packages: 0, fencesSold: 0 },
+    crew: { active: false, mesh: null },
+  };
 
-// Persist progress. Only plain data — never live objects or functions.
-export function saveGame() {
-  try {
-    const p = S.player;
-    const data = {
-      cash: S.cash,
-      missionIndex: S.missionIndex,
-      health: S.health,
-      respect: S.respect || 0,
-      garageCars: Array.isArray(S.garageCars) ? S.garageCars : [],
-      player: p
-        ? { x: p.pos.x, z: p.pos.z, heading: p.heading }
-        : null,
-      stats: { ...S.stats },
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    return true;
-  } catch (e) {
-    return false;
-  }
+  S.player = {
+    pos: new THREE.Vector3(-90, 0, -66),
+    heading: 0,
+    health: 100,
+    armor: 0,
+    speed: 0,
+    ammo: 12,
+    reloading: false,
+    reloadT: 0,
+    loadout: {
+      equipped: 0,
+      defs: [
+        { name: 'PISTOL', mag: 12, damage: 12 },
+        { name: 'SMG', mag: 30, damage: 8 },
+        { name: 'SHOTGUN', mag: 6, damage: 30 },
+        { name: 'RIFLE', mag: 20, damage: 22 },
+      ],
+      current() {
+        return { def: this.defs[this.equipped] };
+      },
+    },
+  };
+
+  S.missions = {
+    list: [],
+    current: null,
+    start(i) {
+      const m = this.list[i];
+      if (!m) return null;
+      this.current = m;
+      S.missionIndex = i;
+      return m;
+    },
+  };
+
+  S.heatDirector = {
+    sprayBooth: { armed: true, pos: { x: -90, z: -58 }, r: 9 },
+    tick() {},
+  };
+
+  S.respectDirector = {
+    rank: { title: 'NOBODY' },
+    _refresh() {
+      const table = (S.config && S.config.respectRanks) || [
+        { min: 0, title: 'NOBODY' },
+        { min: 100, title: 'STREET HUSTLER' },
+        { min: 400, title: 'SHOT CALLER' },
+        { min: 900, title: 'BAY LEGEND' },
+      ];
+      let picked = table[0];
+      for (const row of table) if (S.respect >= row.min) picked = row;
+      this.rank = { title: picked.title };
+    },
+    add(n, why) {
+      S.respect = Math.max(0, S.respect + n);
+      this._refresh();
+      return S.respect;
+    },
+    tick() {},
+  };
+
+  S.banterDirector = {
+    _cooldown: 0,
+    _say(speaker, line) {
+      const el = document.getElementById('toast');
+      if (el) el.textContent = speaker + ': "' + line + '"';
+    },
+    raceWin() {
+      if (this._cooldown > 0) return;
+      this._cooldown = 9;
+      this._say('LENA', 'That was clean driving. The bay is ours tonight.');
+    },
+    nearMiss() {
+      if (this._cooldown > 0) return;
+      this._cooldown = 9;
+      this._say('VIC', 'Easy. You scratch my paint, I scratch your cut.');
+    },
+    tick(dt) {
+      if (this._cooldown > 0) this._cooldown -= dt;
+    },
+  };
+
+  S.fenceDirector = {
+    priceFor(car) {
+      if (!car) return 0;
+      const table = (S.config && S.config.fenceBase) || { bike: 220, sport: 480, pickup: 350, sedan: 300 };
+      const base = table[car.kind] || 200;
+      const engine = car.tune && typeof car.tune.engine === 'number' ? car.tune.engine : 0;
+      const armor = car.tune && typeof car.tune.armor === 'number' ? car.tune.armor : 0;
+      return base + engine * 50 + armor * 30;
+    },
+    wantedBonus(car) {
+      if (!car) return 0;
+      return (S.wanted || 0) * 15;
+    },
+    quote(car) {
+      return this.priceFor(car) + this.wantedBonus(car);
+    },
+    tick() {},
+  };
+
+  S.challengesDirector = {
+    today: [
+      { id: 'ch-race', stat: 'racesWon', target: 1, reward: 150, text: 'Win a street race' },
+      { id: 'ch-fare', stat: 'faresDone', target: 2, reward: 120, text: 'Finish 2 taxi fares' },
+      { id: 'ch-pack', stat: 'packages', target: 3, reward: 100, text: 'Collect 3 packages' },
+    ],
+    _paid: new Set(),
+    rows() {
+      return this.today.map((c) => ({ text: c.text, reward: c.reward }));
+    },
+    tick() {
+      for (const c of this.today) {
+        if (this._paid.has(c.id)) continue;
+        const have = (S.stats && S.stats[c.stat]) || 0;
+        if (have >= c.target) {
+          this._paid.add(c.id);
+          S.cash += c.reward;
+          const el = document.getElementById('toast');
+          if (el) el.textContent = 'CHALLENGE DONE: ' + c.text + ' +$' + c.reward;
+        }
+      }
+    },
+  };
+
+  return S;
 }
 
-// Returns the parsed save object, or null when there is none / it is corrupt.
-export function loadGame() {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (typeof data !== 'object' || data === null) return null;
-    return data;
-  } catch (e) {
-    return null;
-  }
-}
-
-export function clearSave() {
-  try {
-    localStorage.removeItem(SAVE_KEY);
-  } catch (e) {
-    // Storage unavailable — nothing to clear.
-  }
+// Called once from main.js in the shared init order. The object is
+// already complete from createState(); this keeps the slot warm for
+// anything that wants to hang extra runtime state off S later.
+export function init(S) {
+  if (!S._tick) S._tick = [];
+  if (!S.updates) S.updates = [];
+  return S;
 }

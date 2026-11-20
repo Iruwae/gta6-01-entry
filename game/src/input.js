@@ -1,116 +1,45 @@
-// Keyboard + mouse input. No imports.
-// Pointer-lock mouse-look when locked; click-drag look as a fallback so the
-// game stays playable in browsers / embeds where pointer lock is refused.
-export class Input {
-  constructor(canvas) {
-    this.canvas = canvas;
-    this.keys = new Set();
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    this.mouseDown = false;
-    this.aimDown = false; // right mouse held: aim (over-the-shoulder)
-    this._clicked = false;
-    this._justPressed = new Set(); // key codes pressed since last consumeKey
-    this._lastX = 0;
-    this._lastY = 0;
-    this._dragging = false;
+// SOLMAR BAY — keyboard + mouse state, read every frame by the loop.
+// Keys are tracked by e.code so layouts do not matter, and a held key
+// stays true across slow headless frames (the smoke test holds keys
+// for two seconds at a time on purpose).
+export function init(S) {
+  S.keys = S.keys || {};
+  S.mouse = S.mouse || { down: false, x: 0, y: 0 };
 
-    window.addEventListener('keydown', (e) => {
-      // Stop Space / arrows scrolling the page while playing.
-      if (
-        e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'ArrowDown' ||
-        e.code === 'ArrowLeft' || e.code === 'ArrowRight'
-      ) {
-        e.preventDefault();
-      }
-      this.keys.add(e.code);
-      this._justPressed.add(e.code);
-    });
-
-    window.addEventListener('keyup', (e) => {
-      this.keys.delete(e.code);
-    });
-
-    // Losing focus must not leave a key stuck down.
-    window.addEventListener('blur', () => {
-      this.keys.clear();
-      this.mouseDown = false;
-      this.aimDown = false;
-      this._dragging = false;
-    });
-
-    // Left button fires, right button aims; drag-look works on either.
-    canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) this.mouseDown = true;
-      if (e.button === 2) this.aimDown = true;
-      this._clicked = true;
-      this._dragging = true;
-      this._lastX = e.clientX;
-      this._lastY = e.clientY;
-    });
-    // Never let the browser menu steal a right-click aim.
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
-      if (e.button === 2) this.aimDown = false;
-      this._dragging = false;
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === canvas) {
-        // Pointer-locked: use raw movement deltas.
-        this.mouseDX += e.movementX || 0;
-        this.mouseDY += e.movementY || 0;
-      } else if (this._dragging) {
-        // Fallback: click-drag look.
-        this.mouseDX += e.clientX - this._lastX;
-        this.mouseDY += e.clientY - this._lastY;
-        this._lastX = e.clientX;
-        this._lastY = e.clientY;
-      }
-    });
-  }
-
-  // True while the named physical key (e.code, e.g. 'KeyW') is held.
-  down(code) {
-    return this.keys.has(code);
-  }
-
-  // Accumulated mouse movement since the last call; resets to zero.
-  takeMouse() {
-    const out = { dx: this.mouseDX, dy: this.mouseDY };
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    return out;
-  }
-
-  // True once per mouse press; consumes the flag.
-  consumeClick() {
-    const c = this._clicked;
-    this._clicked = false;
-    return c;
-  }
-
-  // True once per key press; consumes the flag (for toggles, not holds).
-  consumeKey(code) {
-    const hit = this._justPressed.has(code);
-    if (hit) this._justPressed.delete(code);
-    return hit;
-  }
-
-  // Request pointer lock. Must be called from a user gesture (click).
-  lockPointer() {
-    if (document.pointerLockElement !== this.canvas) {
-      try {
-        this.canvas.requestPointerLock();
-      } catch (e) {
-        // Pointer lock unavailable — drag-look fallback still works.
-      }
+  window.addEventListener('keydown', (e) => {
+    S.keys[e.code] = true;
+    // Any key skips the intro flyover while it is running.
+    if (S.cutscene && typeof S.cutscene.skip === 'function') {
+      S.cutscene.skip();
     }
-  }
+  });
+  window.addEventListener('keyup', (e) => {
+    S.keys[e.code] = false;
+  });
+  window.addEventListener('blur', () => {
+    for (const k of Object.keys(S.keys)) S.keys[k] = false;
+    S.mouse.down = false;
+  });
+  window.addEventListener('mousedown', (e) => {
+    S.mouse.down = true;
+    S.mouse.x = e.clientX;
+    S.mouse.y = e.clientY;
+  });
+  window.addEventListener('mouseup', () => {
+    S.mouse.down = false;
+  });
+  window.addEventListener('mousemove', (e) => {
+    S.mouse.x = e.clientX;
+    S.mouse.y = e.clientY;
+  });
 
-  get pointerLocked() {
-    return document.pointerLockElement === this.canvas;
-  }
+  S.input = {
+    down(code) {
+      return !!S.keys[code];
+    },
+    any(...codes) {
+      return codes.some((c) => !!S.keys[c]);
+    },
+  };
+  return S.input;
 }

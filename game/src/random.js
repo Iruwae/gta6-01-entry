@@ -1,9 +1,6 @@
-// Tiny deterministic PRNG helpers. No imports, no globals, no Math.random().
-// One seeded stream per system keeps generation reproducible: same seed,
-// same city, same spawns, every load (see procedural-gen skill).
-
-// mulberry32: small, fast, good-enough 32-bit PRNG.
-export function mulberry32(seed) {
+// SOLMAR BAY — one seeded stream so the city layout is identical
+// every boot. mulberry32: tiny, fast, and good enough for streets.
+function mulberry32(seed) {
   let a = seed >>> 0;
   return function next() {
     a |= 0;
@@ -14,48 +11,18 @@ export function mulberry32(seed) {
   };
 }
 
-// Float in [min, max).
-export function rand(rng, min, max) {
-  return min + rng() * (max - min);
-}
-
-// Integer in [min, max] inclusive.
-export function randInt(rng, min, max) {
-  return Math.floor(rand(rng, min, max + 1));
-}
-
-// One element from a non-empty array.
-export function pick(rng, arr) {
-  return arr[Math.floor(rng() * arr.length)];
-}
-
-// True with probability p (0..1).
-export function chance(rng, p) {
-  return rng() < p;
-}
-
-// One element, weighted by a parallel weights array (weights need not sum
-// to 1 — they are normalised here). Used for weighted spawns and drops.
-export function pickWeighted(rng, arr, weights) {
-  let total = 0;
-  for (const w of weights) total += Math.max(0, w);
-  if (total <= 0) return arr[0];
-  let roll = rng() * total;
-  for (let i = 0; i < arr.length; i++) {
-    roll -= Math.max(0, weights[i]);
-    if (roll <= 0) return arr[i];
-  }
-  return arr[arr.length - 1];
-}
-
-// In-place Fisher-Yates shuffle of a copy (the caller's array is untouched).
-export function shuffle(rng, arr) {
-  const out = arr.slice();
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const tmp = out[i];
-    out[i] = out[j];
-    out[j] = tmp;
-  }
-  return out;
+export function init(S) {
+  const seed = 20261120;
+  const rng = mulberry32(seed);
+  S.seed = seed;
+  S.rng = rng;
+  S.rand = (a, b) => {
+    if (a === undefined) return rng();
+    if (b === undefined) return rng() * a;
+    return a + rng() * (b - a);
+  };
+  S.randInt = (a, b) => Math.floor(a + rng() * (b - a + 1));
+  S.pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  S.chance = (p) => rng() < p;
+  return rng;
 }

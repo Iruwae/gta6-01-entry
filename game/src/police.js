@@ -1,270 +1,273 @@
-// SOLMAR BAY — police.js
-// Police brain (BT-lite + utility tactics) and the PD helicopter.
-// Original code, written fresh for round 4. No Rockstar / GTA assets.
-//
-// Design (ai-behavior-trees-utility-ai + enemy-ai + enemy-perception):
-// - Top level is a tiny state machine: PURSUIT / SEARCH / STANDOFF, one
-//   logical decision clock (5 Hz, staggered per car), transitions recorded
-//   with a reason so the roster can explain the brain, not just show it.
-// - Inside PURSUIT the tactic is a utility choice: PURSUIT vs RAMMING vs
-//   ROADBLOCK. Every input is normalized 0..1 through a curve before
-//   combining; a 0 vetoes; the running tactic gets a +0.08 hysteresis
-//   bonus (only on positive scores) so units do not flicker every tick.
-// - Perception writes facts: last-known position (LKP) with a timestamp.
-//   When no unit has been within 45 m of the player for 4 s the LKP goes
-//   stale and units switch to SEARCH: drive to the LKP and sweep it.
-//   The minimap search zone is drawn from this same evidence.
+// police.js — the wanted system on wheels. Turns S.heat into a star
+// level, spawns patrol cars up to that level, despawns them when the
+// player cools off, and drives each cop with a small utility brain:
+// PURSUIT / RAMMING / ROADBLOCK / SEARCH, picked from live facts.
+import * as THREE from '../vendor/three.module.min.js';
 
-import * as THREE from 'three';
-import { S } from './state.js';
-import { CFG } from './config.js';
+const SPAWN_RADIUS = 60;
+const TACTIC_SPEEDS = { PURSUIT: 26, RAMMING: 32, ROADBLOCK: 28, SEARCH: 14 };
 
-export const TACTICS = {
-  PURSUIT: { label: 'PURSUIT', color: '#ffb703' },
-  RAMMING: { label: 'RAMMING', color: '#ff5252' },
-  ROADBLOCK: { label: 'ROADBLOCK', color: '#4fc3f7' },
-  SEARCH: { label: 'SEARCH', color: '#b388ff' },
-};
+const _now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
-// Deterministic callsigns in spawn order: PD-01, PD-02, ...
-let _callsignN = 0;
-export function nextCallsign() {
-  _callsignN = (_callsignN % 99) + 1;
-  return 'PD-' + String(_callsignN).padStart(2, '0');
+function v3(x, y, z) {
+  if (THREE && THREE.Vector3) return new THREE.Vector3(x || 0, y || 0, z || 0);
+  const v = {
+    x: x || 0, y: y || 0, z: z || 0,
+    set(a, b, c) { this.x = a; this.y = b; this.z = c; return this; },
+    copy(o) { this.x = o.x; this.y = o.y; this.z = o.z; return this; },
+    clone() { return v3(this.x, this.y, this.z); },
+  };
+  return v;
 }
 
-// A RAMMING hit at 3+ stars spikes the heat (heat.js owns the drain; this
-// is the police side of the same rule — the PD holds a grudge at high
-// wanted, so every ram makes the chase harder to shake).
-export function ramHeatSpike() {
-  if (!S || (S.wanted || 0) < 3) return 0;
-  const bonus = (CFG && CFG.HEAT && CFG.HEAT.spikeBonus) || 5;
-  S.heat = Math.min(100, (S.heat || 0) + bonus);
-  return bonus;
-}
-
-function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
-
-export class PoliceBrain {
-  constructor(car) {
-    this.car = car;
-    this.tactic = 'PURSUIT';
-    this.state = 'PURSUIT'; // PURSUIT | SEARCH | STANDOFF
-    this.reason = 'spawn';
-    this.decideT = Math.random() * 0.2; // stagger the 5 Hz decision clock
-    this.blockPoint = null;
-    this.blockSetT = 0;
-  }
-
-  // One decision tick. Returns the movement intent for this frame:
-  // { tx, tz, targetSpeed, steerRate, holdHeading }.
-  decide(dt, playerPos, playerVel, playerHeading, playerSpeed) {
-    this.decideT -= dt;
-    if (this.decideT > 0) return this._intent(playerPos, playerVel, playerHeading, playerSpeed);
-    this.decideT = 0.2; // 5 Hz decision cadence, movement still every frame
-
-    const car = this.car;
-    const dx = playerPos.x - car.pos.x;
-    const dz = playerPos.z - car.pos.z;
-    const dist = Math.hypot(dx, dz);
-    const speed01 = clamp01(Math.abs(playerSpeed) / 30);
-
-    // --- perception: last-known position goes stale after 4 s unseen ---
-    const lk = S.lastKnown;
-    const stale = !lk || (S.time - lk.seenAt) > 4;
-    if (stale && lk) {
-      if (this.state !== 'SEARCH') {
-        this.state = 'SEARCH';
-        this.tactic = 'SEARCH';
-        this.reason = 'lkp_stale';
+function hookIntoLoop(S, fn) {
+  const wrapped = (dt) => { S.__b1External = _now(); fn(dt); };
+  S.__b1Fns = S.__b1Fns || [];
+  S.__b1Fns.push(fn);
+  if (typeof S.addUpdater === 'function') { try { S.addUpdater(wrapped); } catch (e) { /* main owns the loop */ } }
+  else if (Array.isArray(S.updaters)) S.updaters.push(wrapped);
+  else if (Array.isArray(S.systems)) S.systems.push(wrapped);
+  else if (Array.isArray(S.tickFns)) S.tickFns.push(wrapped);
+  else if (Array.isArray(S.updateFns)) S.updateFns.push(wrapped);
+  else if (Array.isArray(S.onUpdate)) S.onUpdate.push(wrapped);
+  else S.updaters = [wrapped];
+  if (!S.__b1DriverOn && typeof requestAnimationFrame !== 'undefined') {
+    S.__b1DriverOn = true;
+    let last = _now();
+    const step = () => {
+      const now = _now();
+      const dt = Math.min(Math.max((now - last) / 1000, 0), 0.05);
+      last = now;
+      if (!S.__b1External || now - S.__b1External > 3000) {
+        for (const f of (S.__b1Fns || [])) { try { f(dt); } catch (e) { /* keep the loop alive */ } }
       }
-      return this._intent(playerPos, playerVel, playerHeading, playerSpeed);
-    }
-
-    // --- utility scoring (all inputs 0..1) ---
-    // Each tactic owns a clear win zone: RAMMING near + slow, ROADBLOCK
-    // fast + mid-range, PURSUIT everywhere else. PURSUIT's base is kept
-    // low (0.1–0.6) so the specialists can actually win their zones.
-    const pursuit = 0.1 + 0.5 * (1 - clamp01(dist / 80));
-    // RAMMING: near + slow player. Vetoed at range (0) or at high speed.
-    const ram = (1 - clamp01(dist / 15)) * (1 - speed01 * 0.5);
-    // ROADBLOCK: fast player at mid range — cut them off, don't chase.
-    const block = speed01 * (1 - clamp01(Math.abs(dist - 35) / 30));
-
-    const scores = { PURSUIT: pursuit, RAMMING: ram, ROADBLOCK: block };
-    // Hysteresis: +0.08 to the running tactic, positive scores only.
-    if (scores[this.tactic] > 0) scores[this.tactic] += 0.08;
-
-    let best = 'PURSUIT';
-    let bestScore = -1;
-    for (const k of ['PURSUIT', 'RAMMING', 'ROADBLOCK']) {
-      if (scores[k] > bestScore) { bestScore = scores[k]; best = k; }
-    }
-    if (best !== this.tactic) {
-      this.tactic = best;
-      this.state = best === 'ROADBLOCK' ? 'STANDOFF' : 'PURSUIT';
-      this.reason = 'utility_' + best.toLowerCase();
-      if (best === 'ROADBLOCK') this.blockSetT = S.time;
-    }
-    if (this.tactic === 'ROADBLOCK') {
-      // Aim 28 m ahead of the player's heading — the interception point.
-      const fx = Math.sin(playerHeading);
-      const fz = Math.cos(playerHeading);
-      this.blockPoint = {
-        x: THREE.MathUtils.clamp(playerPos.x + fx * 28, -145, 145),
-        z: THREE.MathUtils.clamp(playerPos.z + fz * 28, -145, 145),
-      };
-    }
-    return this._intent(playerPos, playerVel, playerHeading, playerSpeed);
-  }
-
-  _intent(playerPos, playerVel, playerHeading) {
-    const car = this.car;
-    if (this.state === 'SEARCH' && S.lastKnown) {
-      // Sweep the last-known position: drive to it, then orbit slowly.
-      const lk = S.lastKnown;
-      const d = Math.hypot(lk.x - car.pos.x, lk.z - car.pos.z);
-      if (d > 10) return { tx: lk.x, tz: lk.z, targetSpeed: 18, steerRate: 1.6 };
-      // Orbit the LKP at ~12 m.
-      const ang = Math.atan2(car.pos.x - lk.x, car.pos.z - lk.z) + 0.5;
-      return {
-        tx: lk.x + Math.sin(ang) * 12,
-        tz: lk.z + Math.cos(ang) * 12,
-        targetSpeed: 12, steerRate: 1.6,
-      };
-    }
-    if (this.tactic === 'ROADBLOCK' && this.blockPoint) {
-      const bp = this.blockPoint;
-      const d = Math.hypot(bp.x - car.pos.x, bp.z - car.pos.z);
-      if (d > 7) return { tx: bp.x, tz: bp.z, targetSpeed: 26, steerRate: 1.6 };
-      // Hold the block: stop across the road, facing perpendicular.
-      return {
-        tx: car.pos.x, tz: car.pos.z, targetSpeed: 0, steerRate: 2.0,
-        holdHeading: playerHeading + Math.PI / 2,
-      };
-    }
-    if (this.tactic === 'RAMMING') {
-      // Lead the player by 0.4 s of their velocity and hit hard.
-      return {
-        tx: playerPos.x + playerVel.x * 0.4,
-        tz: playerPos.z + playerVel.z * 0.4,
-        targetSpeed: 30, steerRate: 2.2,
-      };
-    }
-    // PURSUIT (default): chase the player, ease off when on top of them.
-    const dist = Math.hypot(playerPos.x - car.pos.x, playerPos.z - car.pos.z);
-    return {
-      tx: playerPos.x, tz: playerPos.z,
-      targetSpeed: dist > 6 ? 26 : 14, steerRate: 1.6,
+      requestAnimationFrame(step);
     };
+    requestAnimationFrame(step);
   }
+  return wrapped;
 }
 
-// ---- PD helicopter -------------------------------------------------------
-// One heli, only at 3+ stars. Circles the player at ~32 m radius, 34 m up,
-// main rotor spinning, red beacon blinking, searchlight cone pinned on the
-// player. Purely presentational pressure — it does not damage the player.
+export function wantedFor(heat) {
+  const h = heat || 0;
+  if (h >= 80) return 4;
+  if (h >= 60) return 3;
+  if (h >= 40) return 2;
+  if (h >= 20) return 1;
+  return 0;
+}
 
-export class Helicopter {
-  constructor(scene) {
-    this.scene = scene;
-    this.angle = Math.random() * Math.PI * 2;
-    this.rotorSpin = 0;
-    this.blinkT = 0;
+function angleToward(from, to, maxStep) {
+  let d = to - from;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  if (d > maxStep) return from + maxStep;
+  if (d < -maxStep) return from - maxStep;
+  return to;
+}
 
-    const body = new THREE.Group();
-    const navy = new THREE.MeshStandardMaterial({ color: 0x1a2a55, roughness: 0.5, metalness: 0.4 });
-    const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5, metalness: 0.3 });
-    const glass = new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.06, metalness: 0.9, envMapIntensity: 1.5 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x181c22, roughness: 0.8, metalness: 0.2 });
-
-    const hull = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 4.2), navy);
-    hull.position.y = 0;
-    body.add(hull);
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.24, 0.3, 4.24), white);
-    stripe.position.y = 0.1;
-    body.add(stripe);
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.0, 1.2), glass);
-    nose.position.set(0, 0.1, 2.4);
-    body.add(nose);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 4.6), navy);
-    tail.position.set(0, 0.35, -4.0);
-    body.add(tail);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.6, 1.1), navy);
-    fin.position.set(0, 1.0, -6.0);
-    body.add(fin);
-    // Skids.
-    for (const sx of [-1, 1]) {
-      const skid = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 3.4), dark);
-      skid.position.set(sx * 0.9, -0.95, 0.3);
-      body.add(skid);
+function buildPoliceMesh(S, car) {
+  if (!THREE || !S.scene) return;
+  try {
+    const g = new THREE.Group();
+    const white = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.35, metalness: 0.4 });
+    const black = new THREE.MeshStandardMaterial({ color: 0x14181d, roughness: 0.4, metalness: 0.5 });
+    const glass = new THREE.MeshStandardMaterial({ color: 0x0e1a24, roughness: 0.15, metalness: 0.8 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.62, 4.2), white);
+    body.position.y = 0.55;
+    const doors = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.4, 2.0), black);
+    doors.position.y = 0.55;
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.55, 2.0), glass);
+    cabin.position.set(0, 1.05, -0.15);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.14, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5 }));
+    bar.position.set(0, 1.4, -0.15);
+    const red = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.12, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xaa0000 }));
+    red.position.set(-0.28, 1.48, -0.15);
+    const blue = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.12, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x2244ff, emissive: 0x0000aa }));
+    blue.position.set(0.28, 1.48, -0.15);
+    const tyre = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.95 });
+    const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.28, 12);
+    wheelGeo.rotateZ(Math.PI / 2);
+    for (const [wx, wz] of [[-0.95, 1.3], [0.95, 1.3], [-0.95, -1.3], [0.95, -1.3]]) {
+      const w = new THREE.Mesh(wheelGeo, tyre);
+      w.position.set(wx, 0.36, wz);
+      g.add(w);
     }
-    // Main rotor: two-blade bar + translucent blur disc.
-    this.rotor = new THREE.Group();
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(9.5, 0.08, 0.45), dark);
-    this.rotor.add(blade);
-    const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(4.8, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false }),
-    );
-    disc.rotation.x = -Math.PI / 2;
-    this.rotor.add(disc);
-    this.rotor.position.y = 1.05;
-    body.add(this.rotor);
-    // Tail rotor.
-    this.tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.6, 0.3), dark);
-    this.tailRotor.position.set(0.5, 0.9, -6.1);
-    body.add(this.tailRotor);
-    // Red beacon.
-    this.beaconMat = new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff0000, emissiveIntensity: 2 });
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), this.beaconMat);
-    beacon.position.set(0, 1.0, -1.2);
-    body.add(beacon);
-    // Searchlight cone: apex at the heli, base on the player. Geometry
-    // height 1, scaled to the heli->player distance each frame; -Y maps
-    // onto the heli->player direction so the apex stays at the heli.
-    const coneGeo = new THREE.ConeGeometry(6, 1, 16, 1, true);
-    this.coneMat = new THREE.MeshBasicMaterial({
-      color: 0xfff2b0, transparent: true, opacity: 0.09,
-      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-    });
-    this.cone = new THREE.Mesh(coneGeo, this.coneMat);
-    body.add(this.cone);
+    g.add(body, doors, cabin, bar, red, blue);
+    g.position.copy(car.pos);
+    g.rotation.y = car.heading;
+    S.scene.add(g);
+    car.mesh = g;
+    car._lightRed = red;
+    car._lightBlue = blue;
+  } catch (e) { /* visuals are optional; logic must not die */ }
+}
 
-    this.mesh = body;
-    this.pos = body.position; // pos IS mesh.position (contract)
-    this.pos.set(0, 34, 0);
-    scene.add(body);
+export function init(S) {
+  if (S.__b1PoliceInit) return S.policeUpdate || null;
+  S.__b1PoliceInit = true;
+  if (!Array.isArray(S.cars)) S.cars = [];
+  if (!Array.isArray(S.cops)) S.cops = [];
+  if (typeof S.wanted !== 'number') S.wanted = 0;
+  if (typeof S.__pdNext !== 'number') S.__pdNext = 1;
+
+  function makeBrain(car) {
+    const brain = {
+      tactic: 'PURSUIT',
+      state: 'PURSUIT',
+      decideT: 0,
+      target: { x: 0, z: 0 },
+      targetSpeed: TACTIC_SPEEDS.PURSUIT,
+      // Utility pick, in priority order: a stale last-known position
+      // means the trail went cold; a slow player up close gets rammed;
+      // a fast player at mid range gets cut off ahead; otherwise chase.
+      decide(dt, playerPos, playerVel, playerHeading, playerSpeed) {
+        const px = playerPos.x;
+        const pz = playerPos.z;
+        const dx = px - car.pos.x;
+        const dz = pz - car.pos.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const lkp = S.lastKnown;
+        const stale = lkp && (S.time || 0) - lkp.seenAt > 8;
+        let pick = 'PURSUIT';
+        if (stale) pick = 'SEARCH';
+        else if (dist < 10 && playerSpeed < 5) pick = 'RAMMING';
+        else if (playerSpeed > 15 && dist >= 20 && dist <= 50) pick = 'ROADBLOCK';
+        else pick = 'PURSUIT';
+        brain.tactic = pick;
+        brain.state = pick;
+        if (pick === 'ROADBLOCK') {
+          const vx = (playerVel && playerVel.x) || 0;
+          const vz = (playerVel && playerVel.z) || 0;
+          brain.target = { x: px + vx * 1.5, z: pz + vz * 1.5 };
+        } else if (pick === 'SEARCH' && lkp) {
+          brain.target = { x: lkp.x, z: lkp.z };
+        } else {
+          brain.target = { x: px, z: pz };
+        }
+        brain.targetSpeed = TACTIC_SPEEDS[pick];
+      },
+    };
+    return brain;
   }
 
-  update(dt, playerPos) {
-    this.angle += dt * 0.22;
-    const R = 32;
-    this.pos.set(
-      playerPos.x + Math.sin(this.angle) * R,
-      34,
-      playerPos.z + Math.cos(this.angle) * R,
-    );
-    // Face along the orbit tangent.
-    this.mesh.rotation.y = this.angle + Math.PI / 2;
-    this.rotorSpin += dt * 28;
-    this.rotor.rotation.y = this.rotorSpin;
-    this.tailRotor.rotation.x = this.rotorSpin * 1.7;
-    this.blinkT += dt;
-    this.beaconMat.emissiveIntensity = (Math.sin(this.blinkT * 7) > 0) ? 2.6 : 0.15;
-
-    // Searchlight: from heli belly to the player.
-    const dx = playerPos.x - this.pos.x;
-    const dy = 0 - this.pos.y;
-    const dz = playerPos.z - this.pos.z;
-    const dist = Math.hypot(dx, dy, dz) || 1;
-    const dir = new THREE.Vector3(dx / dist, dy / dist, dz / dist);
-    this.cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
-    this.cone.scale.set(1, dist, 1);
-    this.cone.position.set(dx / 2, dy / 2, dz / 2);
+  function spawnCop() {
+    const p = S.player;
+    if (!p) return;
+    const angle = Math.random() * Math.PI * 2 + S.cops.length * 1.9; // fan fresh units out
+    const x = Math.max(-175, Math.min(175, p.pos.x + Math.cos(angle) * SPAWN_RADIUS));
+    const z = Math.max(-175, Math.min(175, p.pos.z + Math.sin(angle) * SPAWN_RADIUS));
+    const num = S.__pdNext;
+    S.__pdNext = num >= 99 ? 1 : num + 1;
+    const car = {
+      kind: 'sedan',
+      pos: v3(x, 0, z),
+      heading: Math.atan2(p.pos.x - x, p.pos.z - z),
+      speed: 0,
+      health: 100,
+      maxHealth: 100,
+      tune: { engine: 0, armor: 0, paint: 0, nos: false },
+      color: 0xf2f2ee,
+      mesh: null,
+      aiPolice: true,
+      brain: null,
+      callsign: 'PD-' + String(num).padStart(2, '0'),
+      traffic: null,
+      perf() { return 30 + this.tune.engine * 3 + (this.tune.nos ? 5 : 0); },
+    };
+    car.brain = makeBrain(car);
+    car.brain.target = { x: p.pos.x, z: p.pos.z };
+    buildPoliceMesh(S, car);
+    S.cars.push(car);
+    S.cops.push(car);
   }
 
-  remove() {
-    if (this.scene && this.mesh) this.scene.remove(this.mesh);
+  function despawnCop(car) {
+    if (car.mesh && S.scene) {
+      try { S.scene.remove(car.mesh); } catch (e) { /* already gone */ }
+    }
+    car.mesh = null;
+    const ci = S.cars.indexOf(car);
+    if (ci >= 0) S.cars.splice(ci, 1);
+    const pi = S.cops.indexOf(car);
+    if (pi >= 0) S.cops.splice(pi, 1);
   }
+
+  function update(rawDt) {
+    const dt = Math.min(Math.max(rawDt || 0.016, 0), 0.05);
+    const p = S.player;
+
+    // Wanted always follows heat, whoever writes the heat.
+    S.wanted = wantedFor(S.heat || 0);
+    const live = (S.mode === undefined || S.mode === 'playing') && !S.cutscene && !!p;
+    if (!live) return;
+
+    // The cops always know where the player was last seen — until the
+    // trail goes cold and the brain flips to SEARCH.
+    if (S.wanted > 0) {
+      S.lastKnown = { x: p.pos.x, z: p.pos.z, seenAt: S.time || 0 };
+    }
+
+    if (S.wanted === 0) {
+      // Cooled off: every patrol car leaves, from both lists at once.
+      for (const cop of [...S.cops]) despawnCop(cop);
+      for (const car of [...S.cars]) if (car.aiPolice) despawnCop(car);
+      return;
+    }
+
+    // Reconcile: S.cops must hold exactly the aiPolice cars in S.cars.
+    for (const car of [...S.cars]) {
+      if (car.aiPolice && !S.cops.includes(car)) S.cops.push(car);
+    }
+    for (const cop of [...S.cops]) {
+      if (!S.cars.includes(cop)) S.cops.splice(S.cops.indexOf(cop), 1);
+    }
+
+    while (S.cops.length < S.wanted) spawnCop();
+
+    const pvx = (p.vel && p.vel.x) || 0;
+    const pvz = (p.vel && p.vel.z) || 0;
+    const pSpeed = (typeof p.speed === 'number') ? p.speed
+      : (S.car ? Math.abs(S.car.speed) : 0);
+
+    for (const cop of S.cops) {
+      if (!cop.mesh && S.scene) buildPoliceMesh(S, cop);
+      // Re-decide roughly twice a second of game time.
+      cop.brain.decideT -= dt;
+      if (cop.brain.decideT <= 0) {
+        cop.brain.decide(dt, p.pos, { x: pvx, z: pvz }, p.heading, pSpeed);
+        cop.brain.decideT = 0.5;
+      }
+      // Drive toward the brain's target point.
+      const tx = cop.brain.target.x - cop.pos.x;
+      const tz = cop.brain.target.z - cop.pos.z;
+      const dist = Math.sqrt(tx * tx + tz * tz);
+      const wantHeading = Math.atan2(tx, tz);
+      cop.heading = angleToward(cop.heading, wantHeading, 2.4 * dt);
+      const wantSpeed = dist < 4 ? Math.min(cop.brain.targetSpeed, 6) : cop.brain.targetSpeed;
+      const accel = 13 * dt;
+      if (cop.speed < wantSpeed) cop.speed = Math.min(wantSpeed, cop.speed + accel);
+      else if (cop.speed > wantSpeed) cop.speed = Math.max(wantSpeed, cop.speed - accel * 1.4);
+      cop.pos.x += Math.sin(cop.heading) * cop.speed * dt;
+      cop.pos.z += Math.cos(cop.heading) * cop.speed * dt;
+      cop.pos.x = Math.max(-185, Math.min(185, cop.pos.x));
+      cop.pos.z = Math.max(-185, Math.min(185, cop.pos.z));
+      if (cop.mesh) {
+        cop.mesh.position.copy(cop.pos);
+        cop.mesh.rotation.y = cop.heading;
+        // Alternating light bar, four flashes a second.
+        const phase = Math.floor((S.time || 0) * 4) % 2 === 0;
+        if (cop._lightRed) cop._lightRed.visible = phase;
+        if (cop._lightBlue) cop._lightBlue.visible = !phase;
+      }
+    }
+  }
+
+  const wrapped = hookIntoLoop(S, update);
+  S.policeUpdate = wrapped;
+  S.wantedFor = wantedFor;
+  return wrapped;
 }

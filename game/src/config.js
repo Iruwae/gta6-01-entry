@@ -1,137 +1,136 @@
-// SOLMAR BAY — central tuning knobs. One place to balance the whole game.
-// All values are original to this project; nothing here comes from any other game.
-export const CFG = {
-  CITY: {
-    size: 300,        // playable ground plane, x/z in [-150, 150]
-    roadGap: 60,      // distance between adjacent road centre lines
-    roadWidth: 12,    // road surface width (roadHalf = 6)
-    blockHalf: 24,    // half-size of a city block (block spans centre +/- 24)
-    bounds: 150,      // hard clamp for player / cars
-  },
+// SOLMAR BAY — shared tuning table for the round-5 rebuild.
+// Every number the game balances on lives here so the other modules
+// stay small and read the same truth: prices, map anchors, radio,
+// vehicle specs, the story spine and the daily-challenge pool.
+export function init(S) {
+  const shopItems = [
+    { id: 'burger', name: 'Burger', price: 15, heal: 25, blurb: 'Double stack, extra pickles.' },
+    { id: 'soda', name: 'Soda', price: 5, heal: 8, blurb: 'Ice cold, too sweet.' },
+    { id: 'pistol-ammo', name: 'Pistol Ammo', price: 20, weapon: 'PISTOL', ammo: 12, blurb: 'A fresh box of 9mm.' },
+    { id: 'smg-ammo', name: 'SMG Ammo', price: 35, weapon: 'SMG', ammo: 30, blurb: 'Spray now, ask later.' },
+    { id: 'shotgun-shells', name: 'Shotgun Shells', price: 30, weapon: 'SHOTGUN', ammo: 6, blurb: 'Six ways to end a talk.' },
+    { id: 'rifle-ammo', name: 'Rifle Ammo', price: 45, weapon: 'RIFLE', ammo: 20, blurb: 'Long reach, clean groups.' },
+    { id: 'medkit', name: 'Medkit', price: 40, heal: 60, blurb: 'Bandages, pills, stubborn hope.' },
+    { id: 'armor', name: 'Body Armor', price: 60, armor: 50, blurb: 'Stops more than harsh words.' },
+    { id: 'repair', name: 'Car Repair', price: 50, repair: 100, blurb: 'Full service, no questions.' },
+  ];
 
-  PLAYER: {
-    walkSpeed: 6,     // m/s on foot
-    runSpeed: 9,      // m/s while sprinting
-    health: 100,
-  },
+  const radioStations = [
+    { name: 'SUNSET 88', tracks: ['Golden Hour — The Palms', 'Last Light — Coral Drive', 'Amber Sky — Rio Mesa'] },
+    { name: 'BAYLINE FM', tracks: ['Neon Tide — Marina Lights', 'Cruise Control — Velvet Static', 'Boardwalk — The Gulls'] },
+    { name: 'VICE 101', tracks: ['Hot Asphalt — Chrome Hearts', 'Night Shift — Dollar Bill', 'Redline — Foxy'] },
+    { name: 'PIER RADIO', tracks: ['Salt Air — The Bait Shop', 'Tide Out — Old Marlin', 'Gull Song — Harbor Choir'] },
+    { name: 'STATIC AGE', tracks: ['Faded Posters — The Rewinds', 'Cassette Summer — Tapedeck', 'Dial Tone — Rotary'] },
+    { name: 'NIGHT DRIVE', tracks: ['Midnight Merge — Low Beam', 'Headlight Hymn — The Offramp', 'Empty Freeway — Ghost Lane'] },
+  ];
 
-  CAR: {
-    accel: 16,        // m/s^2 forward
-    brake: 32,        // m/s^2 braking / reversing
-    maxSpeed: 30,     // m/s, regular traffic cars
-    sportMax: 36,     // m/s, sport cars
-    steerMax: 0.55,   // radians of front-wheel steer at standstill
-  },
+  const districts = [
+    { id: 'beach', name: 'BEACH' },
+    { id: 'strip', name: 'THE STRIP' },
+    { id: 'harbor', name: 'HARBOR' },
+    { id: 'uptown', name: 'UPTOWN' },
+    { id: 'downtown', name: 'DOWNTOWN' },
+    { id: 'oldtown', name: 'OLD TOWN' },
+    { id: 'industrial', name: 'INDUSTRIAL' },
+  ];
 
-  WANTED: {
-    maxStars: 5,
-    decayPerSec: 2.5, // heat drains this fast while laying low
-    heatPerCrime: {
-      steal: 25,      // jacking a car
-      kill: 30,       // taking out a pedestrian
-      shoot: 8,       // firing a shot in public
-      hitPed: 20,     // running a pedestrian over
+  const missions = [
+    { id: 'm1', title: 'First Wheels', giver: 'LENA CRUZ', brief: 'Borrow the garage sport car and shake it down on the strip.' },
+    { id: 'm2', title: "Marco's Errand", giver: 'MARCO SOLIS', brief: 'Run a package across town before the sun is fully down.' },
+    { id: 'm3', title: 'Harbor Lights', giver: 'LENA CRUZ', brief: 'Scout the docks and photograph the night shift roster.' },
+    { id: 'm4', title: 'The Long Way Home', giver: 'MARCO SOLIS', brief: 'Lose a tail through Old Town without firing a shot.' },
+    { id: 'm5', title: 'Payday at the Pier', giver: 'VIC TORRES', brief: 'Hit the pier job with Lena riding shotgun. Do not miss.' },
+    { id: 'm6', title: "Vic's First Job", giver: 'VIC TORRES', brief: 'Boost a ride and bring it to the yard. Clean, no heat.' },
+    { id: 'm7', title: 'The Interceptor', giver: 'VIC TORRES', brief: 'Outrun the PD interceptor unit across the harbor bridge.' },
+    { id: 'm8', title: 'Crew Escort', giver: 'LENA CRUZ', brief: 'Drive the crew through a roadblock and keep everyone breathing.' },
+    { id: 'm9', title: 'The Big Score', giver: 'VIC TORRES', brief: 'The uptown vault job. Everything rides on this one.' },
+    { id: 'm10', title: 'Solmar Nights', giver: 'LENA CRUZ', brief: 'One last run at dawn. Leave the bay or own it.' },
+  ];
+
+  const vehicles = {
+    sedan: { kind: 'sedan', maxHealth: 100, perf: 26, topSpeed: 26, accel: 9, label: 'Sedan' },
+    sport: { kind: 'sport', maxHealth: 100, perf: 32, topSpeed: 34, accel: 13, label: 'Sport Coupe' },
+    bike: { kind: 'bike', maxHealth: 60, perf: 38, topSpeed: 38, accel: 16, label: 'Street Bike' },
+    pickup: { kind: 'pickup', maxHealth: 130, perf: 28, topSpeed: 28, accel: 10, label: 'Pickup Truck' },
+  };
+
+  S.config = {
+    startCash: 120,
+    startHealth: 100,
+    clockStartMinutes: 18 * 60 + 28,
+    timeRate: 1,
+    nightStartMinutes: 122,
+    nightFullMinutes: 212,
+    sprayBooth: { x: -90, z: -58, r: 9, price: 150 },
+    payNSprayPrice: 150,
+    shopItems,
+    radioStations,
+    districts,
+    missions,
+    vehicles,
+    race: {
+      start: { x: -60, z: -60 },
+      gates: [
+        { x: 60, z: -60 },
+        { x: 60, z: 60 },
+        { x: -60, z: 60 },
+        { x: -60, z: -60 },
+      ],
+      prize: 300,
     },
-  },
-
-  // Cash paid out when each story mission is completed, in order.
-  MISSIONS: [500, 800, 1200, 2500, 4000, 5500, 7000, 9000, 12000, 20000],
-
-  // Round 5: day/night cycle (daynight.js) — 1 game hour = 60 s, so the
-  // 18:30 sunset slides into night after ~5 minutes of play.
-  DAY: {
-    hourSecs: 60,
-    nightFrom: 20,   // game hour the night ramp completes
-    dawnTo: 7,       // game hour the night ramp ends
-  },
-
-  // Round 5: crew companion (crew.js) — Lena follows, rides, shoots.
-  CREW: {
-    followDist: 6,
-    speed: 7,
-    shootRange: 30,
-    damage: 12,
-    cooldown: 1.2,
-  },
-
-  // Round 5: side activities (side.js) — race prize, taxi fare, packages.
-  SIDE: {
-    racePrize: 300,
-    taxiBase: 80,
-    taxiTime: 90,
-    packageCash: 50,
-    packageCount: 12,
-  },
-
-  // Round 5: SkyWatch news chopper (heli2.js) — lower and closer than
-  // the PD heli so it reads in the chase-camera frame.
-  HELI: {
-    skyWatchStars: 2,   // stars needed before SKY-7 joins the chase
-    orbitRadius: 18,    // metres from the player
-    orbitHeight: 17,    // metres up
-    tiltGain: 0.45,     // camera pitch lift at full overhead
-  },
-
-  // Round 5: heat depth (heat.js) — lay-low drain, hideouts, pay-n-spray.
-  HEAT: {
-    layLowQuietSecs: 8, // no crime for this long + moving slowly = 3x drain
-    layLowMult: 3,
-    speedHalvesDrainAbove: 15, // m/s: flooring it halves the drain
-    hideoutHoldSecs: 3, // stand inside a hideout this long to shed a star
-    hideoutShed: 30,    // heat shed per hideout use (one star)
-    hideoutRestSecs: 60,
-    sprayCost: 150,
-    sprayShed: 60,      // two stars per repaint
-    spikeBonus: 5,      // extra heat for a crime at 3+ stars
-  },
-
-  // Round 5: ambient life (ambient.js) — archetypes, gulls, rush hour.
-  AMBIENT: {
-    gulls: 5,
-    rushWindows: [[18, 19], [7, 8]], // game-clock hours that pack the roads
-    rushExtraCars: 6,
-    archetypeCap: 20,   // ambient peds alive at once (top-up ceiling)
-  },
-
-  // Round 5: mission replay (menu.js) — replays pay a repeat rate.
-  MENU: {
-    replayPayRate: 0.5,
-  },
-
-  // Radio stations: name + genre + a deterministic track rotation.
-  // The track index is floor(S.time / 45) % tracks.length — no network,
-  // no audio change, the display (and Q to switch) is the feature.
-  RADIO: [
-    {
-      name: 'SOLMAR FM 88.1', genre: 'Neon Drive',
-      tracks: ['Midnight Overdrive — The Palms', 'Sunset Strip — Vega Lights', "Cruisin' 101 — Gold Coast"],
+    taxi: {
+      stand: { x: 68, z: 60 },
+      minFare: 80,
+      destinations: [
+        { x: 120, z: 120 },
+        { x: -120, z: -120 },
+        { x: 0, z: 150 },
+        { x: -140, z: 40 },
+        { x: 140, z: -100 },
+      ],
     },
-    {
-      name: 'BAYLINE 102.5', genre: 'Harbor Nights',
-      tracks: ['Dockside Blues — Marina Ray', 'Foghorn — The Tides', 'Night Shift — Crane Kings'],
-    },
-    {
-      name: 'WAVE 95.3', genre: 'Sunset Cruise',
-      tracks: ['Golden Hour — Sol Mar', 'Boardwalk — Summer Static', 'Flamingo Nights — DJ Rosa'],
-    },
-  ],
-
-  COLORS: {
-    sky: 0x2a2350, // deep dusk indigo (sky dome covers the background)
-    sun: 0xffa04d,
-    asphalt: 0x33373d,
-    sidewalk: 0x8a8578,
-    sand: 0xd9b06a,
-    water: 0x14455e,
-    // Sun-bleached pastel building facades (warm sunset light does the rest).
-    buildings: [
-      0xf2c9a0, 0xf7e6c4, 0xd9a08c, 0xa8c8d8, 0xf0d060,
-      0xc9b8d8, 0x9ac8a8, 0xe8a8b0, 0xd8d0c0, 0x88b8c8,
+    packages: [
+      { x: -120, z: 120 },
+      { x: 120, z: -120 },
+      { x: -120, z: -120 },
+      { x: 150, z: 30 },
+      { x: -150, z: 30 },
+      { x: 30, z: 150 },
+      { x: -30, z: -150 },
+      { x: 150, z: -30 },
+      { x: -150, z: -90 },
+      { x: 90, z: 150 },
+      { x: -90, z: 150 },
+      { x: 0, z: -150 },
     ],
-    // Traffic paint jobs.
-    cars: [
-      0xd83a2e, 0x2e6fd8, 0xf2c200, 0x2ed573, 0xf2f2f2,
-      0x222226, 0xd86a1e, 0x7e3fd8, 0x20b8a8, 0xc0c8d0,
+    packageReward: 50,
+    anchors: {
+      garage: { x: -90, z: -66 },
+      mart: { x: -72, z: -60 },
+      safehouse: { x: 120, z: -120 },
+      fenceYard: { x: 110, z: 138 },
+      bikePark: { x: -88, z: -64 },
+      sportPark: { x: -102, z: -64 },
+      pier: { x: 0, z: 165 },
+    },
+    fenceBase: { bike: 220, sport: 480, pickup: 350, sedan: 300 },
+    respectRanks: [
+      { min: 0, title: 'NOBODY' },
+      { min: 100, title: 'STREET HUSTLER' },
+      { min: 400, title: 'SHOT CALLER' },
+      { min: 900, title: 'BAY LEGEND' },
     ],
-  },
-};
+    challenges: [
+      { id: 'ch-race', stat: 'racesWon', target: 1, reward: 150, text: 'Win a street race' },
+      { id: 'ch-fare', stat: 'faresDone', target: 2, reward: 120, text: 'Finish 2 taxi fares' },
+      { id: 'ch-pack', stat: 'packages', target: 3, reward: 100, text: 'Collect 3 packages' },
+    ],
+  };
+
+  // Seed the mission spine so start(i) works even before the mission
+  // module replaces the list with its live definitions.
+  if (S.missions && Array.isArray(S.missions.list) && S.missions.list.length === 0) {
+    S.missions.list = missions.map((m) => ({ ...m }));
+  }
+  return S.config;
+}
