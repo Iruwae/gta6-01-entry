@@ -1,9 +1,10 @@
-// Chase-shot staging for SOLMAR BAY. Tops the wallet to $500, disarms
-// the pay-n-spray, puts the player downtown, and holds the heat at 90
-// until the helicopter is overhead with at least 3 cops on the roster.
+// SOLMAR BAY — chase-shot staging for tools/shots.mjs.
+// Tops the wallet to $500, disarms the pay-n-spray, puts the player
+// downtown at (0,0), and holds heat at 90 until the helicopter is
+// overhead (within 40 m) with at least 3 cops on the roster.
 export const CHASE_STAGING = {
   walletTopUp: 500,
-  downtown: { x: 0, y: 0, z: 0 },
+  downtown: [0, 0, 0],
   heat: 90,
   heliOverheadDistance: 40,
   minCops: 3,
@@ -15,41 +16,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function stageChaseShot(page, options = {}) {
   const cfg = { ...CHASE_STAGING, ...options };
-  await page.evaluate((c) => {
-    const S = window.__solmar.S;
-    S.cash = c.walletTopUp;
-    if (S.heatDirector) S.heatDirector.sprayBooth.armed = false;
-    S.player.pos.set(c.downtown.x, c.downtown.y, c.downtown.z);
-    S.heat = c.heat;
-  }, cfg);
-
   const t0 = Date.now();
-  let last = { wanted: 0, heat: 0, cops: 0, heli: false, heliDist: -1, rosterRows: 0 };
+  let state = null;
   while (Date.now() - t0 < cfg.settleTimeoutMs) {
-    // Re-assert the heat: the booth and the natural cooldown fight it.
-    await page.evaluate((h) => {
-      window.__solmar.S.heat = h;
-    }, cfg.heat);
-    await sleep(cfg.reassertEveryMs);
-    last = await page.evaluate(() => {
+    state = await page.evaluate((c) => {
       const S = window.__solmar.S;
-      const cops = S.cars.filter((c) => c.aiPolice);
-      let heliDist = -1;
+      S.cash = c.walletTopUp;
+      if (S.heatDirector) S.heatDirector.sprayBooth.armed = false;
+      S.player.pos.set(c.downtown[0], c.downtown[1], c.downtown[2]);
+      S.heat = c.heat;
+      const cops = (S.cars || []).filter((car) => car.aiPolice);
+      let heliDist = null;
       if (S.heli) {
-        heliDist = Math.hypot(S.heli.pos.x - S.player.pos.x, S.heli.pos.z - S.player.pos.z);
+        const dx = S.heli.pos.x - S.player.pos.x;
+        const dz = S.heli.pos.z - S.player.pos.z;
+        heliDist = Math.hypot(dx, dz);
       }
       return {
         wanted: S.wanted,
         heat: S.heat,
         cops: cops.length,
         heli: !!S.heli,
-        heliDist: heliDist < 0 ? -1 : Math.round(heliDist),
+        heliDist,
         rosterRows: document.querySelectorAll('#roster .roster-row').length,
       };
-    });
-    if (last.heli && last.heliDist >= 0 && last.heliDist <= cfg.heliOverheadDistance && last.cops >= cfg.minCops) {
-      return last;
+    }, cfg);
+    if (
+      state.heli &&
+      state.heliDist !== null &&
+      state.heliDist <= cfg.heliOverheadDistance &&
+      state.cops >= cfg.minCops &&
+      state.rosterRows >= cfg.minCops
+    ) {
+      break;
     }
+    await sleep(cfg.reassertEveryMs);
   }
-  return last;
+  return state;
 }

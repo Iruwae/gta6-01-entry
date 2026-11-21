@@ -1,17 +1,21 @@
-// The dialogue box for SOLMAR BAY. The queue itself lives in the boot
-// hub (main.js) so briefings can fire before the modules finish
-// loading; this module makes sure the box is wired through ctx.api and
-// re-exposes the helpers for any module that needs them.
+// SOLMAR BAY — the dialogue box. The queue, render and advance live in
+// the boot hub (ctx.api.showDialogue / advanceDialogue); this module
+// adds keyboard advance (Enter or Space) so a briefing never needs the
+// mouse, and the portrait colour rule (pink Lena, amber Vic, blue else).
+export function portraitColor(name) {
+  if (name === 'LENA CRUZ') return '#ff7a9e';
+  if (name === 'VIC TORRES') return '#ffb347';
+  return '#5fb4c9';
+}
+
 export function init(ctx) {
-  const { api } = ctx;
-  if (typeof api.showDialogue !== 'function') {
-    api.showDialogue = () => {};
-  }
-  if (typeof api.advanceDialogue !== 'function') {
-    api.advanceDialogue = () => {};
-  }
-  ctx.api.dialogue = {
-    show: api.showDialogue,
-    advance: api.advanceDialogue,
-  };
+  const { state: S, input, dom } = ctx;
+  ctx.api.portraitColor = portraitColor;
+  ctx.updates.push(() => {
+    if (!dom.dialogue || dom.dialogue.classList.contains('hidden')) return;
+    if (S.mode === 'paused') return;
+    if (input.wasPressed('Enter') || input.wasPressed('Space')) {
+      ctx.api.advanceDialogue();
+    }
+  });
 }

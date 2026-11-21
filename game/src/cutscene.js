@@ -1,17 +1,13 @@
-// The intro cutscene for SOLMAR BAY: the flyover and the overlay
-// behaviour live in the boot hub (main.js); this module owns the
-// sunset-themed lines and makes sure the overlay can always be skipped
-// with X, both on the key press and while the key is held.
+// SOLMAR BAY — the intro cutscene. The flyover, the overlay and the
+// skip live in the boot hub (startCutscene / endCutscene, X skips by
+// keydown and by held key); this module owns the three sunset lines the
+// flyover cycles through, one every 4.5 seconds over 14 seconds.
+export const CUTSCENE_LINES = [
+  'The sun is going down on Solmar Bay, and the city is waking up.',
+  'One hustler. One car. One last chance to make a name.',
+  'Vic Torres has work. Lena Cruz has the wheel. The bay is yours.',
+];
+
 export function init(ctx) {
-  const { state: S, input } = ctx;
-  ctx.api.skipCutscene = () => {
-    if (!S.cutscene) return;
-    S.cutscene = false;
-    S.mode = 'playing';
-    const overlay = document.getElementById('cutscene');
-    if (overlay) overlay.classList.add('hidden');
-  };
-  ctx.updates.push(() => {
-    if (S.cutscene && input.isDown('KeyX')) ctx.api.skipCutscene();
-  });
+  ctx.api.cutsceneLines = CUTSCENE_LINES;
 }

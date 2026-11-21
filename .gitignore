@@ -2,7 +2,7 @@ node_modules/
 package-lock.json
 /output
 out-*/
-dist/
+out/
 *.log
 npm-debug.log*
 .vscode/

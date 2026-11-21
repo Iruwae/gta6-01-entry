@@ -1,18 +1,17 @@
-// Respect ranks for SOLMAR BAY. The ladder lives in config.js and the
-// respectDirector in state.js drives it; this module keeps the rank
-// title in step with the points.
+// SOLMAR BAY — respect ranks. The ladder (NOBODY 0, SMALL-TIME 50,
+// STREET HUSTLER 150, CREW LEADER 400, BAY BOSS 800, BAY LEGEND 1500)
+// is driven by respectDirector.add; this module exposes the rank lookup
+// so the HUD and the job board always read the same title.
 import { CONFIG } from './config.js';
 
+export function rankFor(points) {
+  let rank = CONFIG.respectLadder[0];
+  for (const row of CONFIG.respectLadder) {
+    if (points >= row.min) rank = row;
+  }
+  return rank;
+}
+
 export function init(ctx) {
-  const { state: S } = ctx;
-  ctx.api.respectRank = () => {
-    let rank = CONFIG.respectLadder[0];
-    for (const r of CONFIG.respectLadder) {
-      if (S.respect >= r.min) rank = r;
-    }
-    return rank;
-  };
-  ctx.updates.push(() => {
-    S.respectDirector.rank = ctx.api.respectRank();
-  });
+  ctx.api.respectRankFor = rankFor;
 }

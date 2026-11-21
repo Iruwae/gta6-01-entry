@@ -1,34 +1,30 @@
-// Wanted-level behaviour: heat cools slowly on its own, and the
-// pay-n-spray booth wipes it clean for $150 while the player drives
-// through it. The booth fires once per entry and re-arms when the
-// player leaves its radius.
+// SOLMAR BAY — wanted-level behaviour. Heat cools slowly on its own;
+// the pay-n-spray booth wipes heat clean for $150 while the player
+// drives through it. The booth fires once per entry and re-arms when
+// the player leaves the radius; it can be disarmed outright via
+// S.heatDirector.sprayBooth.armed = false.
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const { state: S, api } = ctx;
-  const booth = S.heatDirector.sprayBooth;
+  const { state: S } = ctx;
 
   ctx.updates.push((dt) => {
     if (S.mode !== 'playing') return;
-    // Slow natural cooldown.
-    if (S.heat > 0) S.heatDirector.cool(dt * 0.4);
+    if (S.heat > 0) S.heat = Math.max(0, S.heat - dt * 0.5);
 
+    const booth = S.heatDirector.sprayBooth;
     const px = S.car ? S.car.pos.x : S.player.pos.x;
     const pz = S.car ? S.car.pos.z : S.player.pos.z;
     const dx = px - booth.x;
     const dz = pz - booth.z;
-    const inside = dx * dx + dz * dz < booth.radius * booth.radius;
-    if (!inside) {
-      booth.armed = true;
-      return;
-    }
-    // Only a drive-through counts: the player must be in a car.
-    if (!S.car) return;
-    if (booth.armed && S.heat > 0 && S.cash >= booth.cost) {
-      booth.armed = false;
+    const inside = dx * dx + dz * dz <= booth.radius * booth.radius;
+    if (inside && booth.armed && S.car && S.heat > 0 && S.cash >= booth.cost) {
       S.cash -= booth.cost;
       S.heat = 0;
-      api.toast(`Pay-n-spray: heat wiped clean -$${booth.cost}`);
+      S.wanted = 0;
+      booth.armed = false;
+      ctx.api.toast(`Pay-n-spray — heat wiped clean (-$${booth.cost}).`);
     }
+    if (!inside) booth.armed = true;
   });
 }
