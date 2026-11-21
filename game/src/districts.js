@@ -1,22 +1,23 @@
-// SOLMAR BAY — districts: nearest-centre matching. S.district and the
-// HUD district label follow the player.
-import { CONFIG } from './config.js';
-
-export function nearestDistrictId(x, z) {
-  let best = CONFIG.districts[0];
-  let bestD = Infinity;
-  for (const d of CONFIG.districts) {
-    const dx = d.x - x;
-    const dz = d.z - z;
-    const dd = dx * dx + dz * dz;
-    if (dd < bestD) { bestD = dd; best = d; }
+// SOLMAR BAY — districts: nearest-centre matching drives S.district.
+export function nearestDistrict(config, x, z) {
+  let best = config.districts[0];
+  let bd = Infinity;
+  for (const d of config.districts) {
+    const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z);
+    if (dd < bd) {
+      bd = dd;
+      best = d;
+    }
   }
-  return best.id;
+  return best;
 }
 
 export function init(ctx) {
-  const { state: S } = ctx;
+  const { state: S, config } = ctx;
   ctx.updates.push(() => {
-    S.district = nearestDistrictId(S.player.pos.x, S.player.pos.z);
+    S.district = nearestDistrict(config, S.player.pos.x, S.player.pos.z).id;
   });
+  ctx.api.districtAt = (x, z) => nearestDistrict(config, x, z);
 }
+
+export default { init };

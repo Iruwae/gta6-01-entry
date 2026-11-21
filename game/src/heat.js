@@ -1,29 +1,30 @@
-// SOLMAR BAY — wanted level behaviour: heat cools slowly on its own, and
-// the pay-n-spray booth wipes heat clean for $150 while the player drives
-// through it (fires once per entry; re-arms when the player leaves).
-import { CONFIG } from './config.js';
-
+// SOLMAR BAY — wanted behaviour: heat cools slowly on its own, and the
+// pay-n-spray booth wipes heat clean for $150 when the player drives
+// through it (once per entry, re-arms on leaving the radius).
 export function init(ctx) {
-  const { state: S, api } = ctx;
-  const booth = S.heatDirector.sprayBooth;
-
+  const { state: S, config, api } = ctx;
   ctx.updates.push((dt) => {
-    // Slow passive cooldown.
-    if (S.heat > 0) S.heatDirector.cool(dt * 0.3);
-
-    const px = S.car ? S.car.pos.x : S.player.pos.x;
-    const pz = S.car ? S.car.pos.z : S.player.pos.z;
-    const d = Math.hypot(px - booth.x, pz - booth.z);
-    if (d <= booth.radius) {
-      if (booth.armed && S.car && S.heat > 0 && S.cash >= booth.cost) {
-        S.cash -= booth.cost;
-        S.heat = 0;
-        S.wanted = 0;
-        booth.armed = false;
-        api.toast(`Pay-n-spray: heat wiped clean (-$${booth.cost}).`);
+    if (S.heat > 0) S.heatDirector.cool(dt * 0.25);
+    const booth = S.heatDirector.sprayBooth;
+    const car = S.car;
+    if (car) {
+      const d = Math.hypot(car.pos.x - booth.x, car.pos.z - booth.z);
+      if (d < booth.radius) {
+        if (booth.armed && S.heat > 0 && S.cash >= booth.cost) {
+          S.cash -= booth.cost;
+          S.heat = 0;
+          S.wanted = 0;
+          booth.armed = false;
+          api.toast(`Pay-n-spray: heat wiped clean, -$${booth.cost}.`);
+        }
+      } else {
+        booth.armed = true;
       }
     } else {
-      booth.armed = true;
+      const d = Math.hypot(S.player.pos.x - booth.x, S.player.pos.z - booth.z);
+      if (d >= booth.radius) booth.armed = true;
     }
   });
 }
+
+export default { init };

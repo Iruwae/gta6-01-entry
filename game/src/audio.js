@@ -1,62 +1,51 @@
 // SOLMAR BAY — tiny WebAudio synth for UI blips, gunshots, reloads and
-// cash. No audio files, no network. If the browser has no audio context,
-// every call silently does nothing.
-let actx = null;
-
-function ac() {
-  if (actx) return actx;
-  try {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return null;
-    actx = new AC();
-  } catch (e) { return null; }
-  return actx;
-}
-
-function blip(freq, dur, type, gain) {
-  const c = ac();
-  if (!c) return;
-  try {
-    if (c.state === 'suspended') c.resume();
-    const o = c.createOscillator();
-    const g = c.createGain();
-    o.type = type || 'sine';
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(gain || 0.08, c.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
-    o.connect(g);
-    g.connect(c.destination);
-    o.start();
-    o.stop(c.currentTime + dur);
-  } catch (e) { /* silent */ }
-}
-
-function noise(dur, gain) {
-  const c = ac();
-  if (!c) return;
-  try {
-    if (c.state === 'suspended') c.resume();
-    const len = Math.floor(c.sampleRate * dur);
-    const buf = c.createBuffer(1, len, c.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    const src = c.createBufferSource();
-    src.buffer = buf;
-    const g = c.createGain();
-    g.gain.value = gain || 0.12;
-    src.connect(g);
-    g.connect(c.destination);
-    src.start();
-  } catch (e) { /* silent */ }
-}
-
-export const audio = {
-  blip() { blip(660, 0.08, 'sine', 0.06); },
-  shot() { noise(0.12, 0.14); },
-  reload() { blip(320, 0.06, 'square', 0.05); setTimeout(() => blip(480, 0.06, 'square', 0.05), 90); },
-  cash() { blip(880, 0.1, 'sine', 0.07); setTimeout(() => blip(1320, 0.14, 'sine', 0.07), 100); },
-};
-
+// cash. No audio files, no network. Silent if the browser has no audio.
 export function init(ctx) {
-  ctx.api.audio = audio;
+  let ac = null;
+  function context() {
+    if (ac) return ac;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ac = new AC();
+    } catch (e) {
+      ac = null;
+    }
+    return ac;
+  }
+  function beep(freq, dur, type = 'square', gain = 0.08) {
+    const c = context();
+    if (!c) return;
+    try {
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.type = type;
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(gain, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+      o.connect(g);
+      g.connect(c.destination);
+      o.start();
+      o.stop(c.currentTime + dur);
+    } catch (e) {}
+  }
+  ctx.api.audio = {
+    blip() {
+      beep(660, 0.07, 'sine', 0.05);
+    },
+    shot() {
+      beep(160, 0.09, 'square', 0.1);
+    },
+    reload() {
+      beep(440, 0.06, 'sine', 0.06);
+      setTimeout(() => beep(520, 0.06, 'sine', 0.06), 90);
+    },
+    cash() {
+      beep(880, 0.08, 'sine', 0.07);
+      setTimeout(() => beep(1320, 0.12, 'sine', 0.07), 90);
+    },
+  };
+  ctx.api.audioLoaded = true;
 }
+
+export default { init };

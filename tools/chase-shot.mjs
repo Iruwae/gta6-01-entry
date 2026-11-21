@@ -1,7 +1,6 @@
-// SOLMAR BAY — chase-shot staging for tools/shots.mjs (scene 1).
-// Tops the wallet to $500, disarms the pay-n-spray, puts the player
-// downtown (0,0), sets heat 90 and re-asserts it every 2 s until the
-// helicopter is within 40 m with at least 3 cops, up to 90 s.
+// SOLMAR BAY — chase-shot staging for tools/shots.mjs. Tops the wallet to
+// $500, disarms the pay-n-spray, puts the player downtown, and holds heat
+// at 90 until the helicopter is overhead with at least 3 cops on the scene.
 export const CHASE_STAGING = {
   walletTopUp: 500,
   downtown: [0, 0, 0],
@@ -21,36 +20,32 @@ export async function stageChaseShot(page, options = {}) {
     S.cash = c.walletTopUp;
     if (S.heatDirector) S.heatDirector.sprayBooth.armed = false;
     S.player.pos.set(c.downtown[0], c.downtown[1], c.downtown[2]);
-    if (S.car) { S.car = null; }
     S.heat = c.heat;
   }, cfg);
-
   const t0 = Date.now();
   let state = null;
   while (Date.now() - t0 < cfg.settleTimeoutMs) {
-    await page.evaluate((heat) => {
-      const S = window.__solmar.S;
-      if (S.heat < heat) S.heat = heat; // re-assert: heat cools slowly
-    }, cfg.heat);
-    await sleep(cfg.reassertEveryMs);
     state = await page.evaluate(() => {
       const S = window.__solmar.S;
-      const cops = S.cars.filter((c) => c.aiPolice);
       const heliDist = S.heli
-        ? Math.hypot(S.heli.pos.x - S.player.pos.x, S.heli.pos.y - S.player.pos.y, S.heli.pos.z - S.player.pos.z)
-        : null;
+        ? Math.hypot(S.heli.pos.x - S.player.pos.x, S.heli.pos.z - S.player.pos.z)
+        : Infinity;
       return {
         wanted: S.wanted,
         heat: S.heat,
-        cops: cops.length,
+        cops: (S.cars || []).filter((c) => c.aiPolice).length,
         heli: !!S.heli,
-        heliDist: heliDist === null ? null : Math.round(heliDist),
+        heliDist: Math.round(heliDist * 10) / 10,
         rosterRows: document.querySelectorAll('#roster .roster-row').length,
       };
     });
-    if (state.heli && state.heliDist !== null && state.heliDist <= cfg.heliOverheadDistance && state.cops >= cfg.minCops) {
-      break;
-    }
+    if (state.heli && state.heliDist <= cfg.heliOverheadDistance && state.cops >= cfg.minCops) break;
+    await page.evaluate((h) => {
+      window.__solmar.S.heat = h;
+    }, cfg.heat);
+    await sleep(cfg.reassertEveryMs);
   }
   return state;
 }
+
+export default { CHASE_STAGING, stageChaseShot };

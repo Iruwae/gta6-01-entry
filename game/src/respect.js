@@ -1,20 +1,21 @@
-// SOLMAR BAY — respect ranks. The ladder lives in config; the
-// respectDirector in state.js drives it (add() recomputes the rank).
-import { CONFIG } from './config.js';
-
-export function rankFor(points) {
-  let rank = CONFIG.respectLadder[0];
-  for (const r of CONFIG.respectLadder) {
-    if (points >= r.min) rank = r;
-  }
-  return rank;
-}
-
+// SOLMAR BAY — respect ranks: the ladder from config, driven by
+// respectDirector.add. Announces rank-ups over the toast line.
 export function init(ctx) {
-  const { state: S } = ctx;
-  ctx.api.respect = {
-    rankFor,
-    add: (n, why) => S.respectDirector.add(n, why),
-    rank: () => S.respectDirector.rank,
+  const { state: S, config, api } = ctx;
+  const director = S.respectDirector;
+  const origAdd = director.add.bind(director);
+  director.add = (n, why) => {
+    const before = director.rank.title;
+    const rank = origAdd(n, why);
+    if (rank.title !== before) api.toast(`Respect up: ${rank.title}!`);
+    return rank;
   };
+  ctx.api.respectRankFor = (points) => {
+    let best = config.respectLadder[0];
+    for (const r of config.respectLadder) if (points >= r.min) best = r;
+    return best.title;
+  };
+  ctx.api.respectLoaded = true;
 }
+
+export default { init };

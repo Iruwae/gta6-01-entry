@@ -1,116 +1,97 @@
-// SOLMAR BAY — the static 3D city: bay water, road grid, buildings with
-// windows that light up at night, streetlights and the landmark shops.
-// (The boot hub owns the ground plane; the parked rides live in vehicles.js.)
+// SOLMAR BAY — static city: road grid, bay water, buildings with windows
+// that light up at night, streetlights and landmark shops.
 import * as THREE from '../vendor/three.module.min.js';
-import { rand, randInt, pick } from './random.js';
-
-const LANDMARKS = [
-  { name: 'MART', x: -72, z: -60, w: 14, d: 10, h: 6, color: 0xff7a3d },
-  { name: 'GARAGE', x: -90, z: -66, w: 16, d: 12, h: 7, color: 0x8a6bb0 },
-  { name: 'MOTEL', x: 120, z: -120, w: 18, d: 10, h: 9, color: 0x5fb4c9 },
-  { name: 'SPRAY', x: -90, z: -58, w: 10, d: 8, h: 5, color: 0x7ec98a },
-  { name: 'FENCE', x: 110, z: 138, w: 16, d: 12, h: 5, color: 0xe8a34c },
-  { name: 'TAXI', x: 68, z: 60, w: 8, d: 8, h: 4, color: 0xf2d492 },
-  { name: 'RACE', x: -60, z: -60, w: 10, d: 10, h: 1, color: 0xff7a9e },
-];
+import { makeRng } from './random.js';
 
 export function init(ctx) {
-  const { scene, state: S } = ctx;
-  const buildingMats = [];
-  const glowMats = [];
+  const { THREE, scene, state: S, config } = ctx;
+  const rng = makeRng(7);
+  const city = new THREE.Group();
+  scene.add(city);
 
-  // Bay water at the south edge, past the beach.
+  // Bay water along the south edge.
   const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(500, 130),
-    new THREE.MeshStandardMaterial({ color: 0x1d5f7a, roughness: 0.25, metalness: 0.5 }),
+    new THREE.PlaneGeometry(900, 130),
+    new THREE.MeshStandardMaterial({ color: 0x14425e, roughness: 0.25, metalness: 0.4 })
   );
   water.rotation.x = -Math.PI / 2;
-  water.position.set(0, 0.02, 250);
-  scene.add(water);
+  water.position.set(0, 0.02, 245);
+  city.add(water);
 
-  // Road grid: dark asphalt strips every 30 units.
-  const roadMat = new THREE.MeshStandardMaterial({ color: 0x241a30, roughness: 1 });
-  for (let i = -180; i <= 180; i += 30) {
-    const hRoad = new THREE.Mesh(new THREE.PlaneGeometry(380, 7), roadMat);
-    hRoad.rotation.x = -Math.PI / 2;
-    hRoad.position.set(0, 0.0, i);
-    scene.add(hRoad);
-    const vRoad = new THREE.Mesh(new THREE.PlaneGeometry(7, 380), roadMat);
-    vRoad.rotation.x = -Math.PI / 2;
-    vRoad.position.set(i, 0.0, 0);
-    scene.add(vRoad);
+  // Road grid strips.
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x241a30, roughness: 0.9 });
+  for (let i = -3; i <= 3; i++) {
+    const v = new THREE.Mesh(new THREE.PlaneGeometry(12, 420), roadMat);
+    v.rotation.x = -Math.PI / 2;
+    v.position.set(i * 60, 0.04, 0);
+    city.add(v);
+    const h = new THREE.Mesh(new THREE.PlaneGeometry(420, 12), roadMat);
+    h.rotation.x = -Math.PI / 2;
+    h.position.set(0, 0.04, i * 60);
+    city.add(h);
   }
 
-  // Box buildings, kept off the roads and off the landmark plots.
-  const palette = [0x3a2a4a, 0x4a2f3a, 0x2f3a4a, 0x453a2a, 0x35243a];
-  const buildingGeo = new THREE.BoxGeometry(1, 1, 1);
-  for (let gx = -5; gx <= 5; gx++) {
-    for (let gz = -5; gz <= 5; gz++) {
-      const x = gx * 30 + 15 + rand(-4, 4);
-      const z = gz * 30 + 15 + rand(-4, 4);
-      if (Math.abs(x) > 185 || Math.abs(z) > 185) continue;
-      if (LANDMARKS.some((L) => Math.abs(L.x - x) < 14 && Math.abs(L.z - z) < 12)) continue;
-      if (Math.abs(x + 84) < 12 && Math.abs(z + 58) < 12) continue; // player start clearing
-      if (rand() < 0.45) continue;
-      const w = rand(8, 14);
-      const d = rand(8, 14);
-      const h = rand(6, 26);
-      // One mesh per building; its emissive lifts at night like lit windows.
-      const mat = new THREE.MeshStandardMaterial({
-        color: pick(palette),
-        roughness: 0.9,
-        emissive: new THREE.Color(0xffc46b),
-        emissiveIntensity: 0.05,
-      });
-      const b = new THREE.Mesh(buildingGeo, mat);
-      b.scale.set(w, h, d);
-      b.position.set(x, h / 2, z);
-      scene.add(b);
-      buildingMats.push(mat);
+  // Buildings with emissive windows.
+  const windowMats = [];
+  const palette = [0x3a2b4d, 0x4d3242, 0x2e3a4d, 0x503a2e, 0x33284a];
+  for (let i = 0; i < 70; i++) {
+    const bx = Math.round((rng() * 11 - 5.5)) * 30 + (rng() - 0.5) * 12;
+    const bz = Math.round((rng() * 11 - 5.5)) * 30 + (rng() - 0.5) * 12;
+    if (Math.abs(bx) < 14 && Math.abs(bz) < 14) continue;
+    if (Math.abs(bx % 60) < 10 || Math.abs(bz % 60) < 10) continue;
+    if (Math.abs(bz) > 185) continue;
+    const w = 10 + rng() * 14;
+    const h = 8 + rng() * 32;
+    const d = 10 + rng() * 14;
+    const winMat = new THREE.MeshStandardMaterial({
+      color: palette[i % palette.length],
+      emissive: 0xffb347,
+      emissiveIntensity: 0.15,
+      roughness: 0.85,
+    });
+    windowMats.push(winMat);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), winMat);
+    b.position.set(bx, h / 2, bz);
+    city.add(b);
+  }
+  ctx.cityWindows = windowMats;
+
+  // Streetlights along the main roads.
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0xffe0a0, emissive: 0xffc46b, emissiveIntensity: 0.9 });
+  for (let i = -3; i <= 3; i++) {
+    for (let j = -2; j <= 2; j++) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 6, 6), poleMat);
+      pole.position.set(i * 60 + 7, 3, j * 60);
+      city.add(pole);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), lampMat);
+      lamp.position.set(i * 60 + 7, 6.2, j * 60);
+      city.add(lamp);
     }
   }
 
-  // Landmark shops: simple coloured boxes with a taller sign post.
-  for (const L of LANDMARKS) {
-    const mat = new THREE.MeshStandardMaterial({ color: L.color, roughness: 0.7 });
-    const box = new THREE.Mesh(new THREE.BoxGeometry(L.w, L.h, L.d), mat);
-    box.position.set(L.x, L.h / 2, L.z);
-    scene.add(box);
-    const signMat = new THREE.MeshStandardMaterial({
-      color: 0x111111, emissive: new THREE.Color(L.color), emissiveIntensity: 0.9,
-    });
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(L.w * 0.7, 1.2, 0.4), signMat);
-    sign.position.set(L.x, L.h + 1, L.z);
-    scene.add(sign);
-    glowMats.push(signMat);
+  // Landmark shops: MART, garage, safehouse motel, pay-n-spray, fence yard, taxi stand, race pad.
+  function landmark(x, z, w, h, d, color, label) {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.25, roughness: 0.7 })
+    );
+    m.position.set(x, h / 2, z);
+    city.add(m);
+    return m;
   }
-
-  // Streetlights: poles with a warm glowing head.
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a2a33, roughness: 0.7 });
-  const lampMat = new THREE.MeshStandardMaterial({
-    color: 0x111111, emissive: new THREE.Color(0xffd27a), emissiveIntensity: 0.4,
-  });
-  for (let i = 0; i < 18; i++) {
-    const x = randInt(-6, 6) * 30 + rand(-8, 8);
-    const z = randInt(-6, 6) * 30 + rand(-8, 8);
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 5.5, 6), poleMat);
-    pole.position.set(x, 2.75, z);
-    scene.add(pole);
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), lampMat);
-    lamp.position.set(x, 5.6, z);
-    scene.add(lamp);
-  }
-  glowMats.push(lampMat);
+  landmark(config.shop.x, config.shop.z, 16, 6, 10, 0xff7a3d, 'MART');
+  landmark(config.garage.x, config.garage.z, 18, 7, 12, 0x7ec98a, 'GARAGE');
+  landmark(config.safehouse.x, config.safehouse.z, 20, 9, 12, 0x5fb4c9, 'MOTEL');
+  landmark(config.spray.x, config.spray.z, 10, 5, 8, 0xb48ce8, 'SPRAY');
+  landmark(config.fenceYard.x, config.fenceYard.z, 22, 3, 16, 0xe8a34c, 'YARD');
+  landmark(config.taxiStand.x, config.taxiStand.z, 8, 4, 8, 0xf2d492, 'TAXI');
+  landmark(config.racePad.x, config.racePad.z, 12, 1, 12, 0xff2e63, 'RACE');
 
   ctx.updates.push(() => {
     const night = S.dayNight.night;
-    // Buildings lift just a little at night (lit windows); signs and
-    // lamps glow hard.
-    for (const m of buildingMats) {
-      m.emissiveIntensity = 0.05 + night * 0.22;
-    }
-    for (const m of glowMats) {
-      m.emissiveIntensity = 0.3 + night * 1.2;
-    }
+    for (const m of windowMats) m.emissiveIntensity = 0.15 + night * 0.85;
   });
 }
+
+export default { init };

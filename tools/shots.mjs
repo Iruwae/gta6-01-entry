@@ -3,24 +3,23 @@
 // the game in headless Chrome through window.__solmar, stages four scenes
 // and screenshots each at 1280x720 JPEG, stepping quality down
 // (72, 55, 40, 28) until the file is under 256 KiB.
-//   21-sunset-chase.jpg    police chase downtown, 4-5 stars, heli overhead
-//   22-garage-briefing.jpg mission 1 briefing at the garage (LENA CRUZ)
-//   23-street-race.jpg     mid-race at the gates
-//   24-night-ride.jpg      night ride on the bike downtown
+// Usage: node tools/shots.mjs
 import { spawn } from 'node:child_process';
-import { statSync, mkdirSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { mkdirSync, existsSync, statSync, copyFileSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { stageChaseShot } from './chase-shot.mjs';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SHOTS_DIR = join(ROOT, 'screenshots');
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(here, '..');
+const shotsDir = join(repoRoot, 'screenshots');
+mkdirSync(shotsDir, { recursive: true });
 const PORT = 8911;
+const HOME = process.env.HOME;
+const qaToolsPkg = HOME + '/workspace/makefun/qa-tools/node_modules/puppeteer-core/package.json';
+const puppeteer = createRequire(existsSync(qaToolsPkg) ? qaToolsPkg : import.meta.url)('puppeteer-core');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const qaToolsPkg = process.env.HOME + '/workspace/makefun/qa-tools/node_modules/puppeteer-core/package.json';
-const puppeteer = createRequire(qaToolsPkg)('puppeteer-core');
-const { stageChaseShot } = await import('./chase-shot.mjs');
 
 async function holdKey(page, code, ms = 2000) {
   await page.keyboard.down(code);
@@ -41,139 +40,116 @@ async function holdKeyUntil(page, code, checkFn, timeoutMs = 30000) {
   return await checkFn();
 }
 
-async function waitFor(page, fn, timeoutMs = 60000, pollMs = 2000) {
+async function poll(page, fn, timeoutMs = 60000, stepMs = 2000) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    if (await page.evaluate(fn)) return true;
-    await sleep(pollMs);
+    if (await fn()) return true;
+    await sleep(stepMs);
   }
-  return await page.evaluate(fn);
-}
-
-async function closeDialogue(page) {
-  // The m1 briefing auto-starts at spawn; click through it until the box
-  // hides so it does not sit over every other scene.
-  for (let i = 0; i < 3; i++) {
-    const visible = await page.evaluate(() => {
-      const el = document.getElementById('dialogue');
-      return el && !el.classList.contains('hidden');
-    });
-    if (!visible) return;
-    await page.click('#dialogue');
-    await sleep(800);
-  }
+  return await fn();
 }
 
 async function shoot(page, file) {
-  mkdirSync(SHOTS_DIR, { recursive: true });
-  const path = join(SHOTS_DIR, file);
+  const tmp = join('/tmp', file);
   for (const q of [72, 55, 40, 28]) {
-    await page.screenshot({ path, type: 'jpeg', quality: q });
-    const size = statSync(path).size;
-    console.log(`${file}: quality ${q} -> ${size} bytes`);
-    if (size < 262144) return { file, bytes: size };
+    await page.screenshot({ path: tmp, type: 'jpeg', quality: q });
+    const bytes = statSync(tmp).size;
+    if (bytes < 262144 || q === 28) {
+      copyFileSync(tmp, join(shotsDir, file));
+      console.log(`shot ${file}: ${bytes} bytes @ q${q}`);
+      return bytes;
+    }
   }
-  return { file, bytes: statSync(path).size };
+  return 0;
+}
+
+async function startGame(page) {
+  await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'load', timeout: 30000 });
+  await sleep(1500);
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: 'load', timeout: 30000 });
+  await sleep(2000);
+  await page.click('#btn-new');
+  await sleep(1200);
+  await holdKey(page, 'KeyX');
+  await sleep(1200);
 }
 
 async function main() {
   const server = spawn('node', ['serve.ts'], {
-    cwd: ROOT,
+    cwd: repoRoot,
     env: { ...process.env, PORT: String(PORT) },
     stdio: 'ignore',
+    detached: true,
   });
   try {
-    // Wait for the server to answer.
+    let up = false;
     for (let i = 0; i < 30; i++) {
       try {
-        const res = await fetch(`http://127.0.0.1:${PORT}/index.html`);
-        if (res.ok) break;
-      } catch (e) { /* not up yet */ }
+        const r = await fetch(`http://127.0.0.1:${PORT}/index.html`);
+        if (r.ok) { up = true; break; }
+      } catch (e) {}
       await sleep(500);
     }
-
+    if (!up) throw new Error('serve.ts did not come up on ' + PORT);
     const browser = await puppeteer.launch({
-      executablePath: process.env.HOME + '/.cache/ms-playwright/chromium_headless_shell-1148/chrome-linux/headless_shell',
+      executablePath: HOME + '/.cache/ms-playwright/chromium_headless_shell-1148/chrome-linux/headless_shell',
       headless: true,
       args: ['--no-sandbox', '--disable-dev-shm-usage', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--window-size=1280,720'],
       defaultViewport: { width: 1280, height: 720 },
     });
-    try {
-      const page = await browser.newPage();
-      page.on('pageerror', (e) => console.log('PAGEERROR: ' + String(e)));
-      await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'networkidle0', timeout: 30000 });
-      await sleep(2000);
-      await page.evaluate(() => { localStorage.clear(); });
-      await page.reload({ waitUntil: 'load', timeout: 60000 });
-      await sleep(2000);
-      await page.click('#btn-new');
-      await sleep(1500);
-      await holdKey(page, 'KeyX'); // skip the intro cutscene
-      await sleep(1000);
-      await closeDialogue(page); // m1 auto-started at spawn; hide it
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
 
-      // (1) Police chase downtown, 4-5 stars, heli overhead.
-      const chase = await stageChaseShot(page);
-      console.log('chase staged:', JSON.stringify(chase));
-      await sleep(3000);
-      const s1 = await shoot(page, '21-sunset-chase.jpg');
+    // 1 — police chase downtown at 4-5 stars with the helicopter overhead.
+    await startGame(page);
+    const chase = await stageChaseShot(page);
+    console.log('chase staged:', JSON.stringify(chase));
+    await sleep(1500);
+    await shoot(page, '29-sunset-chase.jpg');
 
-      // (2) Mission 1 briefing at the garage — dialogue open, LENA CRUZ.
-      await page.evaluate(() => { window.__solmar.S.heat = 0; });
-      await waitFor(page, () => window.__solmar.S.cops.length === 0 && window.__solmar.S.cars.filter((c) => c.aiPolice).length === 0, 60000);
-      await page.evaluate(() => { window.__solmar.S.player.pos.set(-90, 0, -66); });
-      // Re-show the briefing (it was closed for the chase shot).
-      await page.evaluate(() => { window.__solmar.S.missions.start(0); });
-      await waitFor(page, () => {
-        const el = document.getElementById('dialogue');
-        return el && !el.classList.contains('hidden') && document.getElementById('dlg-name').textContent === 'LENA CRUZ';
-      }, 60000);
-      // Step out from the garage wall so the building reads in frame:
-      // stand south-east of the garage, facing back toward it.
-      await page.evaluate(() => {
-        const S = window.__solmar.S;
-        S.player.pos.set(-78, 0, -48);
-        S.player.heading = -2.36;
-      });
-      await sleep(4000);
-      const s2 = await shoot(page, '22-garage-briefing.jpg');
-      await closeDialogue(page);
+    // 2 — mission 1 briefing at the garage, dialogue open showing LENA CRUZ.
+    await startGame(page);
+    await page.evaluate(() => { window.__solmar.player.pos.set(-90, 0, -66); });
+    await poll(page, async () => page.evaluate(() => {
+      const el = document.getElementById('dialogue');
+      return el && !el.classList.contains('hidden') && (document.getElementById('dlg-name') || {}).textContent === 'LENA CRUZ';
+    }), 30000);
+    await sleep(800);
+    await shoot(page, '30-garage-briefing.jpg');
 
-      // (3) Street race — enter the parked sport car, roll to the pad, T.
-      await page.evaluate(() => { window.__solmar.S.player.pos.set(-102, 0, -64); });
-      await holdKeyUntil(page, 'KeyE', async () => (await page.evaluate(() => !!window.__solmar.S.car)), 20000);
-      await page.evaluate(() => {
-        const S = window.__solmar.S;
-        if (S.car) S.car.pos.set(-60, 0, -60);
-      });
-      await holdKeyUntil(page, 'KeyT', async () => (await page.evaluate(() => window.__solmar.S.sideActivities.race.active)) === true, 30000);
-      await page.evaluate(() => {
-        const S = window.__solmar.S;
-        if (S.car) { S.car.pos.set(20, 0, -60); S.car.heading = Math.PI / 2; }
-      });
-      await sleep(3000);
-      const s3 = await shoot(page, '23-street-race.jpg');
+    // 3 — street race: enter the parked sport car, roll to the start pad, press T.
+    await startGame(page);
+    await page.evaluate(() => { window.__solmar.player.pos.set(-102, 0, -64); });
+    await holdKeyUntil(page, 'KeyE', async () => page.evaluate(() => !!window.__solmar.S.car), 20000);
+    await page.evaluate(() => { const S = window.__solmar.S; if (S.car) S.car.pos.set(-60, 0, -60); });
+    await holdKeyUntil(page, 'KeyT', async () => page.evaluate(() => window.__solmar.S.sideActivities.race.active), 30000);
+    await page.evaluate(() => { const S = window.__solmar.S; if (S.car) S.car.pos.set(30, 0, -60); });
+    await sleep(1500);
+    await shoot(page, '31-street-race.jpg');
 
-      // (4) Night ride on the bike downtown.
-      await holdKeyUntil(page, 'KeyE', async () => !(await page.evaluate(() => !!window.__solmar.S.car)), 20000);
-      await page.evaluate(() => { window.__solmar.S.player.pos.set(-88, 0, -64); });
-      await holdKeyUntil(page, 'KeyE', async () => (await page.evaluate(() => !!window.__solmar.S.car)), 20000);
-      await page.evaluate(() => {
-        const S = window.__solmar.S;
-        S.time = 200;
-        if (S.car) S.car.pos.set(0, 0, 0);
-      });
-      await waitFor(page, () => window.__solmar.S.dayNight.night > 0.5, 90000, 5000);
-      await sleep(3000);
-      const s4 = await shoot(page, '24-night-ride.jpg');
+    // 4 — night ride on the bike downtown.
+    await startGame(page);
+    await page.evaluate(() => { window.__solmar.player.pos.set(-88, 0, -64); });
+    await holdKeyUntil(page, 'KeyE', async () => page.evaluate(() => !!window.__solmar.S.car), 20000);
+    await page.evaluate(() => {
+      const S = window.__solmar.S;
+      if (S.car) S.car.pos.set(0, 0, 0);
+      S.time = 200;
+    });
+    await poll(page, async () => page.evaluate(() => window.__solmar.S.dayNight.night > 0.5), 90000, 3000);
+    await sleep(1000);
+    await shoot(page, '32-night-ride.jpg');
 
-      console.log(JSON.stringify([s1, s2, s3, s4], null, 2));
-    } finally {
-      await browser.close();
-    }
+    console.log('page errors:', errors.length ? errors.join(' | ') : 'none');
+    await browser.close();
   } finally {
-    server.kill();
+    try { server.kill(); } catch (e) {}
   }
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

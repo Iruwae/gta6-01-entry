@@ -1,26 +1,24 @@
-// SOLMAR BAY — day/night progression. The boot hub runs the same
-// computation every frame; this module exposes it as a helper so other
-// modules can ask for the current phase without duplicating the math.
-import { CONFIG } from './config.js';
-
-export function phaseAt(time) {
-  if (time >= CONFIG.nightAt) return { phase: 'NIGHT', target: 1 };
-  if (time >= CONFIG.duskAt) {
-    return { phase: 'DUSK', target: (time - CONFIG.duskAt) / (CONFIG.nightAt - CONFIG.duskAt) };
-  }
-  return { phase: 'SUNSET', target: 0 };
-}
-
-export function updateDayNight(ctx, dt) {
-  const S = ctx.state;
-  const { phase, target } = phaseAt(S.time);
-  S.dayNight.phase = phase;
-  const n = S.dayNight.night;
-  const step = 0.6 * dt;
-  S.dayNight.night = target > n ? Math.min(target, n + step) : Math.max(target, n - step);
-  return S.dayNight.night;
-}
-
+// SOLMAR BAY — day/night progression: phase, night ramp, sun and sky.
 export function init(ctx) {
-  ctx.api.dayNight = { phaseAt, update: (dt) => updateDayNight(ctx, dt) };
+  const { THREE, state: S } = ctx;
+  const amber = new THREE.Color(0xffb347);
+  const cool = new THREE.Color(0x8fb4ff);
+  ctx.updates.push((dt) => {
+    const t = S.time;
+    let target = 0;
+    if (t >= ctx.config.nightAt) target = 1;
+    else if (t >= ctx.config.duskAt) target = (t - ctx.config.duskAt) / (ctx.config.nightAt - ctx.config.duskAt);
+    S.dayNight.night += (target - S.dayNight.night) * Math.min(1, 0.6 * dt);
+    if (S.dayNight.night < 0) S.dayNight.night = 0;
+    if (S.dayNight.night > 1) S.dayNight.night = 1;
+    if (S.sunLight) {
+      S.sunLight.intensity = 2.2 - S.dayNight.night * 1.85;
+      S.sunLight.color.copy(S.dayNight.night > 0.6 ? cool : amber);
+    }
+    if (S.skyDome && S.skyDome.material && S.skyDome.material.uniforms) {
+      S.skyDome.material.uniforms.uNight.value = S.dayNight.night;
+    }
+  });
 }
+
+export default { init };

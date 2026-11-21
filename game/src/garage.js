@@ -1,103 +1,96 @@
-// SOLMAR BAY — the garage. G stores the car you drove to the door;
-// G on foot near the door opens the panel, where a stored car can be
-// spawned back (button class garage-spawn) and the current car tuned
-// (engine, armor, paint, NOS — tuning changes perf() and is kept on the
-// stored record).
-import { CONFIG } from './config.js';
-
-const PAINTS = ['#ffb347', '#ff7a9e', '#5fb4c9', '#7ec98a', '#e8a34c', '#b48ce8'];
-
+// SOLMAR BAY — garage. G with a car at the door stores it; G on foot near
+// the door opens the panel, where a stored car can be spawned back and the
+// current car can be tuned (engine, armor, paint, NOS change perf()).
 export function init(ctx) {
-  const { scene, state: S, input, api, dom } = ctx;
+  const { state: S, input, config, api } = ctx;
+  const panel = document.getElementById('garage-panel');
+  const list = document.getElementById('garage-list');
+  const paints = ['#ff2e63', '#ffb347', '#5fb4c9', '#7ec98a', '#b48ce8', '#e8e8e8'];
 
-  function storeCurrentCar() {
-    const car = S.car;
-    if (!car) return;
-    const record = {
-      kind: car.kind,
-      health: car.health,
-      maxHealth: car.maxHealth,
-      tune: { ...car.tune },
-      color: car.color,
-    };
-    scene.remove(car.mesh);
-    S.cars = S.cars.filter((c) => c !== car);
-    S.car = null;
-    S.garageCars.push(record);
-    api.toast(`Stored the ${record.kind} in the garage.`);
-  }
-
-  function buildPanel() {
-    dom['garage-list'].innerHTML = '';
-    if (S.garageCars.length === 0 && !S.car) {
+  function buildList() {
+    list.innerHTML = '';
+    if (S.garageCars.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'garage-row';
-      empty.textContent = 'Garage is empty — drive a car to the door and press G to store it.';
-      dom['garage-list'].appendChild(empty);
+      empty.textContent = 'Garage is empty — drive a car to the door and press G.';
+      list.appendChild(empty);
+      return;
     }
     S.garageCars.forEach((rec, i) => {
       const row = document.createElement('div');
       row.className = 'garage-row';
-      row.innerHTML = `<div><div class="shop-name">${rec.kind.toUpperCase()}</div><div class="shop-desc">Engine ${rec.tune.engine || 0} · Armor ${rec.tune.armor || 0} · NOS ${rec.tune.nos ? 'yes' : 'no'}</div></div>`;
-      const btn = document.createElement('button');
-      btn.className = 'garage-spawn';
-      btn.textContent = 'SPAWN';
-      btn.addEventListener('click', () => {
-        const car = ctx.api.makeVehicle(rec.kind, CONFIG.garageDoor.x + 4, CONFIG.garageDoor.z + 4, rec.tune);
+      const name = document.createElement('span');
+      name.className = 'garage-name';
+      name.textContent = `${rec.kind.toUpperCase()} — perf ${Math.round(
+        (config.vehicleKinds[rec.kind].perf || 0) + (rec.tune.engine || 0) * 2 + (rec.tune.nos || 0) * 4
+      )}`;
+      row.appendChild(name);
+      const spawn = document.createElement('button');
+      spawn.className = 'garage-spawn';
+      spawn.textContent = 'SPAWN';
+      spawn.addEventListener('click', () => {
+        const car = ctx.api.createVehicle(rec.kind, config.garage.x + 4, config.garage.z, 0);
+        car.tune = { ...rec.tune };
         car.health = rec.health ?? car.maxHealth;
-        S.garageCars.splice(i, 1);
+        S.cars.push(car);
         S.car = car;
-        S.player.pos.copy(car.pos);
-        S.player.heading = car.heading;
-        dom['garage-panel'].classList.add('hidden');
-        api.toast(`Spawned the ${rec.kind} from the garage.`);
+        panel.classList.add('hidden');
+        api.toast(`Spawned your ${rec.kind} from the garage.`);
       });
-      row.appendChild(btn);
-      dom['garage-list'].appendChild(row);
-    });
-    // Tuning for the current car.
-    if (S.car) {
-      const car = S.car;
-      const row = document.createElement('div');
-      row.className = 'garage-row';
-      row.innerHTML = `<div><div class="shop-name">TUNE — ${car.kind.toUpperCase()}</div><div class="shop-desc">Engine ${car.tune.engine || 0} · Armor ${car.tune.armor || 0} · NOS ${car.tune.nos ? 'yes' : 'no'} · Perf ${car.perf()}</div></div>`;
-      const mkBtn = (label, fn) => {
+      row.appendChild(spawn);
+      for (const attr of ['engine', 'armor', 'nos', 'paint']) {
         const b = document.createElement('button');
         b.className = 'garage-tune';
-        b.textContent = label;
-        b.addEventListener('click', () => { fn(); buildPanel(); });
+        b.dataset.attr = attr;
+        b.textContent = `${attr.toUpperCase()} ${(attr === 'paint' ? rec.tune.paint : '+' + (rec.tune[attr] || 0))}`;
+        b.addEventListener('click', () => {
+          if (attr === 'paint') {
+            const idx = paints.indexOf(rec.tune.paint);
+            rec.tune.paint = paints[(idx + 1) % paints.length];
+          } else {
+            rec.tune[attr] = (rec.tune[attr] || 0) + 1;
+          }
+          if (S.car) S.car.tune = { ...rec.tune };
+          api.toast(`${rec.kind} ${attr} upgraded.`);
+          buildList();
+        });
         row.appendChild(b);
-      };
-      mkBtn('ENGINE +', () => { car.tune.engine = Math.min(3, (car.tune.engine || 0) + 1); api.toast(`Engine tuned to ${car.tune.engine}. Perf ${car.perf()}.`); });
-      mkBtn('ARMOR +', () => {
-        car.tune.armor = Math.min(3, (car.tune.armor || 0) + 1);
-        car.maxHealth = (CONFIG.vehicleStats[car.kind] || {}).maxHealth + car.tune.armor * 20;
-        car.health = Math.min(car.maxHealth, car.health + 20);
-        api.toast(`Armor tuned to ${car.tune.armor}.`);
-      });
-      mkBtn('NOS', () => { car.tune.nos = !car.tune.nos; api.toast(car.tune.nos ? 'NOS installed.' : 'NOS removed.'); });
-      mkBtn('PAINT', () => {
-        const idx = PAINTS.indexOf(car.tune.paint);
-        car.tune.paint = PAINTS[(idx + 1) % PAINTS.length];
-        car.color = car.tune.paint;
-        api.toast('New paint job.');
-      });
-      dom['garage-list'].appendChild(row);
-    }
+      }
+      list.appendChild(row);
+      void i;
+    });
   }
 
   ctx.updates.push(() => {
-    if (!input.wasPressed('KeyG') || S.mode !== 'playing') return;
-    const door = CONFIG.garageDoor;
+    if (S.mode !== 'playing') return;
+    if (!input.wasPressed('KeyG')) return;
+    const px = S.car ? S.car.pos.x : S.player.pos.x;
+    const pz = S.car ? S.car.pos.z : S.player.pos.z;
+    const d = Math.hypot(px - config.garage.x, pz - config.garage.z);
+    if (d > config.garage.radius + 2) return;
     if (S.car) {
-      if (Math.hypot(S.car.pos.x - door.x, S.car.pos.z - door.z) <= door.radius) {
-        storeCurrentCar();
-      }
+      const car = S.car;
+      S.garageCars.push({
+        kind: car.kind,
+        tune: { ...car.tune },
+        health: car.health,
+        maxHealth: car.maxHealth,
+      });
+      const idx = S.cars.indexOf(car);
+      if (idx >= 0) S.cars.splice(idx, 1);
+      if (car.mesh) ctx.scene.remove(car.mesh);
+      S.car = null;
+      api.toast(`Stored the ${car.kind} in your garage.`);
     } else {
-      if (Math.hypot(S.player.pos.x - door.x, S.player.pos.z - door.z) <= door.radius) {
-        buildPanel();
-        dom['garage-panel'].classList.remove('hidden');
-      }
+      buildList();
+      panel.classList.remove('hidden');
     }
   });
+  ctx.api.garageLoaded = true;
+  ctx.api.openGarage = () => {
+    buildList();
+    panel.classList.remove('hidden');
+  };
 }
+
+export default { init };

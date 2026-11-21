@@ -1,89 +1,66 @@
-// SOLMAR BAY — ambient life: traffic sedans cruising the road grid
-// (they brake when the player is right in front of them) and gulls
-// circling over the harbour and the beach. Traffic is sedans only and
-// never joins S.cars — it cannot be stolen or mistaken for a parked ride.
+// SOLMAR BAY — ambient life: traffic sedans on the road grid and gulls
+// circling over the harbour and the beach. Traffic is sedans only.
 import * as THREE from '../vendor/three.module.min.js';
-import { rand, randInt, pick } from './random.js';
-
-const TRAFFIC_COLORS = [0x8a8fa8, 0xc9a06a, 0x6a8a7a, 0xa86a6a, 0x5a6a8a];
 
 export function init(ctx) {
-  const { scene, state: S } = ctx;
-  const cars = [];
-  const carGeo = new THREE.BoxGeometry(2.0, 0.7, 4.2);
-  const cabinGeo = new THREE.BoxGeometry(1.7, 0.5, 2.0);
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x1a2436, roughness: 0.2, metalness: 0.5 });
-
+  const { THREE, scene, state: S } = ctx;
+  const traffic = [];
+  const sedanGeo = new THREE.BoxGeometry(2.0, 0.7, 4.0);
+  const cabinGeo = new THREE.BoxGeometry(1.7, 0.6, 2.0);
   for (let i = 0; i < 6; i++) {
-    const horizontal = i % 2 === 0;
-    const lane = randInt(-5, 5) * 30 + (horizontal ? 3.5 : -3.5);
-    const mat = new THREE.MeshStandardMaterial({ color: pick(TRAFFIC_COLORS), roughness: 0.4, metalness: 0.4 });
     const group = new THREE.Group();
-    const body = new THREE.Mesh(carGeo, mat);
-    body.position.y = 0.5;
+    const mat = new THREE.MeshStandardMaterial({ color: [0x8a8f98, 0xc9a06a, 0x6a8a9a, 0x9a6a7a, 0x7a9a6a, 0xb0b4bc][i], metalness: 0.3, roughness: 0.5 });
+    const body = new THREE.Mesh(sedanGeo, mat);
+    body.position.y = 0.6;
     group.add(body);
-    const cabin = new THREE.Mesh(cabinGeo, glassMat);
-    cabin.position.y = 1.05;
+    const cabin = new THREE.Mesh(cabinGeo, new THREE.MeshStandardMaterial({ color: 0x18202e, metalness: 0.6, roughness: 0.25 }));
+    cabin.position.set(0, 1.2, -0.2);
     group.add(cabin);
+    const axis = i % 2 === 0 ? 'x' : 'z';
+    const lane = (i - 2) * 60 + 6;
+    const start = -170 + i * 55;
+    group.position.set(axis === 'x' ? start : lane, 0, axis === 'x' ? lane : start);
+    group.rotation.y = axis === 'x' ? Math.PI / 2 : 0;
     scene.add(group);
-    cars.push({
-      mesh: group,
-      horizontal,
-      lane,
-      t: rand(-180, 180),
-      speed: rand(7, 11),
-      dir: Math.random() < 0.5 ? 1 : -1,
-    });
+    traffic.push({ mesh: group, axis, lane, pos: start, dir: i % 4 < 2 ? 1 : -1, speed: 8 + (i % 3) });
   }
-
-  // Gulls over the harbour (120,120) and the beach (0,165).
+  // Gulls.
   const gulls = [];
   const gullMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const gullGeo = new THREE.ConeGeometry(0.35, 1.4, 4);
-  gullGeo.rotateX(Math.PI / 2);
   for (let i = 0; i < 8; i++) {
-    const g = new THREE.Mesh(gullGeo, gullMat);
+    const g = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.4, 4), gullMat);
+    g.rotation.z = Math.PI / 2;
     scene.add(g);
-    gulls.push({
-      mesh: g,
-      cx: i % 2 === 0 ? 120 : 0,
-      cz: i % 2 === 0 ? 120 : 165,
-      r: rand(8, 22),
-      h: rand(18, 30),
-      a: rand(0, Math.PI * 2),
-      w: rand(0.3, 0.7),
-    });
+    gulls.push({ mesh: g, cx: i < 4 ? 120 : 0, cz: i < 4 ? 120 : 165, r: 12 + i * 2, a: (i / 8) * Math.PI * 2, h: 26 + i * 2 });
   }
-
   ctx.updates.push((dt) => {
-    for (const c of cars) {
+    for (const t of traffic) {
       // Brake when the player is right in front of the car.
       const px = S.player.pos.x;
       const pz = S.player.pos.z;
-      let blocked = false;
-      if (c.horizontal) {
-        const aheadX = c.mesh.position.x + c.dir * 7;
-        if (Math.abs(pz - c.lane) < 4 && Math.abs(px - aheadX) < 7) blocked = true;
+      const mx = t.mesh.position.x;
+      const mz = t.mesh.position.z;
+      const ahead = t.axis === 'x' ? (pz - mz) * 0 + (px - mx) * t.dir : (pz - mz) * t.dir;
+      const lateral = t.axis === 'x' ? Math.abs(pz - mz) : Math.abs(px - mx);
+      let v = t.speed;
+      if (ahead > 0 && ahead < 9 && lateral < 4) v = 0;
+      t.pos += v * t.dir * dt;
+      if (t.pos > 190) t.pos = -190;
+      if (t.pos < -190) t.pos = 190;
+      if (t.axis === 'x') {
+        t.mesh.position.set(t.pos, 0, t.lane);
+        t.mesh.rotation.y = t.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
       } else {
-        const aheadZ = c.mesh.position.z + c.dir * 7;
-        if (Math.abs(px - c.lane) < 4 && Math.abs(pz - aheadZ) < 7) blocked = true;
-      }
-      const v = blocked ? 0 : c.speed;
-      c.t += v * c.dir * dt;
-      if (c.t > 190) c.t = -190;
-      if (c.t < -190) c.t = 190;
-      if (c.horizontal) {
-        c.mesh.position.set(c.t, 0, c.lane);
-        c.mesh.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-      } else {
-        c.mesh.position.set(c.lane, 0, c.t);
-        c.mesh.rotation.y = c.dir > 0 ? 0 : Math.PI;
+        t.mesh.position.set(t.lane, 0, t.pos);
+        t.mesh.rotation.y = t.dir > 0 ? 0 : Math.PI;
       }
     }
     for (const g of gulls) {
-      g.a += g.w * dt;
-      g.mesh.position.set(g.cx + Math.cos(g.a) * g.r, g.h + Math.sin(g.a * 2.3) * 1.5, g.cz + Math.sin(g.a) * g.r);
+      g.a += dt * 0.35;
+      g.mesh.position.set(g.cx + Math.cos(g.a) * g.r, g.h + Math.sin(g.a * 2) * 1.5, g.cz + Math.sin(g.a) * g.r);
       g.mesh.rotation.y = -g.a;
     }
   });
 }
+
+export default { init };
