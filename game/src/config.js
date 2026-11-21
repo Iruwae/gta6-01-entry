@@ -1,221 +1,189 @@
-// SOLMAR BAY — tuning constants (round 8 rewrite).
-//
-// Every number the game balances on lives in this one object. Modules
-// never hard-code a price, a position or a stat; they read it from
-// ctx.config, which main.js builds from this file. Nothing here is a
-// Rockstar asset: every name, place and track is invented for this game.
+// SOLMAR BAY — tuning constants for the round 9 rebuild.
+// Every number the game balances on lives here so the modules stay dumb
+// and the state stays honest. Original setting, original names.
 
 export const CONFIG = {
-  saveKey: 'solmar-save',
+  title: 'SOLMAR BAY',
+  tagline: 'A sunset crime story',
 
-  world: {
-    size: 400,
-    groundColor: 0x2a1f2e,
-    fogColor: 0x2b1830,
-    fogNear: 60,
-    fogFar: 320,
-    bounds: 190,
-  },
+  // Wallet / calendar
+  startCash: 120,
+  startDay: 1,
+  // Minutes after 18:28 when a fresh day begins. S.time counts minutes
+  // from this sunset; 200 minutes in, the clock reads 21:48 (night).
+  dayStartClockMin: 18 * 60 + 28,
+  minutesPerDay: 1440,
+  // Game minutes that pass per real second while playing.
+  timeRate: 0.5,
+  nightStartMin: 150, // 21:00 — full night from here
+  duskStartMin: 62, // 19:30 — sunset fades into dusk
 
-  player: {
-    walkSpeed: 7,
-    runSpeed: 11,
-    maxHealth: 100,
-    startCash: 120,
-    startPos: { x: 0, y: 0, z: 0 },
-  },
+  // Player
+  playerSpeed: 9,
+  playerSprint: 13,
+  maxHealth: 100,
 
-  // Seven districts. The four the game is graded on are harbour, beach,
-  // uptown and the strip; downtown, marina and old town complete the map.
-  // Positions are map centres used for the nearest-district lookup.
-  districts: [
-    { id: 'downtown', name: 'DOWNTOWN', x: 0, z: 0 },
-    { id: 'harbor', name: 'HARBOR', x: 120, z: 120 },
-    { id: 'beach', name: 'BEACH', x: 0, z: 165 },
-    { id: 'uptown', name: 'UPTOWN', x: 120, z: -90 },
-    { id: 'strip', name: 'THE STRIP', x: 0, z: 135 },
-    { id: 'marina', name: 'MARINA', x: -120, z: 90 },
-    { id: 'oldtown', name: 'OLD TOWN', x: -120, z: -120 },
-  ],
-
-  // Six radio stations. Index 0 is the sunset station; index 1 is the
-  // bay hip-hop station the HUD test looks for after one Q press.
+  // Radio — 6 stations. Index 1 must stay BAYLINE: the smoke test cycles
+  // Q once from 0 and expects the HUD to show a BAYLINE name.
   stations: [
     {
-      name: 'SUNSET 88.4',
-      tag: 'golden-hour soul',
+      id: 'sunset', name: 'SUNSET 88.5', blurb: 'Golden hour, all day',
       tracks: [
-        'Amber Skyline — The Meridians',
-        'Last Light Drive — Coral Static',
-        'Peach Horizon — Velvet Coast',
+        'Amber Skyline — The Dusk Riders',
+        'Palms at Dusk — Marina Sol',
+        'Last Light — Coral Club',
+        'Sunset Strip — The Bayliners',
       ],
     },
     {
-      name: 'BAYLINE FM',
-      tag: 'bay hip-hop',
+      id: 'bayline', name: 'BAYLINE FM', blurb: 'Bay talk and traffic',
       tracks: [
-        'Corner Store Kings — Lil Marlow',
-        'Bay Money — Two Tone',
-        'Night Shift — K-Dotty',
+        'Bayline Morning — Dee Marsh',
+        'The Tidal Report — Solmar Newsdesk',
+        'Harbor Lights — The Ferries',
       ],
     },
     {
-      name: 'CORAL WAVE 91.2',
-      tag: 'surf pop',
+      id: 'dusk', name: 'DUSK 96.7', blurb: 'Slow jams after dark',
       tracks: [
-        'Salt Air — The Breakers',
-        'Boardwalk Nights — Sunny Reyes',
-        'Tidepool — Glass Harbor',
+        'Velvet Hour — Nico Palma',
+        'Neon Palms — Sadie Volt',
+        'Two A.M. — The Low Tides',
       ],
     },
     {
-      name: 'NIGHT DRIVE 104.7',
-      tag: 'synth cruise',
+      id: 'harbor', name: 'HARBOR HITS 104.3', blurb: 'Dockside anthems',
       tracks: [
-        'Neon Palms — Vector Fade',
-        'Midnight Overpass — Chrome Coast',
-        'Afterglow — Static Bloom',
+        'Container Blues — Big Ray Ketch',
+        'Foghorn — The Cranes',
+        'Salt Air — Lulu Marlin',
       ],
     },
     {
-      name: 'PALM TALK 99.9',
-      tag: 'talk radio',
+      id: 'tropicana', name: 'TROPICANA 107.9', blurb: 'Salsa and static',
       tracks: [
-        'The Vic Hour — Vic Torres',
-        'Bay News at Dusk — Marina Cole',
+        'Mango Moon — Los Brillos',
+        'Calle Ocho — Rosa Delgado',
+        'Piña Colada Radio — DJ Fuego',
       ],
     },
     {
-      name: 'GOLD COAST 87.5',
-      tag: 'oldies',
+      id: 'onda', name: 'LA ONDA 92.1', blurb: 'Surf rock and static',
       tracks: [
-        'Harbor Lights — The Del Rays',
-        'Seaside Stroll — Bobby Sands',
-        'Golden Summer — The Palmettos',
+        'Boardwalk — The Breakers',
+        'Rip Current — Sandy Toes',
+        'High Tide — The Undertows',
       ],
     },
   ],
 
-  // Four weapon slots. The SMG stays locked until the first job is done.
+  // Districts — 7 of them. The four the tests pin down are exact:
+  // HARBOR (120,120), BEACH (0,165), UPTOWN (120,-90), THE STRIP (0,135).
+  districts: [
+    { id: 'downtown', name: 'DOWNTOWN', x: 0, z: 0, color: '#e8a34c' },
+    { id: 'harbor', name: 'HARBOR', x: 120, z: 120, color: '#5fb4c9' },
+    { id: 'beach', name: 'BEACH', x: 0, z: 165, color: '#f2d492' },
+    { id: 'uptown', name: 'UPTOWN', x: 120, z: -90, color: '#b48ce8' },
+    { id: 'strip', name: 'THE STRIP', x: 0, z: 135, color: '#ff7a9e' },
+    { id: 'oldtown', name: 'OLD TOWN', x: -120, z: -60, color: '#c98a5f' },
+    { id: 'palms', name: 'PALM ROW', x: -120, z: 120, color: '#7ec98a' },
+  ],
+
+  // Weapons — slot order is the 1-4 key order. needsMissions is the
+  // missionIndex that unlocks the slot; the SMG opens after job 1.
   weapons: [
-    { name: 'PISTOL', mag: 12, damage: 25, fireRate: 0.28, range: 60, spread: 0.02 },
-    { name: 'SMG', mag: 30, damage: 14, fireRate: 0.09, range: 45, spread: 0.05, lockedUntilMission: 1 },
-    { name: 'SHOTGUN', mag: 6, damage: 55, fireRate: 0.9, range: 26, spread: 0.12 },
-    { name: 'RIFLE', mag: 30, damage: 40, fireRate: 0.13, range: 120, spread: 0.01 },
+    { id: 'pistol', name: 'PISTOL', magSize: 12, damage: 26, fireInterval: 0.22, reloadTime: 1.2, needsMissions: 0, range: 60 },
+    { id: 'smg', name: 'SMG', magSize: 30, damage: 14, fireInterval: 0.09, reloadTime: 1.4, needsMissions: 1, range: 55 },
+    { id: 'shotgun', name: 'SHOTGUN', magSize: 6, damage: 55, fireInterval: 0.85, reloadTime: 2.0, needsMissions: 3, range: 28 },
+    { id: 'rifle', name: 'RIFLE', magSize: 24, damage: 42, fireInterval: 0.14, reloadTime: 1.6, needsMissions: 5, range: 120 },
   ],
 
-  // Ten story jobs. Mission 5 is the crew job: Lena joins the player.
+  // MART corner store. The Burger is the load-bearing row: $15, +25 HP.
+  shopItems: [
+    { id: 'burger', name: 'Burger', price: 15, heal: 25, desc: 'Double stack, extra pickles.' },
+    { id: 'cola', name: 'Cola', price: 5, heal: 10, desc: 'Ice cold, bay classic.' },
+    { id: 'sandwich', name: 'Sandwich', price: 10, heal: 15, desc: 'Deli fresh, toasted.' },
+    { id: 'coffee', name: 'Coffee', price: 4, heal: 5, desc: 'Burnt, strong, honest.' },
+    { id: 'bandage', name: 'Bandage', price: 20, heal: 40, desc: 'Patches you right up.' },
+    { id: 'snack', name: 'Snack Bar', price: 3, heal: 5, desc: 'Mostly sugar, some hope.' },
+    { id: 'ammo', name: 'Ammo Box', price: 30, heal: 0, desc: 'A full spare magazine.' },
+  ],
+  martPos: { x: -72, z: -60 },
+  martRadius: 7,
+
+  // Safehouse (the motel) and garage door.
+  safehousePos: { x: 120, z: -120 },
+  safehouseRadius: 8,
+  garagePos: { x: -90, z: -66 },
+  garageRadius: 10,
+
+  // Pay-n-spray booth: drive a wanted car through, $150, heat to zero.
+  paynspray: { x: -90, z: -58, cost: 150, radius: 9 },
+
+  // Street race start pad and taxi stand.
+  racePad: { x: -60, z: -60 },
+  racePadRadius: 8,
+  racePrize: 300,
+  taxiStand: { x: 68, z: 60 },
+  taxiStandRadius: 8,
+
+  // Story jobs — 10 on the board. Mission 5 is the crew job.
   missions: [
-    { id: 'm1', title: 'First Pickup', pay: 200, giver: 'LENA CRUZ' },
-    { id: 'm2', title: 'Hot Wheels', pay: 300, giver: 'VIC TORRES' },
-    { id: 'm3', title: 'The Drop', pay: 350, giver: 'LENA CRUZ' },
-    { id: 'm4', title: 'Smoke and Mirrors', pay: 400, giver: 'MARCO SOLIS' },
-    { id: 'm5', title: 'Crew Up', pay: 600, giver: 'VIC TORRES' },
-    { id: 'm6', title: 'Harbor Lights', pay: 500, giver: 'LENA CRUZ' },
-    { id: 'm7', title: 'The Long Way Home', pay: 550, giver: 'MARCO SOLIS' },
-    { id: 'm8', title: 'Double Cross', pay: 700, giver: 'VIC TORRES' },
-    { id: 'm9', title: 'Bay Legend Rising', pay: 800, giver: 'LENA CRUZ' },
-    { id: 'm10', title: 'The Big Score', pay: 1500, giver: 'VIC TORRES' },
+    { id: 'm1', title: 'FIRST JOB', giver: 'LENA CRUZ', pay: 200, desc: 'Meet Lena at the garage. Vic has work.' },
+    { id: 'm2', title: 'HOT WHEELS', giver: 'VIC TORRES', pay: 300, desc: 'Lift a ride and bring it to the yard.' },
+    { id: 'm3', title: 'DEAD DROP', giver: 'MARCO SOLIS', pay: 350, desc: 'A package changes hands on the Strip.' },
+    { id: 'm4', title: 'QUIET STREETS', giver: 'LENA CRUZ', pay: 400, desc: 'Lose the tail, then make the pickup.' },
+    { id: 'm5', title: 'CREW UP', giver: 'VIC TORRES', pay: 600, desc: 'Lena rides with you. Hit the convoy together.' },
+    { id: 'm6', title: 'HARBOR LIGHTS', giver: 'MARCO SOLIS', pay: 550, desc: 'Something is coming in on the night boat.' },
+    { id: 'm7', title: 'THE LONG WAY', giver: 'LENA CRUZ', pay: 650, desc: 'Drive the long way. Do not get followed.' },
+    { id: 'm8', title: 'PAYBACK', giver: 'VIC TORRES', pay: 800, desc: 'Somebody shorted Vic. Collect, politely.' },
+    { id: 'm9', title: 'GOLDEN HOUR', giver: 'MARCO SOLIS', pay: 900, desc: 'One last score before the sun goes down.' },
+    { id: 'm10', title: 'BAY LEGEND', giver: 'VIC TORRES', pay: 1500, desc: 'The whole bay is watching. Make it count.' },
   ],
 
-  // Respect ladder. 200 respect from a fresh start lands on STREET HUSTLER.
-  respectRanks: [
-    { min: 0, title: 'NOBODY' },
-    { min: 150, title: 'STREET HUSTLER' },
-    { min: 400, title: 'NEIGHBORHOOD NAME' },
-    { min: 800, title: 'BAY PLAYER' },
-    { min: 1500, title: 'KING OF THE BAY' },
-    { min: 3000, title: 'BAY LEGEND' },
-  ],
-
-  // Daily challenges: three rows, each pays out once when completed.
+  // Daily challenges — the board pays each one once per day.
   challenges: [
-    { id: 'ch-packages', stat: 'packages', target: 3, reward: 100, text: 'Collect 3 packages' },
-    { id: 'ch-race', stat: 'racesWon', target: 1, reward: 150, text: 'Win 1 street race' },
-    { id: 'ch-taxi', stat: 'faresDone', target: 1, reward: 120, text: 'Complete 1 taxi fare' },
+    { id: 'daily-packages', stat: 'packages', target: 3, reward: 100, text: 'Collect 3 packages' },
+    { id: 'daily-race', stat: 'racesWon', target: 1, reward: 150, text: 'Win 1 street race' },
+    { id: 'daily-fare', stat: 'faresDone', target: 1, reward: 120, text: 'Finish 1 taxi fare' },
   ],
 
-  // The MART corner store. The Burger is the cheap heal: $15 for +25 HP.
-  shop: [
-    { name: 'Burger', price: 15, heal: 25, blurb: 'Double stack, extra pickles.' },
-    { name: 'Fries', price: 8, heal: 15, blurb: 'Salted, still hot.' },
-    { name: 'Pizza Slice', price: 12, heal: 20, blurb: 'Fold it, eat it walking.' },
-    { name: 'Soda', price: 5, heal: 10, blurb: 'Ice cold, too sweet.' },
-    { name: 'Energy Drink', price: 10, heal: 5, blurb: 'Tastes like static. Works.' },
+  // Respect ladder. +200 from 0 must land on STREET HUSTLER.
+  ranks: [
+    { min: 0, title: 'NOBODY' },
+    { min: 50, title: 'SMALL-TIME' },
+    { min: 150, title: 'STREET HUSTLER' },
+    { min: 400, title: 'CREW LEADER' },
+    { min: 800, title: 'BAY BOSS' },
+    { min: 1500, title: 'BAY LEGEND' },
   ],
 
-  // Twelve collectible packages. One pays $50.
-  packages: [
-    { x: -120, z: 120 },
-    { x: 120, z: -120 },
-    { x: -120, z: -120 },
-    { x: 120, z: 120 },
-    { x: 0, z: -150 },
-    { x: -150, z: 0 },
-    { x: 150, z: 30 },
-    { x: 30, z: 150 },
-    { x: -60, z: 150 },
-    { x: 90, z: -150 },
-    { x: -150, z: -60 },
-    { x: 60, z: 90 },
-  ],
+  // Heat: wanted stars are heat / 20, capped at 5.
+  heatPerStar: 20,
+  maxWanted: 5,
+  heliAtStars: 3,
+
+  // Fence base quotes by vehicle kind (before condition / wanted bonus).
+  fenceBase: { bike: 220, sedan: 420, pickup: 520, sport: 900 },
+
+  // Vehicle base stats the smoke test pins down.
+  vehicleBase: {
+    bike: { maxHealth: 60, perf: 38 },
+    pickup: { maxHealth: 130, perf: 28 },
+    sedan: { maxHealth: 100, perf: 32 },
+    sport: { maxHealth: 110, perf: 52 },
+  },
+
+  packageCount: 12,
   packageReward: 50,
 
-  // Street race: start pad plus four checkpoint gates, $300 for the win.
-  race: {
-    start: { x: -60, z: -60 },
-    gates: [
-      { x: 60, z: -60 },
-      { x: 60, z: 60 },
-      { x: -60, z: 60 },
-      { x: -60, z: -60 },
-    ],
-    gateRadius: 8,
-    prize: 300,
-  },
-
-  // Taxi stand and fares.
-  taxi: {
-    stand: { x: 68, z: 60 },
-    radius: 10,
-    minFare: 80,
-    maxFare: 220,
-  },
-
-  safehouse: { x: 120, z: -120, radius: 10 },
-  mart: { x: -72, z: -60, radius: 10 },
-  garage: { x: -90, z: -66, radius: 10 },
-  fence: { x: 110, z: 138, radius: 12 },
-
-  // Pay-n-spray booth: drive a wanted car through, $150, heat wiped.
-  sprayBooth: { x: -90, z: -58, radius: 9, price: 150 },
-
-  // Vehicle definitions. perf() returns the base number when untuned.
-  vehicles: {
-    bike: { kind: 'bike', maxHealth: 60, perf: 38, topSpeed: 34, accel: 22, color: 0xd94f30, spawn: { x: -88, z: -64 } },
-    sedan: { kind: 'sedan', maxHealth: 100, perf: 32, topSpeed: 30, accel: 16, color: 0x3a6fd8, spawn: { x: 20, z: -40 } },
-    pickup: { kind: 'pickup', maxHealth: 130, perf: 28, topSpeed: 26, accel: 13, color: 0x4a7a3a, spawn: { x: 60, z: 120 } },
-    sport: { kind: 'sport', maxHealth: 110, perf: 55, topSpeed: 44, accel: 26, color: 0xe8b73a, spawn: { x: -102, z: -64 } },
-  },
-
-  police: {
-    maxCops: 6,
-    callsignPrefix: 'PD-',
-    spawnDistance: 40,
-    heliMinWanted: 3,
-    // heat is 0-100; wanted stars are heat / 20, capped at 5.
-    heatPerStar: 20,
-    maxWanted: 5,
-  },
-
-  // Day/night: S.time counts game minutes past 18:28. Night is fully in
-  // by time 210 (21:58); the sky is more than half dark by time 200.
-  dayNight: {
-    sunsetMinutes: 0,
-    duskAt: 120,
-    nightAt: 200,
-    fullNightAt: 210,
-    minutesPerRealSecond: 0.5,
+  // Look
+  colors: {
+    amber: '#ffb347',
+    ember: '#ff7a3d',
+    pink: '#ff7a9e',
+    dusk: '#2a1a3a',
+    panel: 'rgba(22, 12, 34, 0.78)',
   },
 };
 

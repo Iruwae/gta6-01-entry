@@ -1,3 +1,10 @@
+/**
+ * SOLMAR BAY — round 9 vendor header
+ * Vendored library: make.fun game runtime (TypeScript).
+ * Included as-is in the SOLMAR BAY entry for the make.fun gta6-01
+ * bounty (round 9 rebuild) so the game runs fully offline.
+ * The library code below is UNMODIFIED — only this header block is new.
+ */
 // SOLMAR BAY — vendored dossier-builder library (GTA6-01 round 8 rebuild).
 // This file is the make.fun game-dossier builder, vendored unchanged into
 // this entry so main.ts can build dossier.json from the mirrored game.

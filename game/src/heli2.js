@@ -1,81 +1,82 @@
-// SOLMAR BAY — heli2.js (round 8 rebuild, written blind from the spec)
-// The police helicopter: it lifts off at 3+ wanted stars, shadows the
-// player from high above, and stands down below 3 stars.
-// Talks to the rest of the game only through ctx.
+// heli2.js — the police helicopter. It shows up once the wanted level
+// hits 3 stars, circles overhead above the player, and leaves (S.heli
+// back to null) as soon as the heat drops below 3.
 import * as THREE from '../vendor/three.module.min.js';
-
-const HOVER_HEIGHT = 42;
 
 export function init(ctx) {
   const S = ctx.state || ctx.S;
   const scene = ctx.scene;
+  let angle = 0;
+  let rotor = null;
 
-  // One helicopter, built once and parked out of sight until it is needed.
-  const heli = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0x27313d,
-    roughness: 0.5,
-    metalness: 0.3,
-  });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 5.2), bodyMat);
-  heli.add(body);
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 4.2), bodyMat);
-  tail.position.set(0, 0.2, -4.4);
-  heli.add(tail);
-  const glass = new THREE.Mesh(
-    new THREE.BoxGeometry(1.9, 0.9, 1.4),
-    new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.2, metalness: 0.6 })
-  );
-  glass.position.set(0, 0.2, 2.2);
-  heli.add(glass);
-  const rotor = new THREE.Group();
-  const bladeMat = new THREE.MeshStandardMaterial({ color: 0x14181f });
-  for (const a of [0, Math.PI / 2]) {
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(9, 0.08, 0.5), bladeMat);
-    blade.rotation.y = a;
-    rotor.add(blade);
-  }
-  rotor.position.y = 1.0;
-  heli.add(rotor);
-  const lamp = new THREE.Mesh(
-    new THREE.SphereGeometry(0.35, 10, 8),
-    new THREE.MeshStandardMaterial({
-      color: 0xfff2b0,
-      emissive: 0xffe9a0,
-      emissiveIntensity: 1.2,
-    })
-  );
-  lamp.position.set(0, -0.9, 1.5);
-  heli.add(lamp);
-  heli.visible = false;
-
-  const target = new THREE.Vector3();
-
-  ctx.updates.push((dt) => {
-    if (S.mode && S.mode !== 'playing') return;
-    const wanted = S.wanted || 0;
-
-    if (wanted >= 3 && !S.heli) {
-      S.heli = {
-        pos: new THREE.Vector3(S.player.pos.x, HOVER_HEIGHT, S.player.pos.z),
-        mesh: heli,
-        rotor,
-      };
-      scene.add(heli);
-      heli.visible = true;
-    } else if (wanted < 3 && S.heli) {
-      scene.remove(heli);
-      heli.visible = false;
-      S.heli = null;
+  function spawnHeli() {
+    const group = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1d2a44, roughness: 0.4, metalness: 0.5 });
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x9fd8e8, roughness: 0.2, metalness: 0.6 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 4.4), bodyMat);
+    group.add(body);
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.0, 1.2), glassMat);
+    nose.position.set(0, -0.1, 2.4);
+    group.add(nose);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 4.0), bodyMat);
+    tail.position.set(0, 0.3, -3.8);
+    group.add(tail);
+    rotor = new THREE.Mesh(new THREE.BoxGeometry(9, 0.08, 0.5), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+    rotor.position.y = 1.0;
+    group.add(rotor);
+    const skidMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    for (const x of [-0.9, 0.9]) {
+      const skid = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 3.4), skidMat);
+      skid.position.set(x, -0.9, 0);
+      group.add(skid);
     }
+    const light = new THREE.Mesh(
+      new THREE.SphereGeometry(0.25, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff4444 })
+    );
+    light.position.set(0, -0.9, 1.5);
+    group.add(light);
+    if (scene) scene.add(group);
+    const heli = {
+      pos: new THREE.Vector3(S.player.pos.x, 28, S.player.pos.z),
+      mesh: group,
+      kind: 'heli',
+    };
+    group.position.copy(heli.pos);
+    S.heli = heli;
+    return heli;
+  }
 
-    if (S.heli) {
-      // Ease overhead and hold station above the player.
-      target.set(S.player.pos.x, HOVER_HEIGHT, S.player.pos.z);
-      S.heli.pos.lerp(target, Math.min(1, dt * 1.4));
-      heli.position.copy(S.heli.pos);
-      heli.rotation.y += dt * 0.4;
-      rotor.rotation.y += dt * 22;
+  function removeHeli() {
+    if (!S.heli) return;
+    if (scene && S.heli.mesh) scene.remove(S.heli.mesh);
+    S.heli = null;
+  }
+
+  if (ctx.api) {
+    ctx.api.spawnHeli = spawnHeli;
+    ctx.api.removeHeli = removeHeli;
+  }
+
+  (ctx.updates || []).push((dt, t) => {
+    if (!S || !S.player || !S.player.pos) return;
+    const wanted = typeof S.wanted === 'number' ? S.wanted : 0;
+    if (S.mode === 'playing' && wanted >= 3) {
+      if (!S.heli) spawnHeli();
+    } else if (S.heli && wanted < 3) {
+      removeHeli();
+      return;
+    }
+    if (!S.heli) return;
+    // Slow orbit above the player, spotlight-style, always in view.
+    angle += dt * 0.35;
+    const px = S.player.pos.x;
+    const pz = S.player.pos.z;
+    S.heli.pos.set(px + Math.cos(angle) * 18, 28, pz + Math.sin(angle) * 18);
+    if (S.heli.mesh) {
+      S.heli.mesh.position.copy(S.heli.pos);
+      S.heli.mesh.rotation.y = Math.atan2(px - S.heli.pos.x, pz - S.heli.pos.z);
+      if (rotor) rotor.rotation.y += dt * 18;
     }
   });
 }

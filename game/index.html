@@ -3,185 +3,264 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOLMAR BAY — sunset open-world crime</title>
+<title>SOLMAR BAY — a sunset crime story</title>
 <style>
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #1a1020;
-    font-family: 'Segoe UI', system-ui, sans-serif; color: #ffe9d6; }
+  :root {
+    --amber: #ffb347;
+    --ember: #ff7a3d;
+    --pink: #ff7a9e;
+    --panel: rgba(22, 12, 34, 0.78);
+    --line: rgba(255, 179, 71, 0.45);
+    --ink: #ffe9c9;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a0f2a; }
+  body { font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif; color: var(--ink); }
   .hidden { display: none !important; }
+
   #game-container { position: fixed; inset: 0; }
-  #game-container canvas { display: block; }
-  #sunset-band { position: fixed; left: 0; right: 0; top: 0; height: 110px;
-    background: linear-gradient(180deg, rgba(255,126,74,.28), rgba(255,126,74,0));
-    pointer-events: none; z-index: 2; }
-  #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2;
-    background: radial-gradient(ellipse at center, transparent 55%, rgba(10,4,16,.55) 100%); }
-  #flash { position: fixed; inset: 0; background: #fff; opacity: .7;
-    pointer-events: none; z-index: 6; }
-  .panel { background: rgba(16,8,22,.82); border: 1px solid rgba(255,179,107,.45);
-    border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
-  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 3;
-    font-size: 14px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
-  #cash { position: absolute; top: 14px; right: 18px; font-size: 26px; font-weight: 800;
-    color: #ffd166; letter-spacing: 1px; }
-  #district { position: absolute; top: 14px; left: 18px; font-size: 20px; font-weight: 800;
-    letter-spacing: 3px; color: #ffb36b; }
-  #day-time { position: absolute; top: 42px; left: 18px; font-size: 13px; letter-spacing: 2px;
-    color: #ffe9d6; }
-  #respect-line { position: absolute; top: 64px; left: 18px; font-size: 13px; }
-  #respect-num { color: #ffd166; font-weight: 700; }
-  #respect-rank { color: #ff9d76; font-weight: 700; letter-spacing: 1px; margin-left: 6px; }
-  #health-bar { position: absolute; left: 18px; bottom: 18px; width: 210px; height: 14px;
-    background: rgba(0,0,0,.6); border: 1px solid rgba(255,179,107,.5); border-radius: 7px;
-    overflow: hidden; }
-  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5e62, #ff9966); }
-  #radio { position: absolute; right: 18px; bottom: 18px; text-align: right; }
-  #radio-station { display: block; font-weight: 800; color: #ffb36b; letter-spacing: 1px; }
-  #radio-track { display: block; font-size: 12px; color: #e8c9a8; }
-  #wanted { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-    font-size: 24px; color: #ff5e62; letter-spacing: 4px; }
-  #roster { position: absolute; top: 52px; right: 18px; width: 240px; padding: 8px 10px; }
-  #roster-code { font-size: 12px; letter-spacing: 2px; color: #ffd166; margin-bottom: 4px; }
-  .roster-row { display: flex; justify-content: space-between; font-size: 12px;
-    padding: 2px 0; border-top: 1px solid rgba(255,179,107,.18); }
-  #minimap { position: absolute; right: 18px; bottom: 86px; border: 1px solid rgba(255,179,107,.5);
-    border-radius: 6px; background: rgba(10,5,14,.7); }
-  #weapons { position: absolute; left: 18px; bottom: 44px; display: flex; gap: 8px; }
-  #weapons .slot { min-width: 86px; padding: 6px 8px; background: rgba(16,8,22,.82);
-    border: 1px solid rgba(255,179,107,.4); border-radius: 6px; }
-  #weapons .slot.active { border-color: #ffd166; box-shadow: 0 0 10px rgba(255,209,102,.5); }
-  .slot-name { display: block; font-weight: 800; font-size: 12px; letter-spacing: 1px; }
-  .slot-ammo { display: block; font-size: 12px; color: #ffd166; }
-  #speedo { position: absolute; right: 18px; bottom: 300px; text-align: right; }
-  #speed-num { font-size: 30px; font-weight: 800; color: #fff; }
-  #speed-gear { font-size: 14px; color: #ffb36b; margin-left: 6px; }
-  #speed-car { display: block; font-size: 12px; letter-spacing: 2px; color: #e8c9a8; }
-  #objective { position: absolute; left: 18px; top: 96px; font-size: 13px; color: #ffe9d6;
-    background: rgba(16,8,22,.7); padding: 6px 10px; border-radius: 6px;
-    border-left: 3px solid #ffb36b; max-width: 340px; }
-  #toast { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
-    background: rgba(16,8,22,.88); border: 1px solid rgba(255,179,107,.5);
-    padding: 8px 16px; border-radius: 6px; font-size: 14px; max-width: 640px; }
-  #dialogue { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%);
-    width: 640px; max-width: 92vw; padding: 14px 18px 14px 86px; z-index: 5; cursor: pointer; }
-  #dlg-portrait { position: absolute; left: 14px; top: 14px; width: 56px; height: 56px;
-    border-radius: 50%; background: linear-gradient(135deg, #ff7e4a, #b04a8a);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 26px; font-weight: 800; color: #fff; }
-  #dlg-name { font-weight: 800; letter-spacing: 2px; color: #ffb36b; margin-bottom: 4px; }
-  #dlg-text { font-size: 15px; line-height: 1.45; }
-  #cutscene { position: fixed; inset: 0; z-index: 7; background: #000;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    cursor: pointer; }
-  #cutscene-text { max-width: 680px; text-align: center; font-size: 22px; line-height: 1.6;
-    color: #ffe9d6; padding: 0 24px; }
-  .cutscene-hint { margin-top: 28px; font-size: 13px; letter-spacing: 3px; color: #ffb36b; }
-  #menu { position: fixed; inset: 0; z-index: 8; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; text-align: center;
-    background: linear-gradient(180deg, rgba(26,10,28,.25), rgba(26,10,28,.88)); }
-  #menu h1 { font-size: 64px; margin: 0; letter-spacing: 10px; color: #ffb36b;
-    text-shadow: 0 4px 30px rgba(255,126,74,.6); }
-  #menu p { font-size: 16px; color: #ffe9d6; max-width: 520px; line-height: 1.5; }
-  #menu button, .menu-btn { margin-top: 18px; font-size: 18px; font-weight: 800;
-    letter-spacing: 3px; padding: 12px 34px; border-radius: 8px; cursor: pointer;
-    color: #1a1020; background: linear-gradient(90deg, #ffb36b, #ffd166);
-    border: none; }
-  #menu button:hover, .menu-btn:hover { filter: brightness(1.1); }
-  .controls { margin-top: 26px; font-size: 13px; line-height: 1.9; color: #e8c9a8; }
-  #pause-menu, #mission-select, #shop-panel, #garage-panel {
-    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 9;
-    width: 460px; max-width: 92vw; padding: 22px; }
-  #pause-menu h2, #mission-select h2, #shop-panel h2, #garage-panel h2 {
-    margin: 0 0 14px 0; letter-spacing: 3px; color: #ffb36b; }
-  #pause-menu button, #mission-select button, #shop-panel button, #garage-panel button {
-    display: block; width: 100%; margin-top: 10px; font-size: 15px; font-weight: 700;
-    letter-spacing: 2px; padding: 10px; border-radius: 6px; cursor: pointer;
-    color: #1a1020; background: linear-gradient(90deg, #ffb36b, #ffd166); border: none; }
-  .job-row, .shop-row, .garage-row { display: flex; justify-content: space-between; gap: 10px;
-    padding: 9px 10px; border-top: 1px solid rgba(255,179,107,.18); cursor: pointer;
-    font-size: 14px; }
-  .job-row:hover, .shop-row:hover, .garage-row:hover { background: rgba(255,179,107,.12); }
-  .job-num { color: #ffd166; font-weight: 800; }
-  .job-pay { color: #ffd166; font-weight: 700; }
-  .shop-buy, .garage-spawn { color: #1a1020; background: #ffd166; border: none;
-    border-radius: 4px; padding: 3px 12px; font-weight: 800; cursor: pointer; }
+  #game-container canvas { display: block; width: 100%; height: 100%; }
+
+  #sunset-band {
+    position: fixed; left: 0; right: 0; top: 0; height: 92px; pointer-events: none; z-index: 3;
+    background: linear-gradient(180deg, rgba(255, 122, 61, 0.20), rgba(255, 122, 158, 0.10) 55%, rgba(255, 122, 158, 0));
+  }
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 3;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(10, 4, 20, 0.55) 100%);
+  }
+  #flash {
+    position: fixed; inset: 0; pointer-events: none; z-index: 6;
+    background: rgba(255, 240, 220, 0.85); opacity: 0; transition: opacity 0.35s ease-out;
+  }
+
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; font-size: 14px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 12px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(2px);
+  }
+  .tl { position: absolute; top: 14px; left: 14px; display: flex; flex-direction: column; gap: 6px; }
+  #cash { font-size: 26px; font-weight: 700; color: var(--amber); letter-spacing: 1px; }
+  #district { font-size: 15px; font-weight: 700; letter-spacing: 3px; }
+  #day-time { font-size: 13px; letter-spacing: 2px; color: #ffd9a0; }
+  #objective { font-size: 13px; color: #ffe9c9; max-width: 340px; line-height: 1.35; }
+  #respect-line { font-size: 13px; letter-spacing: 1px; }
+  #respect-num { color: var(--amber); font-weight: 700; }
+  #respect-rank { color: var(--pink); font-weight: 700; letter-spacing: 2px; }
+
+  .tr { position: absolute; top: 14px; right: 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  #wanted { font-size: 22px; letter-spacing: 3px; color: #7ec8ff; text-shadow: 0 0 12px rgba(80, 160, 255, 0.8); }
+  #radio { text-align: right; min-width: 210px; }
+  #radio-station { font-size: 15px; font-weight: 700; color: var(--amber); letter-spacing: 1px; }
+  #radio-track { font-size: 12px; color: #ffd9a0; margin-top: 2px; }
+  #minimap { border: 1px solid var(--line); border-radius: 10px; background: #12081f; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45); }
+  #roster { min-width: 230px; }
+  #roster-code { font-size: 11px; letter-spacing: 2px; color: #9fd8ff; margin-bottom: 5px; }
+  .roster-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 2px 0; border-top: 1px solid rgba(255, 179, 71, 0.18); }
+  .roster-row b { color: #bfe6ff; }
+
+  .bl { position: absolute; left: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
+  #health-bar { width: 220px; height: 14px; border: 1px solid var(--line); border-radius: 7px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
+  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, var(--ember), var(--amber)); transition: width 0.2s; }
+
+  .br { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+  #weapons { display: flex; gap: 6px; }
+  #weapons .slot {
+    width: 86px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); font-size: 11px; color: #d9c2a8;
+  }
+  #weapons .slot.on { border-color: var(--amber); color: var(--ink); box-shadow: 0 0 10px rgba(255, 179, 71, 0.35); }
+  #weapons .slot-name { font-weight: 700; letter-spacing: 1px; }
+  #weapons .slot-ammo { color: var(--amber); margin-top: 2px; }
+  #speedo { text-align: right; min-width: 170px; }
+  #speed-num { font-size: 30px; font-weight: 700; color: var(--amber); line-height: 1; }
+  #speed-gear { font-size: 12px; letter-spacing: 2px; color: #ffd9a0; }
+  #speed-car { font-size: 12px; letter-spacing: 2px; color: var(--pink); }
+
+  #toast {
+    position: absolute; top: 108px; left: 50%; transform: translateX(-50%);
+    max-width: 640px; text-align: center; font-size: 15px; line-height: 1.4;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 9px 16px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  }
+  #dialogue {
+    position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%);
+    width: min(640px, 86vw); display: flex; gap: 12px; align-items: flex-start;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; pointer-events: auto; cursor: pointer;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  }
+  #dlg-portrait {
+    flex: 0 0 46px; height: 46px; border-radius: 50%; background: var(--ember);
+    color: #241028; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; letter-spacing: 1px;
+  }
+  #dlg-name { font-weight: 700; letter-spacing: 2px; color: var(--amber); font-size: 13px; }
+  #dlg-text { margin-top: 4px; font-size: 15px; line-height: 1.45; }
+  .hint { margin-top: 8px; font-size: 11px; color: #c9a87e; letter-spacing: 1px; }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 24px;
+    background: linear-gradient(180deg, rgba(42, 18, 58, 0.82), rgba(20, 8, 32, 0.92));
+  }
+  .overlay h1 {
+    font-size: 64px; letter-spacing: 10px; color: var(--amber);
+    text-shadow: 0 0 34px rgba(255, 122, 61, 0.65);
+  }
+  .overlay h2 { font-size: 15px; letter-spacing: 4px; color: var(--pink); margin-top: 8px; font-weight: 400; }
+  .overlay p { max-width: 560px; line-height: 1.6; color: #ffe9c9; margin-top: 18px; font-size: 15px; }
+  .keys { margin-top: 20px; font-size: 13px; line-height: 1.9; color: #ffd9a0; letter-spacing: 1px; }
+  .keys b { color: var(--amber); }
+  .big-btn {
+    pointer-events: auto; margin-top: 26px; padding: 13px 34px; font-size: 17px; font-weight: 700;
+    letter-spacing: 3px; color: #241028; background: linear-gradient(180deg, var(--amber), var(--ember));
+    border: none; border-radius: 10px; cursor: pointer; font-family: inherit;
+    box-shadow: 0 6px 22px rgba(255, 122, 61, 0.45);
+  }
+  .big-btn:hover { filter: brightness(1.1); }
+  .ghost-btn {
+    pointer-events: auto; margin-top: 12px; padding: 10px 26px; font-size: 14px; font-weight: 700;
+    letter-spacing: 2px; color: var(--amber); background: transparent;
+    border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-family: inherit;
+  }
+  .ghost-btn:hover { background: rgba(255, 179, 71, 0.12); }
+  #cutscene { background: rgba(8, 3, 16, 0.55); justify-content: flex-end; padding-bottom: 12vh; }
+  #cutscene-text { font-size: 22px; letter-spacing: 2px; line-height: 1.6; max-width: 720px; color: #ffe9c9; text-shadow: 0 2px 14px rgba(0,0,0,0.8); }
+  #cutscene .hint { margin-top: 22px; }
+
+  .sheet {
+    position: fixed; z-index: 11; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(560px, 92vw); max-height: 84vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px 22px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  }
+  .sheet h3 { letter-spacing: 3px; color: var(--amber); font-size: 18px; margin-bottom: 12px; }
+  .job-row, .shop-row, .garage-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 9px 4px; border-top: 1px solid rgba(255, 179, 71, 0.18); font-size: 14px;
+  }
+  .job-row { cursor: pointer; }
+  .job-row:hover { background: rgba(255, 179, 71, 0.08); }
+  .job-row .t { font-weight: 700; letter-spacing: 1px; }
+  .job-row .g { color: var(--pink); font-size: 12px; letter-spacing: 1px; }
+  .job-row .pay { color: var(--amber); font-weight: 700; white-space: nowrap; }
+  .shop-name, .garage-name { font-weight: 700; letter-spacing: 1px; }
+  .shop-desc { font-size: 12px; color: #d9c2a8; }
+  .shop-price, .garage-price { color: var(--amber); font-weight: 700; white-space: nowrap; }
+  .mini-btn {
+    pointer-events: auto; padding: 6px 14px; font-size: 13px; font-weight: 700; letter-spacing: 1px;
+    color: #241028; background: linear-gradient(180deg, var(--amber), var(--ember));
+    border: none; border-radius: 7px; cursor: pointer; font-family: inherit; white-space: nowrap;
+  }
+  .sheet .close-row { margin-top: 14px; text-align: right; }
+  @media (max-width: 700px) {
+    .overlay h1 { font-size: 40px; letter-spacing: 6px; }
+    #weapons .slot { width: 68px; }
+    #objective { max-width: 220px; }
+  }
 </style>
 </head>
 <body>
-<div id="game-container"></div>
-<div id="sunset-band"></div>
-<div id="vignette"></div>
-<div id="flash" class="hidden"></div>
+  <div id="game-container"></div>
+  <div id="sunset-band"></div>
+  <div id="vignette"></div>
+  <div id="flash"></div>
 
-<div id="hud" class="hidden">
-  <div id="cash">$120</div>
-  <div id="district">DOWNTOWN</div>
-  <div id="day-time">DAY 1 18:28 SUNSET</div>
-  <div id="respect-line"><span id="respect-num">0</span><span id="respect-rank">NOBODY</span></div>
-  <div id="health-bar"><div id="health-fill"></div></div>
-  <div id="radio"><span id="radio-station">SUNSET 88.4</span><span id="radio-track">Amber Skyline — The Meridians</span></div>
-  <div id="wanted"></div>
-  <div id="roster" class="panel"><div id="roster-code">DISPATCH 10-4</div><div id="roster-rows"></div></div>
-  <canvas id="minimap" width="180" height="180"></canvas>
-  <div id="weapons">
-    <div class="slot"><span class="slot-name">PISTOL</span><span class="slot-ammo">12</span></div>
-    <div class="slot"><span class="slot-name">SMG</span><span class="slot-ammo">30</span></div>
-    <div class="slot"><span class="slot-name">SHOTGUN</span><span class="slot-ammo">6</span></div>
-    <div class="slot"><span class="slot-name">RIFLE</span><span class="slot-ammo">30</span></div>
+  <div id="hud" class="hidden">
+    <div class="tl">
+      <div id="cash" class="panel">$120</div>
+      <div id="district" class="panel">DOWNTOWN</div>
+      <div id="day-time" class="panel">DAY 1 18:28 SUNSET</div>
+      <div id="objective" class="panel">Explore Solmar Bay — find work.</div>
+      <div id="respect-line" class="panel">RESPECT <span id="respect-num">0</span> · <span id="respect-rank">NOBODY</span></div>
+    </div>
+    <div class="tr">
+      <div id="wanted" class="panel hidden">☆☆☆☆☆</div>
+      <div id="radio" class="panel">
+        <div id="radio-station">SUNSET 88.5</div>
+        <div id="radio-track">Amber Skyline — The Dusk Riders</div>
+      </div>
+      <canvas id="minimap" width="180" height="180"></canvas>
+      <div id="roster" class="panel hidden">
+        <div id="roster-code">DISPATCH 10-80</div>
+        <div id="roster-rows"></div>
+      </div>
+    </div>
+    <div class="bl">
+      <div id="health-bar"><div id="health-fill"></div></div>
+    </div>
+    <div class="br">
+      <div id="weapons">
+        <div class="slot on"><div class="slot-name">PISTOL</div><div class="slot-ammo">12</div></div>
+        <div class="slot"><div class="slot-name">SMG</div><div class="slot-ammo">30</div></div>
+        <div class="slot"><div class="slot-name">SHOTGUN</div><div class="slot-ammo">6</div></div>
+        <div class="slot"><div class="slot-name">RIFLE</div><div class="slot-ammo">24</div></div>
+      </div>
+      <div id="speedo" class="panel">
+        <div><span id="speed-num">0</span> <span>MPH</span></div>
+        <div id="speed-gear">N</div>
+        <div id="speed-car">ON FOOT</div>
+      </div>
+    </div>
+    <div id="toast" class="hidden"></div>
+    <div id="dialogue" class="hidden">
+      <div id="dlg-portrait">LC</div>
+      <div>
+        <div id="dlg-name">LENA CRUZ</div>
+        <div id="dlg-text"></div>
+        <div class="hint">CLICK TO CONTINUE</div>
+      </div>
+    </div>
   </div>
-  <div id="speedo"><span id="speed-num">0</span><span id="speed-gear">N</span><span id="speed-car">ON FOOT</span></div>
-  <div id="objective">Meet Lena at the garage.</div>
-  <div id="toast"></div>
-</div>
 
-<div id="dialogue" class="panel hidden">
-  <div id="dlg-portrait">L</div>
-  <div id="dlg-name">LENA CRUZ</div>
-  <div id="dlg-text"></div>
-</div>
-
-<div id="cutscene" class="hidden">
-  <div id="cutscene-text"></div>
-  <div class="cutscene-hint">PRESS X TO SKIP</div>
-</div>
-
-<div id="menu">
-  <h1>SOLMAR BAY</h1>
-  <p>A sun-soaked bay city at golden hour. Run jobs for Vic Torres, steal
-  cars, outrun the police, and build respect from nobody to bay legend.</p>
-  <button id="btn-new">NEW GAME</button>
-  <div class="controls">
-    WASD / arrows — walk &amp; drive &nbsp;·&nbsp; Mouse — aim &amp; shoot<br>
-    1–4 weapons &nbsp;·&nbsp; R reload &nbsp;·&nbsp; E enter car &nbsp;·&nbsp; Q radio<br>
-    F shop &nbsp;·&nbsp; H rest &nbsp;·&nbsp; G garage &nbsp;·&nbsp; T race &nbsp;·&nbsp; Y taxi<br>
-    V sell car &nbsp;·&nbsp; P pause &amp; jobs &nbsp;·&nbsp; X skip cutscene
+  <div id="cutscene" class="overlay hidden">
+    <div id="cutscene-text">The sun is going down on Solmar Bay.</div>
+    <div class="hint">PRESS X TO SKIP</div>
   </div>
-</div>
 
-<div id="pause-menu" class="panel hidden">
-  <h2>PAUSED</h2>
-  <button id="btn-missions">JOBS</button>
-  <button id="btn-resume">RESUME</button>
-</div>
+  <div id="menu" class="overlay">
+    <h1>SOLMAR BAY</h1>
+    <h2>A SUNSET CRIME STORY</h2>
+    <p>One long golden hour over the bay. You are a small-time hustler with
+    empty pockets and a fast mouth. Run jobs for Vic Torres, ride with Lena
+    Cruz, steal what you need, outrun what you cannot — and build a name
+    from NOBODY to BAY LEGEND.</p>
+    <div class="keys">
+      <b>WASD</b> MOVE / DRIVE &nbsp;·&nbsp; <b>MOUSE</b> AIM + SHOOT<br>
+      <b>1–4</b> WEAPONS &nbsp;·&nbsp; <b>R</b> RELOAD &nbsp;·&nbsp; <b>E</b> ENTER CAR<br>
+      <b>Q</b> RADIO &nbsp;·&nbsp; <b>F</b> SHOP &nbsp;·&nbsp; <b>H</b> SAFEHOUSE<br>
+      <b>G</b> GARAGE &nbsp;·&nbsp; <b>T</b> RACE &nbsp;·&nbsp; <b>Y</b> TAXI &nbsp;·&nbsp; <b>V</b> FENCE &nbsp;·&nbsp; <b>P</b> PAUSE
+    </div>
+    <button id="btn-new" class="big-btn">NEW GAME</button>
+  </div>
 
-<div id="mission-select" class="panel hidden">
-  <h2>JOB BOARD</h2>
-  <div id="mission-list"></div>
-  <button id="btn-close-jobs">CLOSE</button>
-</div>
+  <div id="pause-menu" class="overlay hidden">
+    <h1>PAUSED</h1>
+    <h2>THE BAY WAITS FOR NO ONE — EXCEPT NOW</h2>
+    <button id="btn-missions" class="big-btn">JOB BOARD</button>
+    <button id="btn-resume" class="ghost-btn">RESUME</button>
+  </div>
 
-<div id="shop-panel" class="panel hidden">
-  <h2>MART — CORNER STORE</h2>
-  <div id="shop-items"></div>
-  <button id="btn-close-shop">CLOSE</button>
-</div>
+  <div id="mission-select" class="sheet hidden">
+    <h3>JOB BOARD — VIC'S WORK</h3>
+    <div id="mission-list"></div>
+    <div class="close-row"><button id="btn-close-jobs" class="mini-btn">CLOSE</button></div>
+  </div>
 
-<div id="garage-panel" class="panel hidden">
-  <h2>GARAGE</h2>
-  <div id="garage-list"></div>
-  <button id="btn-close-garage">CLOSE</button>
-</div>
+  <div id="shop-panel" class="sheet hidden">
+    <h3>MART — CORNER STORE</h3>
+    <div id="shop-items"></div>
+    <div class="close-row"><button id="btn-close-shop" class="mini-btn">CLOSE</button></div>
+  </div>
 
-<script type="module" src="./src/main.js"></script>
+  <div id="garage-panel" class="sheet hidden">
+    <h3>GARAGE — STORED RIDES</h3>
+    <div id="garage-list"></div>
+    <div class="close-row"><button id="btn-close-garage" class="mini-btn">CLOSE</button></div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>

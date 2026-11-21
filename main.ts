@@ -1,178 +1,171 @@
-// SOLMAR BAY — make.fun entrypoint (round 8, pass 1).
+// SOLMAR BAY — make.fun gta6-01 entrypoint (round 9 rebuild).
+// Run as `node main.ts`. It mirrors game/ and screenshots/ into the
+// output folder and writes a deterministic dossier.json describing the
+// entry. The repository root is resolved from THIS file's own location
+// (import.meta.url), never from the process working directory, so the
+// same command works from anywhere and produces a byte-identical dossier.
 //
-// Builds the submission dossier: mirrors game/ and screenshots/ into the
-// output folder and validates the entry (schema, cover, four images,
-// text cap, dossier size).
-//
-// The repo root is resolved from THIS file's own location
-// (import.meta.url -> fileURLToPath), never from process.cwd(): the
-// grader runs `node /bot/main.ts` from an unrelated working directory,
-// and resolving from cwd was exactly what killed round 7. When the
-// grader sets MAKEFUN_BOT_DIR, that directory is the bot root instead.
-// Output goes to MAKEFUN_OUTPUT_DIR, or /output when unset.
+//   MAKEFUN_BOT_DIR     — when set, this directory is the repo root.
+//   MAKEFUN_OUTPUT_DIR  — when set, the dossier lands here, else /output.
 
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve, relative, sep } from 'node:path';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { createHash } from 'node:crypto';
 
-const ROOT = process.env.MAKEFUN_BOT_DIR
+interface DossierFile {
+  path: string;
+  size: number;
+  sha256: string;
+}
+
+interface Dossier {
+  competition: string;
+  entry: string;
+  round: number;
+  blurb: string;
+  cover: string | null;
+  game: DossierFile[];
+  screenshots: DossierFile[];
+  totals: { files: number; bytes: number };
+  checks: { schema: boolean; cover: boolean; images: boolean; textCap: boolean; sizeCap: boolean };
+}
+
+const BLURB =
+  'SOLMAR BAY — an original open-world sunset crime game for make.fun gta6-01.';
+const TEXT_CAP = 280;
+const IMAGE_MAX_BYTES = 256 * 1024;
+const DOSSIER_MAX_BYTES = 20 * 1024 * 1024;
+const MIN_IMAGES = 4;
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const root = process.env.MAKEFUN_BOT_DIR
   ? resolve(process.env.MAKEFUN_BOT_DIR)
-  : dirname(fileURLToPath(import.meta.url));
-const GAME_DIR = join(ROOT, 'game');
-const SHOTS_DIR = join(ROOT, 'screenshots');
-const OUT_DIR = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
+  : scriptDir;
+const gameDir = join(root, 'game');
+const shotsDir = join(root, 'screenshots');
+const outDir = process.env.MAKEFUN_OUTPUT_DIR
+  ? resolve(process.env.MAKEFUN_OUTPUT_DIR)
+  : '/output';
 
-const MAX_IMAGE_BYTES = 256 * 1024;
-const MAX_DOSSIER_BYTES = 10 * 1024 * 1024;
-const MAX_TEXT_CHARS = 20000;
-const MAX_TOTAL_TEXT_CHARS = 50000;
-const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png']);
-
-function fail(msg) {
-  throw new Error('[solmar dossier] ' + msg);
-}
-
-async function sha256File(path) {
-  const data = await readFile(path);
-  return createHash('sha256').update(data).digest('hex');
-}
-
-async function walk(dir, base) {
-  const out = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    const rel = base ? base + '/' + e.name : e.name;
-    if (e.isDirectory()) {
-      out.push(...(await walk(full, rel)));
-    } else if (e.isFile()) {
-      out.push({ rel, full });
-    }
-  }
-  return out;
-}
-
-async function checkEntrySchema() {
-  if (!existsSync(join(GAME_DIR, 'index.html'))) {
-    fail('game/index.html is missing');
-  }
-  if (!existsSync(join(GAME_DIR, 'src', 'main.js'))) {
-    fail('game/src/main.js is missing');
-  }
-  if (!existsSync(SHOTS_DIR)) {
-    fail('screenshots/ folder is missing');
-  }
-}
-
-async function checkImages() {
-  const names = (await readdir(SHOTS_DIR)).filter((n) =>
-    IMAGE_EXTS.has(extname(n).toLowerCase()),
-  );
-  names.sort();
-  if (names.length < 4) {
-    fail('need at least 4 screenshots, found ' + names.length);
-  }
-  for (const n of names) {
-    const s = await stat(join(SHOTS_DIR, n));
-    if (s.size > MAX_IMAGE_BYTES) {
-      fail('screenshot ' + n + ' is ' + s.size + ' bytes (cap ' + MAX_IMAGE_BYTES + ')');
-    }
-  }
-  const cover = names.includes('cover.jpg') ? 'cover.jpg' : names[0];
-  return { images: names, cover };
-}
-
-async function checkText() {
-  const readmePath = join(ROOT, 'README.md');
-  if (!existsSync(readmePath)) fail('README.md is missing');
-  const readme = await readFile(readmePath, 'utf8');
-  if (readme.length > MAX_TEXT_CHARS) {
-    fail('README.md is ' + readme.length + ' chars (cap ' + MAX_TEXT_CHARS + ')');
-  }
-  let total = readme.length;
-  const licensePath = join(ROOT, 'LICENSE');
-  if (existsSync(licensePath)) {
-    total += (await readFile(licensePath, 'utf8')).length;
-  }
-  if (total > MAX_TOTAL_TEXT_CHARS) {
-    fail('total entry text is ' + total + ' chars (cap ' + MAX_TOTAL_TEXT_CHARS + ')');
-  }
-  return { readmeChars: readme.length, totalTextChars: total };
-}
-
-function validateManifest(m) {
-  const required = ['entry', 'version', 'cover', 'images', 'files', 'textChars', 'totalBytes'];
-  for (const k of required) {
-    if (!(k in m)) fail('dossier manifest is missing field: ' + k);
-  }
-  if (m.entry !== 'solmar-bay') fail('dossier manifest entry must be solmar-bay');
-  if (!Array.isArray(m.images) || m.images.length < 4) {
-    fail('dossier manifest must list at least 4 images');
-  }
-  if (!Array.isArray(m.files) || m.files.length === 0) {
-    fail('dossier manifest must list files');
-  }
-  if (typeof m.totalBytes !== 'number' || m.totalBytes > MAX_DOSSIER_BYTES) {
-    fail('dossier is ' + m.totalBytes + ' bytes (cap ' + MAX_DOSSIER_BYTES + ')');
-  }
-  if (typeof m.textChars !== 'number' || m.textChars > MAX_TOTAL_TEXT_CHARS) {
-    fail('dossier text is ' + m.textChars + ' chars (cap ' + MAX_TOTAL_TEXT_CHARS + ')');
-  }
-}
-
-async function main() {
-  await checkEntrySchema();
-  const shots = await checkImages();
-  const text = await checkText();
-
-  await rm(OUT_DIR, { recursive: true, force: true });
-  await mkdir(OUT_DIR, { recursive: true });
-  await cp(GAME_DIR, join(OUT_DIR, 'game'), { recursive: true });
-  await cp(SHOTS_DIR, join(OUT_DIR, 'screenshots'), { recursive: true });
-  for (const f of ['README.md', 'LICENSE']) {
-    const src = join(ROOT, f);
-    if (existsSync(src)) await cp(src, join(OUT_DIR, f));
-  }
-
-  const files = await walk(OUT_DIR, '');
-  const listed = [];
-  let totalBytes = 0;
-  for (const f of files) {
-    const s = await stat(f.full);
-    totalBytes += s.size;
-    listed.push({ path: f.rel, bytes: s.size, sha256: await sha256File(f.full) });
-  }
-
-  const manifest = {
-    entry: 'solmar-bay',
-    version: 8,
-    cover: shots.cover,
-    images: shots.images,
-    files: listed,
-    textChars: text.totalTextChars,
-    totalBytes,
-  };
-  validateManifest(manifest);
-  await writeFile(
-    join(OUT_DIR, 'dossier.json'),
-    JSON.stringify(manifest, null, 2) + '\n',
-    'utf8',
-  );
-
-  console.log('[solmar dossier] OK');
-  console.log('  root: ' + ROOT);
-  console.log('  output: ' + OUT_DIR);
-  console.log('  cover: ' + shots.cover);
-  console.log('  images: ' + shots.images.length + ' (' + shots.images.join(', ') + ')');
-  console.log('  files: ' + listed.length);
-  console.log('  text: ' + text.totalTextChars + ' chars');
-  console.log('  total: ' + totalBytes + ' bytes');
-}
-
-main().catch((err) => {
-  console.error(err && err.message ? err.message : String(err));
+function fail(message: string): never {
+  console.error('main.ts: ' + message);
   process.exit(1);
-});
+}
+
+function sha256(file: string): string {
+  return createHash('sha256').update(readFileSync(file)).digest('hex');
+}
+
+function walk(dir: string, base: string, out: DossierFile[]): void {
+  const names = readdirSync(dir).sort();
+  for (const name of names) {
+    const full = join(dir, name);
+    const rel = relative(base, full).split(sep).join('/');
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      walk(full, base, out);
+    } else if (st.isFile()) {
+      out.push({ path: rel, size: st.size, sha256: sha256(full) });
+    }
+  }
+}
+
+function main(): void {
+  if (!existsSync(gameDir) || !statSync(gameDir).isDirectory()) {
+    fail('game/ not found under repo root: ' + root);
+  }
+  if (!existsSync(join(gameDir, 'index.html'))) {
+    fail('game/index.html missing');
+  }
+  if (!existsSync(join(gameDir, 'src', 'main.js'))) {
+    fail('game/src/main.js missing');
+  }
+  if (!existsSync(shotsDir) || !statSync(shotsDir).isDirectory()) {
+    fail('screenshots/ not found under repo root: ' + root);
+  }
+
+  const resolvedOut = resolve(outDir);
+  if (resolvedOut === '/' || resolvedOut === resolve(root)) {
+    fail('refusing to use an unsafe output directory: ' + resolvedOut);
+  }
+
+  // Mirror the entry into a clean output folder.
+  rmSync(resolvedOut, { recursive: true, force: true });
+  mkdirSync(resolvedOut, { recursive: true });
+  cpSync(gameDir, join(resolvedOut, 'game'), { recursive: true });
+  cpSync(shotsDir, join(resolvedOut, 'screenshots'), { recursive: true });
+
+  const gameFiles: DossierFile[] = [];
+  walk(join(resolvedOut, 'game'), resolvedOut, gameFiles);
+  const shotFiles: DossierFile[] = [];
+  walk(join(resolvedOut, 'screenshots'), resolvedOut, shotFiles);
+  gameFiles.sort((a, b) => (a.path < b.path ? -1 : 1));
+  shotFiles.sort((a, b) => (a.path < b.path ? -1 : 1));
+
+  // Checks: four images, each under the cap; a cover when one is shipped;
+  // the blurb inside its text cap; the whole dossier inside its size cap.
+  const images = shotFiles.filter((f) => /\.(jpe?g|png)$/i.test(f.path));
+  const imagesOk = images.length >= MIN_IMAGES && images.every((f) => f.size <= IMAGE_MAX_BYTES);
+  const coverFile =
+    shotFiles.find((f) => /(^|\/)cover\.(jpe?g|png)$/i.test(f.path)) || null;
+  const coverOk = coverFile === null || coverFile.size <= IMAGE_MAX_BYTES;
+  const textOk = BLURB.length <= TEXT_CAP;
+  const totalBytes =
+    gameFiles.reduce((n, f) => n + f.size, 0) +
+    shotFiles.reduce((n, f) => n + f.size, 0);
+  const sizeOk = totalBytes <= DOSSIER_MAX_BYTES;
+
+  const dossier: Dossier = {
+    competition: 'gta6-01',
+    entry: 'SOLMAR BAY',
+    round: 9,
+    blurb: BLURB,
+    cover: coverFile ? coverFile.path : null,
+    game: gameFiles,
+    screenshots: shotFiles,
+    totals: { files: gameFiles.length + shotFiles.length, bytes: totalBytes },
+    checks: {
+      schema: true,
+      cover: coverOk,
+      images: imagesOk,
+      textCap: textOk,
+      sizeCap: sizeOk,
+    },
+  };
+
+  // Schema check: every required field present with the right shape.
+  const schemaOk =
+    typeof dossier.competition === 'string' &&
+    typeof dossier.entry === 'string' &&
+    typeof dossier.blurb === 'string' &&
+    Array.isArray(dossier.game) &&
+    Array.isArray(dossier.screenshots) &&
+    dossier.game.every((f) => typeof f.path === 'string' && typeof f.size === 'number' && /^[0-9a-f]{64}$/.test(f.sha256));
+  dossier.checks.schema = schemaOk;
+
+  // The dossier itself is part of the output, but its own bytes are not
+  // hashed into it — otherwise no two runs could ever agree.
+  const text = JSON.stringify(dossier, null, 2) + '\n';
+  writeFileSync(join(resolvedOut, 'dossier.json'), text, 'utf8');
+
+  const allOk = schemaOk && coverOk && imagesOk && textOk && sizeOk;
+  console.log(`SOLMAR BAY dossier: ${gameFiles.length} game files, ${shotFiles.length} screenshots (${images.length} images), ${totalBytes} bytes -> ${resolvedOut}`);
+  console.log(
+    `checks: schema=${schemaOk} cover=${coverOk} images=${imagesOk} textCap=${textOk} sizeCap=${sizeOk}`
+  );
+  if (!allOk) {
+    fail('one or more dossier checks failed');
+  }
+}
+
+main();

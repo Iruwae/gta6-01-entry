@@ -1,112 +1,136 @@
-// sky.js — the sunset sky dome, the sun, the stars, and the light
-// that sells golden hour sliding into night.
-// The day/night module owns S.dayNight; this module reads its night
-// value each frame and grades the sky, sun, and fog to match.
-// Written fresh for round 8 from the shared contract.
+// SOLMAR BAY — sky dome, stars, moon and drifting clouds
+// (round 9 rebuild, builder B / world).
+// A gradient shader dome holds the sunset look: orange horizon melting
+// into purple dusk, sliding to deep night blue as uNight rises. The
+// day/night module owns uNight; this module only builds the sky and
+// animates the stars, moon and clouds from it. Written fresh from the
+// build contract; no other game module is imported.
 import * as THREE from '../vendor/three.module.min.js';
 
-export function init(ctx) {
-  const S = ctx.state;
-  const scene = ctx.scene;
-
-  // Big inverted sphere with a gradient shader: orange horizon at
-  // sunset, deep purple overhead, near-black at night, plus a sun glow.
-  const skyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-    uniforms: {
-      uNight: { value: 0 },
-      uTopDay: { value: new THREE.Color(0x3a2a6e) },
-      uTopNight: { value: new THREE.Color(0x05060f) },
-      uHorizonDay: { value: new THREE.Color(0xff8a4a) },
-      uHorizonNight: { value: new THREE.Color(0x141a33) },
-    },
-    vertexShader: [
-      'varying vec3 vDir;',
-      'void main() {',
-      '  vDir = normalize(position);',
-      '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}',
-    ].join('\n'),
-    fragmentShader: [
-      'uniform float uNight;',
-      'uniform vec3 uTopDay; uniform vec3 uTopNight;',
-      'uniform vec3 uHorizonDay; uniform vec3 uHorizonNight;',
-      'varying vec3 vDir;',
-      'void main() {',
-      '  float h = clamp(vDir.y * 1.4 + 0.25, 0.0, 1.0);',
-      '  vec3 top = mix(uTopDay, uTopNight, uNight);',
-      '  vec3 hor = mix(uHorizonDay, uHorizonNight, uNight);',
-      '  vec3 col = mix(hor, top, pow(h, 0.8));',
-      '  float sunGlow = pow(max(dot(normalize(vDir), normalize(vec3(-0.55, 0.18, -0.35))), 0.0), 24.0);',
-      '  col += vec3(1.0, 0.55, 0.25) * sunGlow * (1.0 - uNight) * 0.9;',
-      '  gl_FragColor = vec4(col, 1.0);',
-      '}',
-    ].join('\n'),
-  });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(880, 28, 18), skyMat);
-  scene.add(dome);
-  S.skyDome = dome;
-
-  // Low warm sun for the long sunset shadows.
-  const sun = new THREE.DirectionalLight(0xffb36b, 2.6);
-  sun.position.set(-140, 110, -60);
-  scene.add(sun);
-  scene.add(sun.target);
-  S.sunLight = sun;
-
-  const hemi = new THREE.HemisphereLight(0xff9a7a, 0x2a1e3f, 0.9);
-  scene.add(hemi);
-  S.hemiLight = hemi;
-
-  // Stars: a shell of points, invisible by day, fading in at night.
-  const starCount = 420;
-  const pos = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i++) {
+function starField(scene) {
+  const count = 500;
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    // Random point on the upper hemisphere of a big sphere.
     const a = Math.random() * Math.PI * 2;
-    const e = Math.random() * Math.PI * 0.45 + 0.08;
-    const r = 820;
+    const e = Math.random() * Math.PI * 0.48 + 0.03;
+    const r = 840;
     pos[i * 3] = Math.cos(a) * Math.cos(e) * r;
     pos[i * 3 + 1] = Math.sin(e) * r;
     pos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * r;
   }
-  const starGeo = new THREE.BufferGeometry();
-  starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const starMat = new THREE.PointsMaterial({
-    color: 0xffffff, size: 2.2, transparent: true, opacity: 0,
-    sizeAttenuation: false, depthWrite: false,
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 1.8,
+    sizeAttenuation: false,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
   });
-  const stars = new THREE.Points(starGeo, starMat);
+  const stars = new THREE.Points(geo, mat);
+  stars.frustumCulled = false;
   scene.add(stars);
-  S.stars = stars;
+  return mat;
+}
 
-  // A pale moon that only shows after dark.
-  const moon = new THREE.Mesh(
-    new THREE.SphereGeometry(18, 16, 16),
-    new THREE.MeshBasicMaterial({ color: 0xe8ecff, transparent: true, opacity: 0, fog: false }),
-  );
-  moon.position.set(260, 300, -620);
+function moonDisc(scene) {
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xe8ecff,
+    transparent: true,
+    opacity: 0,
+    fog: false,
+  });
+  const moon = new THREE.Mesh(new THREE.CircleGeometry(26, 24), mat);
+  moon.position.set(-420, 400, -520);
+  moon.lookAt(0, 0, 0);
   scene.add(moon);
-  S.moon = moon;
+  return mat;
+}
 
-  scene.fog = new THREE.Fog(0x3a2036, 140, 780);
-  const fogDay = new THREE.Color(0x3a2036);
-  const fogNight = new THREE.Color(0x0a0d1e);
+function cloudBank(scene) {
+  const mat = new THREE.MeshLambertMaterial({
+    color: 0xffe8d8,
+    transparent: true,
+    opacity: 0.3,
+  });
+  const clouds = [];
+  for (let i = 0; i < 7; i++) {
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), mat);
+    puff.scale.set(26 + Math.random() * 22, 4.5, 12 + Math.random() * 8);
+    puff.position.set(
+      -380 + Math.random() * 760,
+      120 + Math.random() * 60,
+      -320 + Math.random() * 480,
+    );
+    scene.add(puff);
+    clouds.push({ mesh: puff, speed: 1 + Math.random() * 1.6 });
+  }
+  return clouds;
+}
+
+export function init(ctx) {
+  const { scene } = ctx;
+  const S = ctx.state || ctx.S;
+
+  const skyMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      uNight: { value: 0 },
+      uSunDir: { value: new THREE.Vector3(-0.7, 0.12, 0.3).normalize() },
+    },
+    vertexShader: `
+      varying vec3 vDir;
+      void main() {
+        vDir = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uNight;
+      uniform vec3 uSunDir;
+      varying vec3 vDir;
+      void main() {
+        vec3 d = normalize(vDir);
+        float h = clamp(d.y, -0.1, 1.0);
+        vec3 dayLow = vec3(1.0, 0.52, 0.20);
+        vec3 dayHigh = vec3(0.45, 0.22, 0.55);
+        vec3 nightLow = vec3(0.05, 0.07, 0.16);
+        vec3 nightHigh = vec3(0.01, 0.01, 0.05);
+        vec3 low = mix(dayLow, nightLow, uNight);
+        vec3 high = mix(dayHigh, nightHigh, uNight);
+        vec3 col = mix(low, high, smoothstep(0.0, 0.55, h));
+        vec3 sunDir = normalize(uSunDir);
+        float glow = pow(max(dot(d, sunDir), 0.0), 24.0);
+        col += vec3(1.0, 0.75, 0.4) * glow * (1.0 - uNight) * 0.9;
+        float disc = smoothstep(0.9993, 0.9997, dot(d, sunDir));
+        col += vec3(1.0, 0.9, 0.7) * disc * (1.0 - uNight);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  });
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(880, 28, 18), skyMat);
+  dome.frustumCulled = false;
+  dome.renderOrder = -1;
+  scene.add(dome);
+  S.skyDome = dome;
+
+  const starMat = starField(scene);
+  const moonMat = moonDisc(scene);
+  const clouds = cloudBank(scene);
 
   ctx.updates.push((dt) => {
-    const dn = S.dayNight;
-    const n = dn ? dn.night : 0;
-    skyMat.uniforms.uNight.value = n;
-    sun.intensity = 2.6 + (0.35 - 2.6) * n;
-    hemi.intensity = 0.9 + (0.28 - 0.9) * n;
-    starMat.opacity = n * 0.9;
-    moon.material.opacity = n * 0.95;
-    scene.fog.color.copy(fogDay).lerp(fogNight, n);
-    if (S.player && S.player.pos) {
-      dome.position.set(S.player.pos.x, 0, S.player.pos.z);
-      stars.position.set(S.player.pos.x, 0, S.player.pos.z);
+    const night = (S.dayNight && S.dayNight.night) || 0;
+    // The dome follows the player so its edge is never reached.
+    const p = S.player && S.player.pos;
+    if (p) dome.position.set(p.x, 0, p.z);
+    starMat.opacity = night * 0.9;
+    moonMat.opacity = night * 0.95;
+    for (const c of clouds) {
+      c.mesh.position.x += c.speed * dt;
+      if (c.mesh.position.x > 430) c.mesh.position.x = -430;
     }
   });
 }

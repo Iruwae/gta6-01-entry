@@ -1,269 +1,196 @@
-// SOLMAR BAY — police.js (round 8 rebuild, written blind from the spec)
-// The wanted response: patrol cruisers with a utility brain
-// (PURSUIT / RAMMING / ROADBLOCK / SEARCH), callsigns, last-known
-// tracking, and the live roster panel. Talks to the game only via ctx.
+// police.js — the Solmar PD pursuit. Cops spawn from S.wanted, chase
+// with a small utility brain (decide() picks RAMMING / ROADBLOCK /
+// PURSUIT / SEARCH), show up on the roster panel, and leave when the
+// heat cools to zero. S.cops is the live list; police cars also live
+// in S.cars with aiPolice set so the world can see them.
 import * as THREE from '../vendor/three.module.min.js';
-
-const MAX_COPS = 8;
 
 export function init(ctx) {
   const S = ctx.state || ctx.S;
   const scene = ctx.scene;
   const dom = ctx.dom || {};
-
-  const $ = (id) => dom[id] || document.getElementById(id);
-
   if (!Array.isArray(S.cops)) S.cops = [];
   if (!Array.isArray(S.cars)) S.cars = [];
-
-  let nextCall = 1;
-  let spawnT = 0;
+  let nextNum = 1;
   let rosterT = 0;
 
-  function makeCop() {
-    const a = Math.random() * Math.PI * 2;
-    const r = 45 + Math.random() * 18;
-    const x = S.player.pos.x + Math.sin(a) * r;
-    const z = S.player.pos.z + Math.cos(a) * r;
-    const callsign = 'PD-' + String(nextCall).padStart(2, '0');
-    nextCall = nextCall >= 99 ? 1 : nextCall + 1;
-
-    const cop = {
-      kind: 'police',
-      aiPolice: true,
-      callsign,
-      pos: new THREE.Vector3(x, 0, z),
-      heading: Math.atan2(S.player.pos.x - x, S.player.pos.z - z),
-      speed: 0,
-      maxHealth: 140,
-      health: 140,
-      tune: { engine: 0, armor: 0, paint: 0x1d2733, nos: false },
-      mesh: null,
-      brain: null,
-      wander: null,
-    };
-    cop.perf = function () {
-      return 34;
-    };
-
-    // Dark cruiser, white cabin, red-and-blue light bar.
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(2.0, 0.65, 4.4),
-      new THREE.MeshStandardMaterial({ color: 0x1d2733, roughness: 0.5, metalness: 0.3 })
-    );
-    body.position.y = 0.65;
-    g.add(body);
-    const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(1.7, 0.55, 2.2),
-      new THREE.MeshStandardMaterial({ color: 0xdfe6ee, roughness: 0.4 })
-    );
-    cabin.position.set(0, 1.2, -0.2);
-    g.add(cabin);
-    const blue = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.18, 0.4),
-      new THREE.MeshStandardMaterial({ color: 0x2244cc, emissive: 0x2244cc, emissiveIntensity: 0.8 })
-    );
-    blue.position.set(0.6, 1.55, -0.2);
-    g.add(blue);
-    const red = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.18, 0.4),
-      new THREE.MeshStandardMaterial({ color: 0xcc2222, emissive: 0xcc2222, emissiveIntensity: 0.8 })
-    );
-    red.position.set(-0.6, 1.55, -0.2);
-    g.add(red);
-    const dark = new THREE.MeshStandardMaterial({ color: 0x14181f });
-    for (const [wx, wz] of [[-0.95, -1.5], [0.95, -1.5], [-0.95, 1.5], [0.95, 1.5]]) {
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.25, 12), dark);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(wx, 0.36, wz);
-      g.add(wheel);
-    }
-    g.position.copy(cop.pos);
-    scene.add(g);
-    cop.mesh = g;
-
-    // The utility brain. decide() is called with (dt, playerPos,
-    // playerVel, playerHeading, playerSpeed) and picks one tactic:
-    // RAMMING when near and slow, ROADBLOCK when fast and mid-range,
-    // PURSUIT when far and slow, SEARCH when the last-known position
-    // has gone stale.
-    cop.brain = {
+  function makeBrain(car) {
+    const brain = {
       tactic: 'PURSUIT',
       state: 'PURSUIT',
       decideT: 0,
-      decide(dt, pp, pv, ph, ps) {
-        const dx = pp.x - cop.pos.x;
-        const dz = pp.z - cop.pos.z;
+      target: { x: 0, z: 0 },
+      decide(dt, playerPos, playerVel, heading, speed) {
+        this.decideT -= dt;
+        if (this.decideT > 0) return;
+        this.decideT = 1.5;
+        const dx = car.pos.x - playerPos.x;
+        const dz = car.pos.z - playerPos.z;
         const dist = Math.hypot(dx, dz);
-        const lk = S.lastKnown;
-        const stale = !!lk && S.time - lk.seenAt > 8;
-        let t;
-        if (stale) t = 'SEARCH';
-        else if (dist < 12 && ps < 6) t = 'RAMMING';
-        else if (ps > 15 && dist >= 20 && dist <= 50) t = 'ROADBLOCK';
-        else t = 'PURSUIT';
-        this.tactic = t;
-        this.state = t;
-        if (!stale && dist < 45) {
-          S.lastKnown = { x: pp.x, z: pp.z, seenAt: S.time };
-        }
-        return t;
+        const seenAt = S.lastKnown && typeof S.lastKnown.seenAt === 'number' ? S.lastKnown.seenAt : S.time;
+        const stale = (S.time - seenAt) > 5;
+        let tactic = 'PURSUIT';
+        if (stale) tactic = 'SEARCH';
+        else if (dist < 15 && speed < 8) tactic = 'RAMMING';
+        else if (speed > 12 && dist >= 15 && dist <= 50) tactic = 'ROADBLOCK';
+        else tactic = 'PURSUIT';
+        this.tactic = tactic;
+        this.state = tactic;
       },
     };
-    // Dispatch knows where the player is the moment a unit rolls:
-    // without this the last-known position stays empty until a cruiser
-    // closes to 45 m, which headless frames may not reach in time.
-    S.lastKnown = { x: S.player.pos.x, z: S.player.pos.z, seenAt: S.time };
+    return brain;
+  }
+
+  function spawnCop() {
+    const num = nextNum++;
+    const callsign = 'PD-' + String(num).padStart(2, '0');
+    const a = Math.random() * Math.PI * 2;
+    const d = 32 + Math.random() * 18;
+    const x = S.player.pos.x + Math.cos(a) * d;
+    const z = S.player.pos.z + Math.sin(a) * d;
+    const cop = {
+      kind: 'sedan',
+      callsign,
+      aiPolice: true,
+      pos: new THREE.Vector3(x, 0, z),
+      heading: Math.atan2(S.player.pos.x - x, S.player.pos.z - z),
+      speed: 0,
+      health: 100,
+      maxHealth: 100,
+      basePerf: 34,
+      topSpeed: 30,
+      accel: 18,
+      color: 0x1d2a44,
+      tune: { engine: 0, armor: 0, paint: 0, nos: false },
+      mesh: null,
+      perf() { return this.basePerf; },
+      brain: null,
+    };
+    cop.brain = makeBrain(cop);
+    if (scene && THREE) {
+      const group = new THREE.Group();
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1d2a44, roughness: 0.4, metalness: 0.4 });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.7, 4.0), bodyMat);
+      body.position.y = 0.55;
+      group.add(body);
+      const bar = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2, 0.25, 0.5),
+        new THREE.MeshBasicMaterial({ color: 0x3355ff })
+      );
+      bar.position.set(0, 1.05, 0);
+      group.add(bar);
+      const cabin = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 0.6, 1.8),
+        new THREE.MeshStandardMaterial({ color: 0x111118, roughness: 0.8 })
+      );
+      cabin.position.set(0, 1.15, -0.2);
+      group.add(cabin);
+      scene.add(group);
+      cop.mesh = group;
+    }
+    S.cops.push(cop);
+    S.cars.push(cop);
     return cop;
   }
 
   function removeCop(cop) {
-    scene.remove(cop.mesh);
-    let i = S.cars.indexOf(cop);
-    if (i >= 0) S.cars.splice(i, 1);
-    i = S.cops.indexOf(cop);
-    if (i >= 0) S.cops.splice(i, 1);
+    S.cops = S.cops.filter((c) => c !== cop);
+    S.cars = S.cars.filter((c) => c !== cop);
+    if (scene && cop.mesh) scene.remove(cop.mesh);
   }
 
-  function renderRoster() {
-    const panel = $('roster');
-    const rowsEl = $('roster-rows');
-    const codeEl = $('roster-code');
-    const wanted = S.wanted || 0;
-    if (panel) panel.classList.toggle('hidden', wanted <= 0);
-    if (wanted <= 0) return;
-    if (codeEl) {
-      codeEl.textContent =
-        'DISPATCH ' + wanted + ' STAR' + (wanted > 1 ? 'S' : '') + ' — ' +
-        (wanted >= 3 ? 'AIR SUPPORT UP' : 'GROUND UNITS');
+  function refreshRoster() {
+    const panel = dom.roster || document.getElementById('roster');
+    if (!panel) return;
+    const codeEl = dom['roster-code'] || document.getElementById('roster-code');
+    if ((S.wanted || 0) <= 0 || S.cops.length === 0) {
+      panel.classList.add('hidden');
+      return;
     }
-    if (!rowsEl) return;
-    rowsEl.innerHTML = '';
+    panel.classList.remove('hidden');
+    if (codeEl) codeEl.textContent = '10-31 SOLMAR PD — ' + S.wanted + ' STAR' + (S.wanted > 1 ? 'S' : '');
+    // Rebuild rows: one per officer, callsign + distance + tactic.
+    panel.querySelectorAll('.roster-row').forEach((row) => row.remove());
     for (const cop of S.cops) {
-      const d = Math.round(
-        Math.hypot(cop.pos.x - S.player.pos.x, cop.pos.z - S.player.pos.z)
-      );
       const row = document.createElement('div');
       row.className = 'roster-row';
-      row.textContent =
-        cop.callsign + ' · ' + d + 'm · ' + (cop.brain ? cop.brain.tactic : 'PURSUIT');
-      rowsEl.appendChild(row);
+      const dist = Math.round(Math.hypot(cop.pos.x - S.player.pos.x, cop.pos.z - S.player.pos.z));
+      row.textContent = cop.callsign + '  ' + dist + 'm  ' + ((cop.brain && cop.brain.tactic) || 'PURSUIT');
+      panel.appendChild(row);
     }
   }
 
-  const prevPlayer = new THREE.Vector3();
-  let havePrev = false;
+  if (ctx.api) {
+    ctx.api.spawnCop = spawnCop;
+    ctx.api.policeCount = () => S.cops.length;
+  }
 
-  ctx.updates.push((dt) => {
-    if (S.mode && S.mode !== 'playing') return;
-
-    // Wanted stars follow heat: 20 heat per star, capped at 5.
-    const heat = S.heat || 0;
-    S.wanted = Math.max(0, Math.min(5, Math.floor(heat / 20)));
-
-    // Player velocity from the position delta (works on foot and in a car).
-    const pv = { x: 0, z: 0 };
-    if (havePrev && dt > 0) {
-      pv.x = (S.player.pos.x - prevPlayer.x) / dt;
-      pv.z = (S.player.pos.z - prevPlayer.z) / dt;
+  (ctx.updates || []).push((dt) => {
+    if (!S || !S.player || !S.player.pos) return;
+    const wanted = typeof S.wanted === 'number' ? S.wanted : 0;
+    if (S.mode !== 'playing' || S.cutscene) {
+      if (wanted <= 0) refreshRoster();
+      return;
     }
-    prevPlayer.copy(S.player.pos);
-    havePrev = true;
-    const pSpeed = S.car ? Math.abs(S.car.speed) : Math.hypot(pv.x, pv.z);
-
-    // Spawn cruisers to match the wanted level, clear them when it cools.
-    const target = S.wanted > 0 ? Math.min(MAX_COPS, S.wanted + 2) : 0;
-    spawnT -= dt;
-    if (S.cops.length < target && spawnT <= 0) {
-      const cop = makeCop();
-      S.cops.push(cop);
-      S.cars.push(cop);
-      spawnT = 0.5;
+    // Track the last known position while wanted.
+    if (wanted > 0) {
+      S.lastKnown = { x: S.player.pos.x, z: S.player.pos.z, seenAt: S.time };
     }
-    // Fast catch-up: the trickle above fields one cruiser per 0.5
-    // game-seconds, and headless frames advance game-time slowly, so
-    // a fresh 4-star wanted level stalls at three units inside the
-    // grading window — field the first four at once.
-    while (S.cops.length < target && S.cops.length < 4) {
-      const extra = makeCop();
-      S.cops.push(extra);
-      S.cars.push(extra);
+    const desired = wanted <= 0 ? 0 : wanted + 2;
+    while (S.cops.length < desired) spawnCop();
+    while (S.cops.length > desired) removeCop(S.cops[S.cops.length - 1]);
+    if (wanted <= 0) {
+      S.lastKnown = S.lastKnown || null;
+      refreshRoster();
+      return;
     }
-    if (S.wanted === 0 && S.cops.length > 0) {
-      [...S.cops].forEach(removeCop);
-    }
-
-    // Drive every cruiser by its brain.
+    // Player velocity estimate for the roadblock play.
+    const pvx = S.car ? Math.sin(S.car.heading || 0) * (S.car.speed || 0) : 0;
+    const pvz = S.car ? Math.cos(S.car.heading || 0) * (S.car.speed || 0) : 0;
+    const pSpeed = S.car ? Math.abs(S.car.speed || 0) : 0;
     for (const cop of [...S.cops]) {
-      if (cop.health <= 0) {
-        removeCop(cop);
-        continue;
-      }
-      const brain = cop.brain;
-      brain.decideT -= dt;
-      if (brain.decideT <= 0) {
-        brain.decide(dt, S.player.pos, pv, S.player.heading || 0, pSpeed);
-        brain.decideT = 0.4;
-      }
+      if (!cop.brain) continue;
+      cop.brain.decide(dt, S.player.pos, { x: pvx, z: pvz }, S.player.heading || 0, pSpeed);
+      const tactic = cop.brain.tactic;
       let tx = S.player.pos.x;
       let tz = S.player.pos.z;
-      let top = 20;
-      if (brain.tactic === 'ROADBLOCK') {
-        tx = S.player.pos.x + pv.x * 1.2;
-        tz = S.player.pos.z + pv.z * 1.2;
-        top = 16;
-      } else if (brain.tactic === 'SEARCH') {
-        const lk = S.lastKnown;
-        if (lk) {
-          tx = lk.x;
-          tz = lk.z;
-        }
-        top = 10;
-      } else if (brain.tactic === 'RAMMING') {
-        top = 24;
+      let cruise = 20;
+      if (tactic === 'SEARCH' && S.lastKnown) {
+        tx = S.lastKnown.x;
+        tz = S.lastKnown.z;
+        cruise = 12;
+      } else if (tactic === 'ROADBLOCK') {
+        // Cut across ahead of the player's path.
+        tx = S.player.pos.x + pvx * 1.2;
+        tz = S.player.pos.z + pvz * 1.2;
+        cruise = 24;
+      } else if (tactic === 'RAMMING') {
+        cruise = 26;
       }
-      let dx = tx - cop.pos.x;
-      let dz = tz - cop.pos.z;
-      let dist = Math.hypot(dx, dz);
-      if (brain.tactic === 'SEARCH' && dist < 8) {
-        if (
-          !cop.wander ||
-          Math.hypot(cop.wander.x - cop.pos.x, cop.wander.z - cop.pos.z) < 6
-        ) {
-          cop.wander = {
-            x: cop.pos.x + (Math.random() - 0.5) * 40,
-            z: cop.pos.z + (Math.random() - 0.5) * 40,
-          };
-        }
-        tx = cop.wander.x;
-        tz = cop.wander.z;
-        dx = tx - cop.pos.x;
-        dz = tz - cop.pos.z;
-        dist = Math.hypot(dx, dz);
+      const dx = tx - cop.pos.x;
+      const dz = tz - cop.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 2) {
+        const wantHeading = Math.atan2(dx, dz);
+        let dh = wantHeading - cop.heading;
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        cop.heading += Math.max(-2.4 * dt, Math.min(2.4 * dt, dh));
+        const arrive = tactic === 'ROADBLOCK' && dist < 6;
+        cop.speed = arrive ? 0 : cruise;
+        cop.pos.x += Math.sin(cop.heading) * cop.speed * dt;
+        cop.pos.z += Math.cos(cop.heading) * cop.speed * dt;
+        cop.pos.y = 0;
       }
-      const want = Math.atan2(dx, dz);
-      let diff = want - cop.heading;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      cop.heading += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
-      const arrive = brain.tactic === 'ROADBLOCK' && dist < 7;
-      const wantSpeed = arrive ? 0 : top;
-      cop.speed += Math.max(-18 * dt, Math.min(18 * dt, wantSpeed - cop.speed));
-      cop.pos.x += Math.sin(cop.heading) * cop.speed * dt;
-      cop.pos.z += Math.cos(cop.heading) * cop.speed * dt;
-      cop.mesh.position.copy(cop.pos);
-      cop.mesh.rotation.y = cop.heading;
-      // A cruiser that can see the player refreshes the last-known spot.
-      if (dist < 45) {
-        S.lastKnown = { x: S.player.pos.x, z: S.player.pos.z, seenAt: S.time };
+      if (cop.mesh) {
+        cop.mesh.position.set(cop.pos.x, 0, cop.pos.z);
+        cop.mesh.rotation.y = cop.heading;
       }
     }
-
     rosterT -= dt;
     if (rosterT <= 0) {
-      renderRoster();
       rosterT = 0.25;
+      refreshRoster();
     }
   });
 }

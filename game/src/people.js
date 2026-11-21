@@ -1,107 +1,106 @@
-// people.js — the pedestrians of SOLMAR BAY.
-// Twenty-six locals wandering the blocks on foot: they pick a corner,
-// walk to it, wait a while, and pick another. They give the player a
-// little space when he gets close, and they bob as they walk.
-// Written fresh for round 8 from the shared contract.
+// SOLMAR BAY — pedestrians (round 9 rebuild, builder B / world).
+// Fourteen walkers wander the streets with swinging legs and a little
+// bob, picking a new destination whenever they arrive; two of them stand
+// around instead — one by the MART, one down on the beach. They are
+// pure street life: no collisions, no gameplay hooks, just a city that
+// feels lived in. Written fresh from the build contract; no other game
+// module is imported.
 import * as THREE from '../vendor/three.module.min.js';
 
-const SHIRTS = [0xff8a5c, 0x5cb8ff, 0x9ad86a, 0xffd25c, 0xc86aff, 0x5ce8c8, 0xff6a7a, 0xe8e8e8];
+const WALKERS = 14;
+const BOUND = 175;
+const SHIRTS = [0xd86a5a, 0x5a8ad8, 0x6ab06a, 0xd8c25a, 0x9a6ad8, 0xe8e2d4, 0x3a3f4a, 0xd88a4a];
+const SKINS = [0xc98d64, 0x8a5a3a, 0xe8b88a, 0x6a4a2a, 0xdb9a6a];
 
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+function randomTarget() {
+  return {
+    x: -BOUND + Math.random() * BOUND * 2,
+    z: -BOUND + Math.random() * BOUND * 2,
+  };
+}
+
+function makeWalker(idle) {
+  const g = new THREE.Group();
+  const shirt = new THREE.MeshLambertMaterial({
+    color: SHIRTS[(Math.random() * SHIRTS.length) | 0],
+  });
+  const skin = new THREE.MeshLambertMaterial({
+    color: SKINS[(Math.random() * SKINS.length) | 0],
+  });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2c3242 });
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.32), shirt);
+  torso.position.y = 1.05;
+  g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), skin);
+  head.position.y = 1.62;
+  g.add(head);
+
+  // Legs pivot at the hip: geometry translated so rotation swings them.
+  const legGeo = new THREE.BoxGeometry(0.2, 0.7, 0.22);
+  legGeo.translate(0, -0.35, 0);
+  const legL = new THREE.Mesh(legGeo, pants);
+  legL.position.set(-0.14, 0.7, 0);
+  const legR = new THREE.Mesh(legGeo, pants);
+  legR.position.set(0.14, 0.7, 0);
+  g.add(legL);
+  g.add(legR);
+
+  const start = randomTarget();
+  g.position.set(start.x, 0, start.z);
+  return {
+    mesh: g,
+    legL,
+    legR,
+    pos: g.position,
+    target: idle ? { x: start.x, z: start.z } : randomTarget(),
+    speed: idle ? 0 : 1.2 + Math.random() * 1.0,
+    phase: Math.random() * Math.PI * 2,
+    heading: Math.random() * Math.PI * 2,
+    idle: !!idle,
   };
 }
 
 export function init(ctx) {
-  const S = ctx.state;
-  const scene = ctx.scene;
-  const rand = mulberry32(777);
-  const COUNT = 26;
-  const peds = [];
+  const { scene } = ctx;
+  const S = ctx.state || ctx.S;
 
-  for (let i = 0; i < COUNT; i++) {
-    const shirt = SHIRTS[Math.floor(rand() * SHIRTS.length)];
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 1.05, 0.32),
-      new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.9 }),
-    );
-    body.position.y = 0.95;
-    g.add(body);
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.21, 10, 10),
-      new THREE.MeshStandardMaterial({ color: 0xd9a986, roughness: 0.8 }),
-    );
-    head.position.y = 1.68;
-    g.add(head);
-    const legs = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.75, 0.3),
-      new THREE.MeshStandardMaterial({ color: 0x2a2a33, roughness: 1 }),
-    );
-    legs.position.y = 0.38;
-    g.add(legs);
-    const x = (rand() - 0.5) * 320;
-    const z = (rand() - 0.5) * 320;
-    g.position.set(x, 0, z);
-    scene.add(g);
-    peds.push({
-      mesh: g,
-      pos: g.position,
-      heading: rand() * Math.PI * 2,
-      speed: 1 + rand() * 1.2,
-      target: null,
-      waitT: rand() * 2,
-      phase: rand() * Math.PI * 2,
-    });
+  const walkers = [];
+  for (let i = 0; i < WALKERS; i++) {
+    const w = makeWalker(i < 2);
+    if (i === 0) w.pos.set(-68, 0, -54); // loitering by the MART
+    if (i === 1) w.pos.set(8, 0, 158); // standing on the beach
+    w.mesh.position.copy(w.pos);
+    walkers.push(w);
+    scene.add(w.mesh);
   }
+  S.pedestrians = walkers;
+  ctx.api.people = { walkers };
 
-  S.peds = peds;
-  S.people = peds;
-  ctx.api.pedestrians = peds;
-
-  function pickTarget(p) {
-    p.target = { x: (rand() - 0.5) * 320, z: (rand() - 0.5) * 320 };
-  }
-
-  let t = 0;
-  ctx.updates.push((dt) => {
-    t += dt;
-    if (S.mode !== 'playing') return;
-    for (const p of peds) {
-      if (p.waitT > 0) { p.waitT -= dt; continue; }
-      if (!p.target) pickTarget(p);
-      const dx = p.target.x - p.pos.x;
-      const dz = p.target.z - p.pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d < 1.5) {
-        p.target = null;
-        p.waitT = 1 + rand() * 4;
+  ctx.updates.push((dt, t) => {
+    for (const w of walkers) {
+      if (w.idle) {
+        // Just breathing: a slow sway, feet planted.
+        w.mesh.rotation.z = Math.sin(t * 0.8 + w.phase) * 0.03;
         continue;
       }
-      let mx = dx / d;
-      let mz = dz / d;
-      // Shy away from the player when he gets close.
-      if (S.player && S.player.pos) {
-        const px = p.pos.x - S.player.pos.x;
-        const pz = p.pos.z - S.player.pos.z;
-        const pd = Math.hypot(px, pz);
-        if (pd < 3 && pd > 0.01) {
-          mx += (px / pd) * 0.8;
-          mz += (pz / pd) * 0.8;
-          const ml = Math.hypot(mx, mz) || 1;
-          mx /= ml; mz /= ml;
-        }
+      const dx = w.target.x - w.pos.x;
+      const dz = w.target.z - w.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 1.5) {
+        w.target = randomTarget();
+        continue;
       }
-      p.pos.x += mx * p.speed * dt;
-      p.pos.z += mz * p.speed * dt;
-      p.heading = Math.atan2(mx, mz);
-      p.mesh.rotation.y = p.heading;
-      p.mesh.position.y = Math.abs(Math.sin(t * 6 + p.phase)) * 0.05;
+      const step = Math.min(dist, w.speed * dt);
+      w.pos.x += (dx / dist) * step;
+      w.pos.z += (dz / dist) * step;
+      w.heading = Math.atan2(dx, dz);
+      w.mesh.rotation.y = w.heading;
+      w.phase += dt * w.speed * 4;
+      const swing = Math.sin(w.phase) * 0.55;
+      w.legL.rotation.x = swing;
+      w.legR.rotation.x = -swing;
+      w.mesh.position.y = Math.abs(Math.sin(w.phase)) * 0.05;
     }
   });
 }

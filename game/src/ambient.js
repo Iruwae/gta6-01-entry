@@ -1,123 +1,158 @@
-// ambient.js — the city breathing: traffic on the road grid and birds
-// circling over the beach. Traffic cars are kept out of S.cars on
-// purpose, so the enter-car key never grabs a moving car by mistake.
-// Written fresh for round 8 from the shared contract.
+// SOLMAR BAY — ambient life (round 9 rebuild, builder B / world).
+// Traffic sedans cruising the road grid (they brake when the player is
+// right in front of them) and gulls circling over the harbour and beach.
+// Traffic is sedans only, so the parked bike and pickup stay the unique
+// finds of their kind. Written fresh from the build contract; no other
+// game module is imported.
 import * as THREE from '../vendor/three.module.min.js';
 
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+const ROAD_LINES = [-160, -120, -80, -40, 0, 40, 80, 120, 160];
+const BOUND = 195;
+const TRAFFIC_COUNT = 8;
+
+function buildSedanMesh(color) {
+  const g = new THREE.Group();
+  const paint = new THREE.MeshLambertMaterial({ color });
+  const glass = new THREE.MeshLambertMaterial({ color: 0x1a1d22 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.65, 1.9), paint);
+  body.position.y = 0.5;
+  g.add(body);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.85, 1.6), glass);
+  cab.position.set(-0.2, 1.05, 0);
+  g.add(cab);
+  const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 10);
+  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111214 });
+  for (const [wx, wz] of [
+    [1.38, 0.95],
+    [1.38, -0.95],
+    [-1.38, 0.95],
+    [-1.38, -0.95],
+  ]) {
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.x = Math.PI / 2;
+    w.position.set(wx, 0.34, wz);
+    g.add(w);
+  }
+  return g;
+}
+
+function spawnTraffic(scene, S) {
+  const palette = [0x8a9bb0, 0xc2a35a, 0x7a6a9a, 0x9a9a92, 0xb0705a, 0x5a8a7a];
+  const cars = [];
+  for (let i = 0; i < TRAFFIC_COUNT; i++) {
+    const axis = Math.random() < 0.5 ? 'x' : 'z';
+    const line = ROAD_LINES[(Math.random() * ROAD_LINES.length) | 0];
+    const along = -BOUND + Math.random() * BOUND * 2;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const color = palette[(Math.random() * palette.length) | 0];
+    const mesh = buildSedanMesh(color);
+    const car = {
+      kind: 'sedan',
+      aiTraffic: true,
+      pos: new THREE.Vector3(
+        axis === 'x' ? along : line + (Math.random() * 4 - 2),
+        0,
+        axis === 'x' ? line + (Math.random() * 4 - 2) : along,
+      ),
+      heading: 0,
+      speed: 0,
+      cruise: 9 + Math.random() * 5,
+      axis,
+      dir,
+      health: 100,
+      maxHealth: 100,
+      color,
+      tune: { engine: 0, armor: 0, paint: color, nos: false },
+      mesh,
+      perf() {
+        return 30 + this.tune.engine * 3 + (this.tune.nos ? 8 : 0);
+      },
+    };
+    car.heading =
+      axis === 'x' ? (dir > 0 ? 0 : Math.PI) : dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+    mesh.position.copy(car.pos);
+    mesh.rotation.y = car.heading;
+    cars.push(car);
+    S.cars.push(car);
+    scene.add(mesh);
+  }
+  return cars;
+}
+
+function spawnGulls(scene) {
+  const gulls = [];
+  const wingMat = new THREE.MeshLambertMaterial({ color: 0xf2f2ee });
+  for (let i = 0; i < 5; i++) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), wingMat);
+    body.scale.set(1.6, 0.7, 0.7);
+    g.add(body);
+    const wingGeo = new THREE.BoxGeometry(0.9, 0.05, 0.35);
+    const wl = new THREE.Mesh(wingGeo, wingMat);
+    wl.position.set(0, 0.08, -0.55);
+    const wr = new THREE.Mesh(wingGeo, wingMat);
+    wr.position.set(0, 0.08, 0.55);
+    g.add(wl);
+    g.add(wr);
+    scene.add(g);
+    gulls.push({
+      mesh: g,
+      wl,
+      wr,
+      cx: 60 + (Math.random() * 80 - 40),
+      cz: 130 + (Math.random() * 40 - 20),
+      h: 42 + Math.random() * 18,
+      r: 18 + Math.random() * 22,
+      a: Math.random() * Math.PI * 2,
+      speed: 0.25 + Math.random() * 0.2,
+    });
+  }
+  return gulls;
 }
 
 export function init(ctx) {
-  const S = ctx.state;
-  const scene = ctx.scene;
-  const rand = mulberry32(4242);
+  const { scene } = ctx;
+  const S = ctx.state || ctx.S;
+  if (!Array.isArray(S.cars)) S.cars = [];
 
-  // Shared headlight material so every traffic car lights up at night.
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffdf80, emissiveIntensity: 0.5 });
+  const traffic = spawnTraffic(scene, S);
+  const gulls = spawnGulls(scene);
+  ctx.api.ambient = { traffic };
 
-  function buildTrafficMesh(color) {
-    const g = new THREE.Group();
-    const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.5 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x14141c, roughness: 0.6, metalness: 0.3 });
-    const glass = new THREE.MeshStandardMaterial({ color: 0x9fd8e8, roughness: 0.15, metalness: 0.7 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.62, 4.2), paint);
-    body.position.y = 0.55;
-    g.add(body);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.55, 1.9), glass);
-    cabin.position.set(0, 1.05, -0.2);
-    g.add(cabin);
-    for (const x of [-0.7, 0.7]) {
-      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.08), headMat);
-      lamp.position.set(x, 0.6, 2.12);
-      g.add(lamp);
-    }
-    const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 12);
-    for (const [x, z] of [[-0.95, 1.3], [0.95, 1.3], [-0.95, -1.3], [0.95, -1.3]]) {
-      const wheel = new THREE.Mesh(wheelGeo, dark);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 0.36, z);
-      g.add(wheel);
-    }
-    return g;
-  }
-
-  // Traffic runs the road grid (roads at multiples of 60) and wraps.
-  const ROADS = [-120, -60, 0, 60, 120];
-  const COLORS = [0x8a97a8, 0xb8b0a0, 0x6a7a8a, 0xa85a4a, 0x4a6a8a, 0xc8c8c8];
-  const traffic = [];
-  for (let i = 0; i < 9; i++) {
-    const alongZ = rand() > 0.5;
-    const road = ROADS[Math.floor(rand() * ROADS.length)];
-    const dir = rand() > 0.5 ? 1 : -1;
-    const lane = (rand() - 0.5) * 4;
-    const color = COLORS[Math.floor(rand() * COLORS.length)];
-    const mesh = buildTrafficMesh(color);
-    scene.add(mesh);
-    traffic.push({
-      mesh, alongZ, road, dir, lane,
-      speed: 8 + rand() * 6,
-      s: (rand() - 0.5) * 360,
-    });
-  }
-  S.traffic = traffic;
-  ctx.api.traffic = traffic;
-
-  // Gulls over the beach, circling slow and high.
-  const birds = [];
-  const birdMat = new THREE.MeshBasicMaterial({ color: 0x1a1420, side: THREE.DoubleSide });
-  for (let i = 0; i < 8; i++) {
-    const b = new THREE.Group();
-    const w1 = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.25), birdMat);
-    w1.rotation.z = 0.5; w1.position.x = -0.4; b.add(w1);
-    const w2 = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.25), birdMat);
-    w2.rotation.z = -0.5; w2.position.x = 0.4; b.add(w2);
-    scene.add(b);
-    birds.push({
-      mesh: b,
-      cx: (rand() - 0.5) * 120,
-      cz: 150 + rand() * 30,
-      r: 20 + rand() * 40,
-      h: 26 + rand() * 14,
-      a: rand() * Math.PI * 2,
-      w: 0.1 + rand() * 0.12,
-    });
-  }
-  S.birds = birds;
-
-  let t = 0;
-  ctx.updates.push((dt) => {
-    t += dt;
-    const n = S.dayNight ? S.dayNight.night : 0;
-    headMat.emissiveIntensity = 0.5 + n * 2.0;
-    if (S.mode !== 'playing') return;
-    for (const c of traffic) {
-      c.s += c.dir * c.speed * dt;
-      if (c.s > 195) c.s = -195;
-      if (c.s < -195) c.s = 195;
-      if (c.alongZ) {
-        c.mesh.position.set(c.road + c.lane, 0, c.s);
-        c.mesh.rotation.y = c.dir > 0 ? 0 : Math.PI;
-      } else {
-        c.mesh.position.set(c.s, 0, c.road + c.lane);
-        c.mesh.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+  ctx.updates.push((dt, t) => {
+    const p = S.player && S.player.pos;
+    for (const car of traffic) {
+      // Brake for the player, then pull away again.
+      let target = car.cruise;
+      if (p) {
+        const dx = car.pos.x - p.x;
+        const dz = car.pos.z - p.z;
+        if (dx * dx + dz * dz < 81) target = 0;
       }
+      car.speed += (target - car.speed) * Math.min(1, dt * 2);
+      if (car.axis === 'x') {
+        car.pos.x += car.dir * car.speed * dt;
+        if (car.pos.x > BOUND) car.pos.x = -BOUND;
+        if (car.pos.x < -BOUND) car.pos.x = BOUND;
+      } else {
+        car.pos.z += car.dir * car.speed * dt;
+        if (car.pos.z > BOUND) car.pos.z = -BOUND;
+        if (car.pos.z < -BOUND) car.pos.z = BOUND;
+      }
+      car.mesh.position.set(car.pos.x, 0, car.pos.z);
+      car.mesh.rotation.y = car.heading;
     }
-    for (const b of birds) {
-      b.a += b.w * dt;
-      b.mesh.position.set(
-        b.cx + Math.cos(b.a) * b.r,
-        b.h + Math.sin(t * 0.7 + b.a) * 2,
-        b.cz + Math.sin(b.a) * b.r,
+    for (const gu of gulls) {
+      gu.a += gu.speed * dt;
+      gu.mesh.position.set(
+        gu.cx + Math.cos(gu.a) * gu.r,
+        gu.h + Math.sin(t * 0.7 + gu.a) * 2,
+        gu.cz + Math.sin(gu.a) * gu.r,
       );
-      b.mesh.rotation.y = -b.a;
-      b.mesh.rotation.z = Math.sin(t * 3 + b.a * 5) * 0.25;
+      gu.mesh.rotation.y = -gu.a;
+      const flap = Math.sin(t * 6 + gu.a * 3) * 0.45;
+      gu.wl.rotation.x = flap;
+      gu.wr.rotation.x = -flap;
     }
   });
 }

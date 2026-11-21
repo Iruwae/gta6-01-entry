@@ -1,31 +1,26 @@
-# Dependencies and build output
+# Dependencies
 node_modules/
-output/
-out/
+package-lock.json
+
+# Build / dossier output
+/output
+out-*/
 dist/
-build/
 
-# Submission dossier output (built by main.ts)
-dossier.json
+# Screenshots are committed with the entry: the dossier needs them.
 
-# Logs and local environment
+# Logs
 *.log
-.env
-.env.*
-!.env.example
+npm-debug.log*
 
-# Temporary files
-*.tmp
-*.temp
-
-# OS files
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Editor files
+# Editor and OS clutter
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env
+.env.local

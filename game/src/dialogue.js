@@ -1,102 +1,91 @@
 // dialogue.js — SOLMAR BAY dialogue box.
-// Shows a queue of speaker lines in #dialogue. A click advances to the
-// next line; the box hides when the queue runs out. Missions hand their
-// briefing lines to show(); this file never invents mission flow.
+// Missions and crew moments hand this module a queue of lines; it shows
+// one at a time and advances on click. A line may be a plain string in
+// "NAME: text" form or an object with a name/speaker and text.
 export function init(ctx) {
   const S = ctx.state || ctx.S;
   const dom = ctx.dom || {};
-  const el = (id) => dom[id] || document.getElementById(id);
-
-  // Built-in briefings, used only when a caller asks for a mission's
-  // dialogue by id instead of passing its own lines.
-  const BRIEFINGS = {
-    m1: [
-      { name: 'LENA CRUZ', text: 'Sunset is burning out, hustler. Vic has a job and it starts with wheels — that garage is ours tonight.' },
-      { name: 'MARCO SOLIS', text: 'Keys are in the coupe, kid. Do not scratch her. Vic hates scratches more than he hates cops.' },
-    ],
-    m5: [
-      { name: 'LENA CRUZ', text: 'Crew night, baby. I drive, you shoot, we both get paid. Stay close and do what I say.' },
-      { name: 'VIC TORRES', text: 'This one is big. Harbor at midnight — no mistakes, no witnesses, no heroes.' },
-    ],
-  };
-
-  const PORTRAIT_TINT = {
-    'LENA CRUZ': '#e07840', 'VIC TORRES': '#8a4a6b', 'MARCO SOLIS': '#3f7d6b',
-    'NARRATOR': '#5a5470',
-  };
+  const $ = (id) => dom[id] || document.getElementById(id);
 
   let lines = [];
   let idx = 0;
-  let active = false;
+  let open = false;
+  let onDone = null;
 
-  function normalise(raw) {
-    if (!Array.isArray(raw)) return [];
-    return raw.map((l) => {
-      if (typeof l === 'string') return { name: 'NARRATOR', text: l };
-      if (Array.isArray(l)) return { name: l[0] || 'NARRATOR', text: l[1] || '' };
-      return { name: l.name || l.speaker || 'NARRATOR', text: l.text || l.line || '' };
-    }).filter((l) => l.text);
+  function normalize(line) {
+    if (typeof line === 'string') {
+      const m = line.match(/^([^:]{1,40}):\s*([\s\S]*)$/);
+      if (m) return { name: m[1].trim(), text: m[2].trim() };
+      return { name: '', text: line };
+    }
+    if (line && typeof line === 'object') {
+      return {
+        name: line.name || line.speaker || line.who || '',
+        text: line.text || line.line || line.say || '',
+      };
+    }
+    return { name: '', text: '' };
+  }
+
+  function portraitColor(name) {
+    let h = 0;
+    for (let i = 0; i < (name || '').length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ', 55%, 45%)';
   }
 
   function render() {
     const line = lines[idx];
     if (!line) { hide(); return; }
-    const box = el('dialogue');
-    const nameEl = el('dlg-name');
-    const textEl = el('dlg-text');
-    const faceEl = el('dlg-portrait');
+    const nameEl = $('dlg-name');
+    const textEl = $('dlg-text');
+    const portraitEl = $('dlg-portrait');
     if (nameEl) nameEl.textContent = line.name;
     if (textEl) textEl.textContent = line.text;
-    if (faceEl) {
-      const parts = line.name.split(' ').filter(Boolean);
-      faceEl.textContent = parts.map((p) => p[0]).join('').slice(0, 2);
-      faceEl.style.background = PORTRAIT_TINT[line.name] || '#5a5470';
+    if (portraitEl) {
+      portraitEl.textContent = (line.name || '?').charAt(0);
+      portraitEl.style.background = portraitColor(line.name);
     }
-    if (box) box.classList.remove('hidden');
   }
 
-  function show(rawLines) {
-    lines = normalise(rawLines);
-    if (!lines.length) return false;
+  function show(newLines, done) {
+    lines = (newLines || []).map(normalize).filter((l) => l.text);
     idx = 0;
-    active = true;
+    onDone = typeof done === 'function' ? done : null;
+    if (!lines.length) { hide(); return; }
+    open = true;
+    const box = $('dialogue');
+    if (box) box.classList.remove('hidden');
     render();
-    return true;
-  }
-
-  function showMission(id) {
-    const brief = BRIEFINGS[id];
-    if (brief) return show(brief);
-    return false;
   }
 
   function advance() {
-    if (!active) return false;
+    if (!open) return;
     idx += 1;
-    if (idx >= lines.length) { hide(); return false; }
-    render();
-    return true;
+    if (idx >= lines.length) hide();
+    else render();
   }
 
   function hide() {
-    active = false;
-    lines = [];
-    idx = 0;
-    const box = el('dialogue');
+    open = false;
+    const box = $('dialogue');
     if (box) box.classList.add('hidden');
+    const done = onDone;
+    onDone = null;
+    if (done) done();
   }
 
-  const box = el('dialogue');
-  if (box) box.addEventListener('click', () => { advance(); });
+  const box = $('dialogue');
+  if (box) box.addEventListener('click', advance);
 
-  ctx.api.showDialogue = show;
-  ctx.api.showDialog = show;
-  ctx.api.dialogue = {
-    show,
-    showMission,
-    advance,
-    hide,
-    isOpen: () => active,
-    current: () => (active ? lines[idx] || null : null),
+  const api = {
+    show, say: show, start: show,
+    advance, next: advance,
+    hide, isOpen: () => open,
+    current: () => (open && lines[idx]) || null,
   };
+  ctx.api = ctx.api || {};
+  ctx.api.dialogue = api;
+  ctx.api.showDialogue = show;
+  ctx.api.say = show;
+  S.dialogueDirector = api;
 }
