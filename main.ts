@@ -99,10 +99,9 @@ function main(): void {
     fail('refusing to use an unsafe output directory: ' + resolvedOut);
   }
 
-  // Mirror the entry into a clean output folder. Only clear the
-  // CONTENTS of the output dir — never remove the dir itself, because
-  // the grader mounts /output as a mount point and rmSync on it fails
-  // EBUSY ("Device or resource busy") -> exit 1.
+  // Mirror the entry into a clean output folder.
+  // Clear only the *contents*: /output is a mount point at the grader,
+  // so removing the directory itself fails EBUSY and exits 1.
   mkdirSync(resolvedOut, { recursive: true });
   for (const name of readdirSync(resolvedOut)) {
     rmSync(join(resolvedOut, name), { recursive: true, force: true });
