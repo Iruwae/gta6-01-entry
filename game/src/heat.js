@@ -1,30 +1,41 @@
-// SOLMAR BAY — wanted-level behaviour. Heat cools slowly on its own;
-// the pay-n-spray booth wipes heat clean for $150 while the player
-// drives through it. The booth fires once per entry and re-arms when
-// the player leaves the radius; it can be disarmed outright via
-// S.heatDirector.sprayBooth.armed = false.
+// SOLMAR BAY — wanted-level behaviour: slow heat cooldown + pay-n-spray.
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const { state: S } = ctx;
+  const S = ctx.state;
+  const booth = S.heatDirector.sprayBooth;
+  let inside = false;
 
   ctx.updates.push((dt) => {
-    if (S.mode !== 'playing') return;
-    if (S.heat > 0) S.heat = Math.max(0, S.heat - dt * 0.5);
-
-    const booth = S.heatDirector.sprayBooth;
-    const px = S.car ? S.car.pos.x : S.player.pos.x;
-    const pz = S.car ? S.car.pos.z : S.player.pos.z;
-    const dx = px - booth.x;
-    const dz = pz - booth.z;
-    const inside = dx * dx + dz * dz <= booth.radius * booth.radius;
-    if (inside && booth.armed && S.car && S.heat > 0 && S.cash >= booth.cost) {
-      S.cash -= booth.cost;
-      S.heat = 0;
-      S.wanted = 0;
-      booth.armed = false;
-      ctx.api.toast(`Pay-n-spray — heat wiped clean (-$${booth.cost}).`);
+    // Heat cools slowly on its own.
+    if (S.heat > 0) {
+      S.heat = Math.max(0, S.heat - 0.2 * dt);
     }
-    if (!inside) booth.armed = true;
+    // Pay-n-spray: drive through the booth, heat wiped for $150.
+    const px = S.player.pos.x;
+    const pz = S.player.pos.z;
+    const d = Math.hypot(px - booth.x, pz - booth.z);
+    const nowInside = d <= booth.radius;
+    if (nowInside && !inside && S.car && booth.armed) {
+      if (S.heat > 0 && S.cash >= booth.cost) {
+        S.cash -= booth.cost;
+        S.heat = 0;
+        booth.armed = false;
+        ctx.api.toast(`PAY-N-SPRAY: fresh paint, clean slate. -$${booth.cost}`);
+      } else if (S.heat > 0) {
+        ctx.api.toast('PAY-N-SPRAY: not enough cash for a respray.');
+      }
+    }
+    if (!nowInside) {
+      // Re-arm once the player leaves the booth radius.
+      if (!booth.armed) booth.armed = true;
+      inside = false;
+    } else {
+      inside = true;
+    }
   });
+
+  return { booth };
 }
+
+export default init;

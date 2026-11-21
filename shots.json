@@ -1,1 +1,33 @@
-{"entry":"GTA6-01 round 12","game":"SOLMAR BAY","height":720,"maxBytes":262144,"shots":[{"bytes":55936,"cash":500,"file":"09-sunset-chase.jpg","note":"Police chase downtown at 4 stars with the helicopter overhead."},{"bytes":57863,"cash":500,"file":"10-garage-briefing.jpg","note":"Mission 1 briefing at the garage — Lena Cruz lays out the first job."},{"bytes":56233,"cash":500,"file":"11-street-race.jpg","note":"Street race from the start pad, gates ahead, sunset on the bay."},{"bytes":41671,"cash":500,"file":"12-night-ride.jpg","note":"Night ride on the bike downtown under neon and stars."}],"width":1280}
+{
+  "entry": "GTA6-01 round 13",
+  "game": "SOLMAR BAY",
+  "width": 1280,
+  "height": 720,
+  "maxBytes": 262144,
+  "shots": [
+    {
+      "file": "13-sunset-chase.jpg",
+      "bytes": 45082,
+      "cash": 500,
+      "note": "Police chase downtown at 4 stars with the helicopter overhead."
+    },
+    {
+      "file": "14-garage-briefing.jpg",
+      "bytes": 57186,
+      "cash": 500,
+      "note": "Mission 1 briefing at the garage — Lena Cruz lays out the first job."
+    },
+    {
+      "file": "15-street-race.jpg",
+      "bytes": 44200,
+      "cash": 500,
+      "note": "Street race from the start pad in the sport car, chasing gate one."
+    },
+    {
+      "file": "16-night-ride.jpg",
+      "bytes": 48041,
+      "cash": 500,
+      "note": "Night ride downtown on the bike under neon and stars."
+    }
+  ]
+}

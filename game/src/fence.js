@@ -1,35 +1,34 @@
-// SOLMAR BAY — Vic's fence yard. The yard itself (walls, office, a
-// hand-painted sign) plus the quote logic through fenceDirector — the
-// sale action itself lives in side.js (press V while driving in the yard).
+// SOLMAR BAY — Vic's fence yard: the place, the quote, the sale lives in side.js.
+import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const { THREE, scene, state: S } = ctx;
-
+  const { THREE: T, scene } = ctx;
+  const S = ctx.state;
   const yard = CONFIG.fenceYard;
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x3d4a2e, roughness: 0.9 });
-  for (const [w, d, x, z] of [
-    [26, 1, yard.x, yard.z - 13],
-    [26, 1, yard.x, yard.z + 13],
-    [1, 26, yard.x - 13, yard.z],
-    [1, 26, yard.x + 13, yard.z],
-  ]) {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 2.4, d), wallMat);
-    wall.position.set(x, 1.2, z);
-    scene.add(wall);
-  }
-  const office = new THREE.Mesh(
-    new THREE.BoxGeometry(8, 4, 6),
-    new THREE.MeshStandardMaterial({ color: 0x54406a, roughness: 0.85 }),
-  );
-  office.position.set(yard.x - 7, 2, yard.z - 8);
-  scene.add(office);
-  const sign = new THREE.Mesh(
-    new THREE.BoxGeometry(6, 1.4, 0.3),
-    new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xff7a9e, emissiveIntensity: 0.8 }),
-  );
-  sign.position.set(yard.x, 4.6, yard.z - 13);
-  scene.add(sign);
 
-  ctx.api.fenceQuote = (car) => S.fenceDirector.priceFor(car) + S.fenceDirector.wantedBonus(car);
+  // A small office booth at the yard's edge.
+  const booth = new THREE.Mesh(
+    new THREE.BoxGeometry(5, 3.5, 4),
+    new THREE.MeshStandardMaterial({ color: 0x8a6d2f, roughness: 0.85 }),
+  );
+  booth.position.set(yard.x - 8, 1.75, yard.z - 6);
+  scene.add(booth);
+  // Fence posts around the yard.
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x555566, roughness: 0.7, metalness: 0.5 });
+  for (let i = 0; i <= 6; i++) {
+    for (const [px, pz] of [
+      [yard.x - 10 + i * 3.4, yard.z - 8],
+      [yard.x - 10 + i * 3.4, yard.z + 8],
+    ]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.2, 6), postMat);
+      post.position.set(px, 1.1, pz);
+      scene.add(post);
+    }
+  }
+
+  ctx.fenceQuote = (car) => S.fenceDirector.priceFor(car) + S.fenceDirector.wantedBonus(car);
+  return { yard };
 }
+
+export default init;

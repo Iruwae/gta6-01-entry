@@ -1,10 +1,10 @@
 // SOLMAR BAY — chase-shot staging for tools/shots.mjs.
-// Tops the wallet to $500, disarms the pay-n-spray, puts the player
-// downtown at (0,0), and holds heat at 90 until the helicopter is
-// overhead (within 40 m) with at least 3 cops on the roster.
+// Stages a police chase downtown at 4-5 stars with the helicopter
+// overhead: wallet topped up, pay-n-spray disarmed, player downtown,
+// heat 90 re-asserted until the heli is close with >= 3 cops.
 export const CHASE_STAGING = {
   walletTopUp: 500,
-  downtown: [0, 0, 0],
+  downtown: { x: 0, y: 0, z: 0 },
   heat: 90,
   heliOverheadDistance: 40,
   minCops: 3,
@@ -16,21 +16,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function stageChaseShot(page, options = {}) {
   const cfg = { ...CHASE_STAGING, ...options };
+  await page.evaluate((c) => {
+    const S = window.__solmar.S;
+    S.cash = c.walletTopUp;
+    S.heatDirector.sprayBooth.armed = false;
+    S.player.pos.set(c.downtown.x, c.downtown.y, c.downtown.z);
+    S.heat = c.heat;
+  }, cfg);
+
   const t0 = Date.now();
   let state = null;
   while (Date.now() - t0 < cfg.settleTimeoutMs) {
-    state = await page.evaluate((c) => {
+    await page.evaluate((heat) => {
+      window.__solmar.S.heat = heat;
+    }, cfg.heat);
+    await sleep(cfg.reassertEveryMs);
+    state = await page.evaluate(() => {
       const S = window.__solmar.S;
-      S.cash = c.walletTopUp;
-      if (S.heatDirector) S.heatDirector.sprayBooth.armed = false;
-      S.player.pos.set(c.downtown[0], c.downtown[1], c.downtown[2]);
-      S.heat = c.heat;
-      const cops = (S.cars || []).filter((car) => car.aiPolice);
+      const cops = S.cars.filter((c) => c.aiPolice);
       let heliDist = null;
       if (S.heli) {
-        const dx = S.heli.pos.x - S.player.pos.x;
-        const dz = S.heli.pos.z - S.player.pos.z;
-        heliDist = Math.hypot(dx, dz);
+        heliDist = Math.hypot(
+          S.heli.pos.x - S.player.pos.x,
+          S.heli.pos.y - S.player.pos.y,
+          S.heli.pos.z - S.player.pos.z,
+        );
       }
       return {
         wanted: S.wanted,
@@ -40,17 +50,13 @@ export async function stageChaseShot(page, options = {}) {
         heliDist,
         rosterRows: document.querySelectorAll('#roster .roster-row').length,
       };
-    }, cfg);
-    if (
-      state.heli &&
-      state.heliDist !== null &&
-      state.heliDist <= cfg.heliOverheadDistance &&
-      state.cops >= cfg.minCops &&
-      state.rosterRows >= cfg.minCops
-    ) {
+    });
+    if (state.heli && state.heliDist !== null && state.heliDist <= cfg.heliOverheadDistance
+      && state.cops >= cfg.minCops && state.wanted >= 4) {
       break;
     }
-    await sleep(cfg.reassertEveryMs);
   }
   return state;
 }
+
+export default stageChaseShot;

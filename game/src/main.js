@@ -1,192 +1,211 @@
 // SOLMAR BAY — boot hub. The ONLY file that imports the other modules.
-// Owns the renderer, the look (sunset sky, warm sun), the HUD, the menu /
-// pause / cutscene flow, save + load, and the frame loop. Feature modules
-// are probed with fetch first and each init is guarded, so one failing
-// module never kills the boot.
+// Owns the renderer, the look, save/load, menu/pause/cutscene, HUD wiring.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
-import { createState } from './state.js';
+import createState from './state.js';
 import { createInput } from './input.js';
 
 const $ = (id) => document.getElementById(id);
-const IDS = [
-  'game-container', 'sunset-band', 'vignette', 'flash', 'hud', 'cash',
-  'district', 'day-time', 'objective', 'respect-line', 'respect-num',
-  'respect-rank', 'wanted', 'radio', 'radio-station', 'radio-track',
-  'minimap', 'roster', 'roster-code', 'roster-rows', 'health-bar',
-  'health-fill', 'weapons', 'speedo', 'speed-num', 'speed-gear',
-  'speed-car', 'toast', 'dialogue', 'dlg-portrait', 'dlg-name', 'dlg-text',
-  'cutscene', 'cutscene-text', 'menu', 'btn-new', 'pause-menu',
-  'btn-missions', 'btn-resume', 'mission-select', 'mission-list',
-  'btn-close-jobs', 'shop-panel', 'shop-items', 'btn-close-shop',
-  'garage-panel', 'garage-list', 'btn-close-garage',
+const DOM_IDS = [
+  'game-container', 'sunset-band', 'vignette', 'flash', 'hud', 'cash', 'district',
+  'day-time', 'objective', 'respect-line', 'respect-num', 'respect-rank', 'wanted',
+  'radio', 'radio-station', 'radio-track', 'minimap', 'roster', 'roster-code',
+  'roster-rows', 'health-bar', 'health-fill', 'weapons', 'speedo', 'speed-num',
+  'speed-gear', 'speed-car', 'toast', 'dialogue', 'dlg-portrait', 'dlg-name',
+  'dlg-text', 'cutscene', 'cutscene-text', 'menu', 'btn-new', 'pause-menu',
+  'btn-missions', 'btn-resume', 'mission-select', 'mission-list', 'btn-close-jobs',
+  'shop-panel', 'shop-items', 'btn-close-shop', 'garage-panel', 'garage-list',
+  'btn-close-garage',
 ];
 const dom = {};
-for (const id of IDS) dom[id] = $(id);
+for (const id of DOM_IDS) dom[id] = $(id);
+function show(el) {
+  if (el) el.classList.remove('hidden');
+}
+function hide(el) {
+  if (el) el.classList.add('hidden');
+}
 
-function show(el) { if (el) el.classList.remove('hidden'); }
-function hide(el) { if (el) el.classList.add('hidden'); }
-
-// ---- toast: only a newer toast replaces the current one ----
+// ---- toast ----
 let toastToken = 0;
 function showToast(msg) {
   const el = dom.toast;
   if (!el) return;
+  const token = ++toastToken;
   el.textContent = msg;
   el.classList.remove('hidden');
-  const mine = ++toastToken;
   setTimeout(() => {
-    if (mine === toastToken) el.classList.add('hidden');
+    if (token === toastToken) el.classList.add('hidden');
   }, 4500);
 }
 
-// ---- dialogue queue ----
-let dialogueQueue = [];
-function portraitColor(name) {
-  if (name === 'LENA CRUZ') return '#ff7a9e';
-  if (name === 'VIC TORRES') return '#ffb347';
-  return '#5fb4c9';
-}
-function renderDialogue() {
-  const line = dialogueQueue[0];
-  if (!line) { hide(dom.dialogue); return; }
-  dom['dlg-name'].textContent = line.name;
-  dom['dlg-text'].textContent = line.text;
-  dom['dlg-portrait'].textContent = line.name.split(' ').map((w) => w[0]).join('');
-  dom['dlg-portrait'].style.background = portraitColor(line.name);
+// ---- dialogue fallback (dialogue.js replaces these when it loads) ----
+let dlgQueue = [];
+let dlgCurrent = null;
+function dlgRender() {
+  if (!dlgCurrent) {
+    hide(dom.dialogue);
+    return;
+  }
+  const name = dlgCurrent.name;
+  let initials = '?';
+  let color = '#7ea8ff';
+  if (name === 'LENA CRUZ') { initials = 'LC'; color = '#ff7a9e'; }
+  else if (name === 'VIC TORRES') { initials = 'VT'; color = '#ffb347'; }
+  else if (name === 'MARCO SOLIS') { initials = 'MS'; color = '#5fb4c9'; }
+  else {
+    initials = name.split(' ').map((p) => p[0] || '').join('').slice(0, 2).toUpperCase() || '?';
+  }
+  dom['dlg-portrait'].textContent = initials;
+  dom['dlg-portrait'].style.background = color;
+  dom['dlg-name'].textContent = name;
+  dom['dlg-text'].textContent = dlgCurrent.text;
   show(dom.dialogue);
 }
 function showDialogue(lines) {
-  dialogueQueue = lines.map((l) => ({ name: l.name, text: l.text }));
-  renderDialogue();
+  if (!lines || lines.length === 0) return;
+  dlgQueue = lines.map((l) => ({ name: l.name, text: l.text }));
+  dlgCurrent = dlgQueue.shift();
+  dlgRender();
 }
 function advanceDialogue() {
-  dialogueQueue.shift();
-  renderDialogue();
-}
-function flash() {
-  const el = dom.flash;
-  if (!el) return;
-  el.style.opacity = '0.45';
-  setTimeout(() => { el.style.opacity = '0'; }, 90);
+  if (dlgQueue.length > 0) {
+    dlgCurrent = dlgQueue.shift();
+    dlgRender();
+  } else {
+    dlgCurrent = null;
+    dlgQueue = [];
+    dlgRender();
+  }
 }
 
-// ---- state, input, renderer ----
+// ---- renderer / scene / camera ----
+const container = dom['game-container'];
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
+container.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a1a3a);
+scene.fog = new THREE.Fog(0x2a1a3a, 120, 520);
+const camera = new THREE.PerspectiveCamera(62, (container.clientWidth || 1280) / (container.clientHeight || 720), 0.1, 1200);
+camera.position.set(-40, 26, 90);
+window.addEventListener('resize', () => {
+  const w = container.clientWidth || window.innerWidth;
+  const h = container.clientHeight || window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+});
+
+// ---- state / input / ctx ----
 const S = createState({ toast: showToast });
 const input = createInput();
 input.attach();
+const api = {
+  toast: showToast,
+  showDialogue,
+  advanceDialogue,
+  flash: (opacity = 80) => {
+    const el = dom.flash;
+    if (!el) return;
+    el.style.opacity = String(Math.min(1, opacity / 100));
+    setTimeout(() => { el.style.opacity = '0'; }, 90);
+  },
+  audio: () => {},
+  shake: () => {},
+};
+const ctx = {
+  THREE, scene, camera, renderer, config: CONFIG, state: S, dom,
+  updates: [], api, input,
+  shopLoaded: false,
+  shopFallbackInstalled: false,
+  cutsceneLines: null,
+  playerMesh: null,
+};
+ctx.clearDialogue = () => {
+  dlgQueue = [];
+  dlgCurrent = null;
+  dlgRender();
+};
 
-const container = dom['game-container'];
-const renderer = new THREE.WebGLRenderer({ antialias: false });
-// Headless SwiftShader renders this scene at ~0.5 fps at full res, and
-// the game logic (missions, police, districts) only advances once per
-// frame — so render at half resolution and let the canvas upscale via
-// CSS. Same picture, ~4x fewer fragments, and the frame loop runs at a
-// speed the game can actually play at.
-const RENDER_SCALE = 0.5;
-function sizeRenderer() {
-  const w = Math.max(320, Math.floor((container.clientWidth || window.innerWidth) * RENDER_SCALE));
-  const h = Math.max(180, Math.floor((container.clientHeight || window.innerHeight) * RENDER_SCALE));
-  renderer.setPixelRatio(1);
-  renderer.setSize(w, h, false);
-  renderer.domElement.style.width = '100%';
-  renderer.domElement.style.height = '100%';
-}
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-sizeRenderer();
-container.appendChild(renderer.domElement);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(CONFIG.look.dusk);
-scene.fog = new THREE.Fog(0x2a1a3a, 120, 520);
-
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1200);
-camera.position.set(-40, 26, 90);
-
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  sizeRenderer();
-});
-
-// ---- the Sunset look, owned by the boot hub ----
-const sun = new THREE.DirectionalLight(0xffb347, 2.2);
-sun.position.set(70, 38, -60);
-scene.add(sun);
-S.sunLight = sun;
-scene.add(new THREE.AmbientLight(0x604a7a, 0.9));
-scene.add(new THREE.HemisphereLight(0xffc98a, 0x2a1a3a, 0.7));
-
+// ---- the look, owned by the boot hub ----
+const sunLight = new THREE.DirectionalLight(0xffb347, 2.2);
+sunLight.position.set(70, 38, -60);
+scene.add(sunLight);
+S.sunLight = sunLight;
+scene.add(new THREE.AmbientLight(0x8a6a9a, 0.55));
+const hemi = new THREE.HemisphereLight(0xffc890, 0x2a1a3a, 0.5);
+scene.add(hemi);
+// Shader sky dome: orange horizon through purple dusk by day, deep night blue.
 const skyMat = new THREE.ShaderMaterial({
   side: THREE.BackSide,
   depthWrite: false,
+  fog: false,
   uniforms: { uNight: { value: 0 } },
-  vertexShader: 'varying vec3 vPos; void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: [
-    'uniform float uNight; varying vec3 vPos;',
-    'void main() {',
-    '  float h = normalize(vPos).y;',
-    '  vec3 dayHorizon = vec3(1.0, 0.62, 0.25);',
-    '  vec3 dayZenith = vec3(0.45, 0.22, 0.55);',
-    '  vec3 nightHorizon = vec3(0.05, 0.08, 0.22);',
-    '  vec3 nightZenith = vec3(0.01, 0.01, 0.06);',
-    '  vec3 horizon = mix(dayHorizon, nightHorizon, uNight);',
-    '  vec3 zenith = mix(dayZenith, nightZenith, uNight);',
-    '  vec3 col = mix(horizon, zenith, clamp(h * 1.4 + 0.25, 0.0, 1.0));',
-    '  gl_FragColor = vec4(col, 1.0);',
-    '}',
-  ].join('\n'),
+  vertexShader: `
+    varying vec3 vPos;
+    void main() {
+      vPos = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: `
+    uniform float uNight;
+    varying vec3 vPos;
+    void main() {
+      float h = normalize(vPos).y;
+      vec3 sunset = mix(vec3(1.0, 0.55, 0.25), vec3(0.45, 0.2, 0.5), clamp(h * 1.4 + 0.3, 0.0, 1.0));
+      vec3 night = mix(vec3(0.02, 0.03, 0.1), vec3(0.08, 0.1, 0.25), clamp(h * 1.2 + 0.4, 0.0, 1.0));
+      gl_FragColor = vec4(mix(sunset, night, uNight), 1.0);
+    }`,
 });
-const skyDome = new THREE.Mesh(new THREE.SphereGeometry(700, 32, 15), skyMat);
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(700, 32, 16), skyMat);
 scene.add(skyDome);
 S.skyDome = skyDome;
-
+// Dark ground plane.
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(900, 900),
-  new THREE.MeshStandardMaterial({ color: 0x241a2e, roughness: 1 })
+  new THREE.MeshStandardMaterial({ color: 0x1a1426, roughness: 1 }),
 );
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.05;
 scene.add(ground);
 
-const ctx = {
-  THREE, scene, camera, renderer, config: CONFIG, state: S, dom,
-  updates: [],
-  api: { toast: showToast, showDialogue, advanceDialogue, flash },
-  input,
-};
-
-// ---- mission briefing fallback (m1 Lena-then-Marco, m5 Lena-then-Vic) ----
-const rawStart = S.missions.start.bind(S.missions);
+// ---- mission briefing fallback (m1 / m5) ----
+const origStart = S.missions.start.bind(S.missions);
 S.missions.start = (idOrIndex) => {
-  const job = rawStart(idOrIndex);
-  if (job && job.id === 'm1') {
-    showDialogue([
-      { name: 'LENA CRUZ', text: 'You made it. Vic has been waiting on this one — keep the engine warm and your mouth shut.' },
-      { name: 'MARCO SOLIS', text: 'The garage is the only honest place left in Solmar. Do this right and Vic remembers your name.' },
+  const cur = origStart(idOrIndex);
+  if (!cur) return cur;
+  if (cur.id === 'm1') {
+    api.showDialogue([
+      { name: 'LENA CRUZ', text: 'You made it. Vic has been asking about you — says you drive like the bay owes you money.' },
+      { name: 'MARCO SOLIS', text: 'Easy, Lena. Kid, the job is simple: take the package, do not get followed, do not get cute.' },
     ]);
-    showToast('New job: FIRST JOB — meet Lena at the garage.');
-  } else if (job && job.id === 'm5') {
-    showDialogue([
-      { name: 'LENA CRUZ', text: 'I am riding with you on this one. You drive, I watch the mirrors. We do not stop for anybody.' },
-      { name: 'VIC TORRES', text: 'The convoy runs at dusk. Hit it clean, bring it home, and the whole bay will know your name.' },
+    api.toast('JOB STARTED: FIRST JOB — meet Lena at the garage.');
+  } else if (cur.id === 'm5') {
+    api.showDialogue([
+      { name: 'LENA CRUZ', text: 'I am riding with you on this one. Hit the convoy together, and do exactly what I say.' },
+      { name: 'VIC TORRES', text: 'Lena knows the roads better than the cops do. Listen to her, and we all get paid.' },
     ]);
-    showToast('CREW UP — Lena is riding with you.');
+    api.toast('JOB STARTED: CREW UP — Lena rides with you.');
   }
-  return job;
+  return cur;
 };
 
-// ---- save / load (localStorage, primitives only) ----
+// ---- save / load / reset ----
 const SAVE_KEY = 'solmar-save';
 function saveGame() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({
+    const data = {
       cash: S.cash, day: S.day, time: S.time, missionIndex: S.missionIndex,
-      respect: S.respect, stats: S.stats, health: S.player.health,
+      respect: S.respect, stats: { ...S.stats }, health: S.player.health,
       radioStation: S.radioStation, px: S.player.pos.x, pz: S.player.pos.z,
-      garageCars: S.garageCars,
-    }));
-  } catch (e) { /* storage unavailable — play on without saving */ }
+      garageCars: S.garageCars.map((c) => ({
+        kind: c.kind, tune: { ...c.tune }, health: c.health, maxHealth: c.maxHealth, color: c.color,
+      })),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (e) { /* storage is best-effort */ }
 }
 function loadGame() {
   try {
@@ -195,19 +214,22 @@ function loadGame() {
     const d = JSON.parse(raw);
     if (!d || typeof d !== 'object') return;
     if (typeof d.cash === 'number') S.cash = d.cash;
-    if (typeof d.day === 'number' && d.day >= 1) S.day = d.day;
-    if (typeof d.time === 'number' && d.time >= 0 && d.time < 1440) S.time = d.time;
+    if (typeof d.day === 'number') S.day = d.day;
+    if (typeof d.time === 'number') S.time = d.time;
     if (typeof d.missionIndex === 'number') S.missionIndex = Math.max(0, Math.min(10, d.missionIndex));
-    if (typeof d.respect === 'number') { S.respect = Math.max(0, d.respect); S.respectDirector.add(0, 'load'); }
+    if (typeof d.respect === 'number') {
+      S.respect = Math.max(0, d.respect);
+      S.respectDirector.add(0, 'load');
+    }
     if (d.stats && typeof d.stats === 'object') {
       for (const k of ['packages', 'racesWon', 'fencesSold', 'faresDone']) {
         if (typeof d.stats[k] === 'number') S.stats[k] = d.stats[k];
       }
     }
     if (typeof d.health === 'number') S.player.health = Math.max(0, Math.min(100, d.health));
-    if (typeof d.radioStation === 'number') S.radioStation = d.radioStation % CONFIG.radio.length;
+    if (typeof d.radioStation === 'number') S.radioStation = d.radioStation % 6;
     if (typeof d.px === 'number' && typeof d.pz === 'number') S.player.pos.set(d.px, 0, d.pz);
-    if (Array.isArray(d.garageCars)) S.garageCars = d.garageCars;
+    if (Array.isArray(d.garageCars)) S.garageCars = d.garageCars.filter((c) => c && typeof c.kind === 'string');
   } catch (e) { /* corrupt save = fresh start */ }
 }
 function resetState() {
@@ -216,66 +238,67 @@ function resetState() {
   S.time = 0;
   S.missionIndex = 0;
   S.respect = 0;
-  S.respectDirector.add(0, 'reset');
+  S.respectDirector.rank = { title: 'NOBODY', min: 0 };
   S.heat = 0;
   S.wanted = 0;
   S.radioStation = 0;
-  S.car = null;
-  S.heli = null;
-  S.lastKnown = null;
+  S.district = 'downtown';
+  S.objective = CONFIG.defaultObjective;
+  S.dayNight.phase = 'SUNSET';
+  S.dayNight.night = 0;
+  // Clear police.
+  for (const cop of [...S.cops]) {
+    const i = S.cars.indexOf(cop);
+    if (i >= 0) S.cars.splice(i, 1);
+    if (cop.mesh && cop.mesh.parent) cop.mesh.parent.remove(cop.mesh);
+  }
   S.cops = [];
+  if (S.heli) {
+    if (S.heli.mesh && S.heli.mesh.parent) S.heli.mesh.parent.remove(S.heli.mesh);
+    S.heli = null;
+  }
+  S.lastKnown = null;
+  S.car = null;
   S.garageCars = [];
   S.missions.current = null;
-  S.objective = 'Explore Solmar Bay — find work.';
   S.stats = { packages: 0, racesWon: 0, fencesSold: 0, faresDone: 0 };
   S.sideActivities.taxi = { active: false, dest: null, fare: 0 };
   S.sideActivities.race = { active: false, gates: [], next: 0 };
   S.challengesDirector.today = CONFIG.challenges.map((c) => ({ ...c }));
   S.challengesDirector._paid = [];
-  S.challengesDirector._day = 1;
   S.crew.active = false;
   if (S.crew.mesh) S.crew.mesh.visible = false;
   S.player.pos.set(-84, 0, -58);
   S.player.vel.set(0, 0, 0);
   S.player.heading = 0;
-  S.player.health = CONFIG.maxHealth;
+  S.player.health = CONFIG.player.maxHealth;
   S.player.reloading = false;
   S.player.reloadT = 0;
   S.player.fireT = 0;
   for (const slot of S.player.loadout.slots) slot.mag = slot.def.mag;
-  S.player.loadout._equipped = 0;
-  for (const p of S.packages) p.taken = false;
-  dialogueQueue = [];
-  hide(dom.dialogue);
+  S.player.loadout.equipped = 0;
+  S.packages.forEach((p) => { p.taken = false; });
+  if (ctx.clearDialogue) ctx.clearDialogue();
+  if (ctx.playerMesh) ctx.playerMesh.visible = true;
 }
 
 // ---- menu / pause / cutscene ----
-const CUTSCENE_LINES = (ctx.api.cutsceneLines) || [
-  'The sun is going down on Solmar Bay, and the city is waking up.',
-  'One hustler. One car. One last chance to make a name.',
-  'Vic Torres has work. Lena Cruz has the wheel. The bay is yours.',
+const CUTSCENE_FALLBACK = [
+  'The sun is going down over Solmar Bay — and the whole city is about to light up.',
+  'You came here with $120 and a name nobody knows. Tonight, that changes.',
+  'Vic Torres has work. Lena Cruz has the wheel. All you need is nerve.',
 ];
 let cutsceneT = 0;
-let cutsceneLine = -1;
-// The cutscene module owns the lines once it loads; fall back to the
-// boot hub's own copy so the intro works even if it never loads.
-function cutsceneLines() {
-  return (ctx.api.cutsceneLines && ctx.api.cutsceneLines.length)
-    ? ctx.api.cutsceneLines
-    : CUTSCENE_LINES;
-}
-function showCutsceneLine(i) {
-  if (dom['cutscene-text']) dom['cutscene-text'].textContent = cutsceneLines()[i] || '';
-}
+let cutsceneLineIdx = -1;
 function startCutscene() {
   S.mode = 'cutscene';
   S.cutscene = true;
   cutsceneT = 0;
-  cutsceneLine = -1;
+  cutsceneLineIdx = -1;
   show(dom.cutscene);
   show(dom.hud);
-  showCutsceneLine(0);
-  cutsceneLine = 0;
+  dom['cutscene-text'].textContent = (ctx.cutsceneLines || CUTSCENE_FALLBACK)[0];
+  cutsceneLineIdx = 0;
 }
 function endCutscene() {
   if (!S.cutscene) return;
@@ -305,372 +328,277 @@ function resumeGame() {
   hide(dom['pause-menu']);
   hide(dom['mission-select']);
 }
-
-// X skips the cutscene immediately — a frame can span a whole key press
-// at headless speed, so the frame loop checks the held key too.
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyX' && S.cutscene) endCutscene();
-});
-
-// ---- job board ----
 function buildJobBoard() {
   const list = dom['mission-list'];
-  if (!list) return;
   list.innerHTML = '';
   CONFIG.missions.forEach((m, i) => {
     const row = document.createElement('div');
     row.className = 'job-row';
     const done = i < S.missionIndex;
     const isCurrent = S.missions.current && S.missions.current.index === i;
-    const pay = done ? '✓' : isCurrent ? 'ACTIVE' : '$' + m.pay;
-    row.innerHTML = `<span class="job-title">${m.title}</span><span class="job-giver">${m.giver}</span><span class="job-pay">${pay}</span><span class="job-desc">${m.desc}</span>`;
-    row.addEventListener('click', () => {
-      if (done) return;
-      S.missions.start(i);
-      hide(dom['mission-select']);
-      resumeGame();
-    });
+    const title = document.createElement('span');
+    title.className = 'job-title';
+    title.textContent = `${i + 1}. ${m.title}`;
+    const giver = document.createElement('span');
+    giver.className = 'job-giver';
+    giver.textContent = m.giver;
+    const pay = document.createElement('span');
+    pay.className = 'job-pay';
+    pay.textContent = done ? '✓' : isCurrent ? 'ACTIVE' : '$' + m.pay;
+    const desc = document.createElement('span');
+    desc.className = 'job-desc';
+    desc.textContent = m.desc;
+    row.append(title, giver, pay, desc);
+    if (!done) {
+      row.addEventListener('click', () => {
+        S.missions.start(i);
+        hide(dom['mission-select']);
+        resumeGame();
+      });
+    }
     list.appendChild(row);
   });
 }
 
-if (dom['btn-new']) dom['btn-new'].addEventListener('click', startNewGame);
-if (dom['btn-resume']) dom['btn-resume'].addEventListener('click', resumeGame);
-if (dom['btn-missions']) dom['btn-missions'].addEventListener('click', () => { buildJobBoard(); show(dom['mission-select']); });
-if (dom['btn-close-jobs']) dom['btn-close-jobs'].addEventListener('click', () => hide(dom['mission-select']));
-if (dom['btn-close-shop']) dom['btn-close-shop'].addEventListener('click', () => hide(dom['shop-panel']));
-if (dom['btn-close-garage']) dom['btn-close-garage'].addEventListener('click', () => hide(dom['garage-panel']));
-if (dom.dialogue) dom.dialogue.addEventListener('click', advanceDialogue);
-if (dom.cutscene) dom.cutscene.addEventListener('click', endCutscene);
+// Buttons.
+dom['btn-new'].addEventListener('click', startNewGame);
+dom['btn-resume'].addEventListener('click', resumeGame);
+dom['btn-missions'].addEventListener('click', () => {
+  buildJobBoard();
+  show(dom['mission-select']);
+});
+dom['btn-close-jobs'].addEventListener('click', () => hide(dom['mission-select']));
+dom['btn-close-shop'].addEventListener('click', () => hide(dom['shop-panel']));
+dom['btn-close-garage'].addEventListener('click', () => hide(dom['garage-panel']));
+dom.dialogue.addEventListener('click', () => api.advanceDialogue());
+dom.cutscene.addEventListener('click', () => endCutscene());
+// X skips the cutscene — both a keydown listener (immediate) and the
+// frame loop (held key), so a fast headless frame never misses it.
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyX' && S.cutscene) endCutscene();
+});
 
 // ---- shop fallback (only if no shop module loaded) ----
-let shopFallbackActive = false;
 function installShopFallback() {
-  shopFallbackActive = true;
   const list = dom['shop-items'];
-  function buildRows() {
-    if (!list) return;
-    list.innerHTML = '';
-    for (const item of CONFIG.shop.items) {
-      const row = document.createElement('div');
-      row.className = 'shop-row fallback-row';
-      row.innerHTML = `<span class="shop-name">${item.name}</span><span class="shop-desc">${item.desc}</span><span class="shop-price">$${item.price}</span>`;
-      const btn = document.createElement('button');
-      btn.className = 'shop-buy';
-      btn.textContent = 'BUY';
-      btn.addEventListener('click', () => {
-        // Ignore rows built by a real shop module.
-        if (!row.classList.contains('fallback-row')) return;
-        if (S.cash < item.price) { showToast('Not enough cash.'); return; }
-        S.cash -= item.price;
-        if (item.ammo) {
-          const cur = S.player.loadout.current();
-          cur.mag = cur.def.mag;
-          showToast(`${item.name} — magazine refilled.`);
-        } else {
-          S.player.health = Math.min(CONFIG.maxHealth, S.player.health + item.heal);
-          showToast(`${item.name} — +${item.heal} HP.`);
-        }
-      });
-      row.appendChild(btn);
-      list.appendChild(row);
-    }
+  list.innerHTML = '';
+  for (const item of CONFIG.shop.items) {
+    const row = document.createElement('div');
+    row.className = 'shop-row fallback-row';
+    row.dataset.fallback = '1';
+    const name = document.createElement('span');
+    name.className = 'shop-name';
+    name.textContent = item.name;
+    const desc = document.createElement('span');
+    desc.className = 'shop-desc';
+    desc.textContent = item.desc;
+    const price = document.createElement('span');
+    price.className = 'shop-price';
+    price.textContent = '$' + item.price;
+    const buy = document.createElement('button');
+    buy.className = 'shop-buy';
+    buy.textContent = 'BUY';
+    buy.addEventListener('click', () => {
+      if (row.dataset.fallback !== '1') return; // never touch real shop rows
+      if (S.cash < item.price) {
+        api.toast('Not enough cash for that.');
+        return;
+      }
+      S.cash -= item.price;
+      if (item.id === 'ammo') {
+        S.player.loadout.current().mag = S.player.loadout.current().def.mag;
+      } else if (item.heal > 0) {
+        S.player.health = Math.min(CONFIG.player.maxHealth, S.player.health + item.heal);
+      }
+      api.toast(`Bought ${item.name} for $${item.price}.`);
+    });
+    row.append(name, desc, price, buy);
+    list.appendChild(row);
   }
-  ctx.api.buildShopRows = buildRows;
+  ctx.shopFallbackInstalled = true;
 }
 
-// ---- feature modules, in the pinned order ----
+// ---- feature modules ----
 const MODULE_ORDER = [
   'daynight', 'districts', 'player', 'vehicles', 'city', 'sky', 'ambient',
   'people', 'police', 'heli2', 'heat', 'missions', 'side', 'shop', 'garage',
   'fence', 'hud', 'dialogue', 'audio', 'banter', 'crew', 'challenges',
   'respect', 'radio2', 'safehouse', 'weapons', 'cutscene', 'juice', 'postfx',
 ];
-const loadedModules = new Set();
 async function loadModules() {
   for (const name of MODULE_ORDER) {
-    // Resolve against THIS module's URL: main.js lives in src/, so the
-    // feature modules are ./<name>.js — a './src/<name>.js' specifier
-    // would wrongly resolve to /src/src/<name>.js and 404 every module.
-    const url = new URL(`./${name}.js`, import.meta.url).href;
     try {
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const mod = await import(url);
+      const res = await fetch('./src/' + name + '.js');
+      if (!res.ok) continue; // missing file is a quiet skip
+      const mod = await import('./' + name + '.js');
       if (mod && typeof mod.init === 'function') {
         try {
           mod.init(ctx);
-          loadedModules.add(name);
         } catch (e) {
-          console.warn('module failed: ' + name, e);
+          console.warn('module init failed: ' + name, e);
         }
       }
-    } catch (e) {
-      // Missing file is a quiet skip, never a console error.
-    }
+    } catch (e) { /* quiet skip */ }
   }
-  if (!loadedModules.has('shop')) installShopFallback();
+  if (!ctx.shopLoaded) installShopFallback();
   dedupeParkedCars();
 }
-
 function dedupeParkedCars() {
   const seen = new Set();
-  for (let i = S.cars.length - 1; i >= 0; i--) {
-    const car = S.cars[i];
+  for (const car of [...S.cars]) {
     if (car.aiPolice) continue;
     const key = car.kind + '@' + Math.round(car.pos.x) + ',' + Math.round(car.pos.z);
     if (seen.has(key)) {
+      const i = S.cars.indexOf(car);
+      if (i >= 0) S.cars.splice(i, 1);
       if (car.mesh && car.mesh.parent) car.mesh.parent.remove(car.mesh);
-      S.cars.splice(i, 1);
+      if (S.car === car) S.car = null;
     } else {
       seen.add(key);
     }
   }
 }
 
-// ---- day / night ----
-function updateDayNight(dt) {
-  const t = S.time;
+// ---- day/night fallback (daynight.js owns it when loaded) ----
+function daynightFallback(dt) {
   let target = 0;
   let phase = 'SUNSET';
-  if (t >= CONFIG.nightStart) { phase = 'NIGHT'; target = 1; }
-  else if (t >= CONFIG.duskStart) {
+  if (S.time >= CONFIG.nightAt) {
+    target = 1;
+    phase = 'NIGHT';
+  } else if (S.time >= CONFIG.duskAt) {
+    target = (S.time - CONFIG.duskAt) / (CONFIG.nightAt - CONFIG.duskAt);
     phase = 'DUSK';
-    target = (t - CONFIG.duskStart) / (CONFIG.nightStart - CONFIG.duskStart);
   }
   S.dayNight.phase = phase;
-  const n = S.dayNight.night;
-  S.dayNight.night = n + (target - n) * Math.min(1, dt * 0.6);
   const night = S.dayNight.night;
-  sun.intensity = 2.2 - night * 1.85;
-  sun.color.setHex(night > 0.6 ? 0x8fb4ff : 0xffb347);
-  if (S.skyDome) S.skyDome.material.uniforms.uNight.value = night;
+  S.dayNight.night = target > night
+    ? Math.min(target, night + 0.6 * dt)
+    : Math.max(target, night - 0.6 * dt);
+  const n = S.dayNight.night;
+  if (S.sunLight) {
+    S.sunLight.intensity = 2.2 - n * 1.85;
+    S.sunLight.color.set(n > 0.6 ? 0x8fb4ff : 0xffb347);
+  }
+  if (S.skyDome) S.skyDome.material.uniforms.uNight.value = n;
+}
+
+// ---- HUD fallback (hud.js owns it when loaded) ----
+function hudFallback() {
+  dom.cash.textContent = '$' + Math.floor(S.cash).toLocaleString('en-US');
+  const total = CONFIG.dayStartHour * 60 + CONFIG.dayStartMinute + Math.floor(S.time);
+  const hh = Math.floor(total / 60) % 24;
+  const mm = total % 60;
+  dom['day-time'].textContent = `DAY ${S.day} ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} ${S.dayNight.phase}`;
 }
 
 // ---- camera ----
-const camTarget = new THREE.Vector3();
-function updateCamera(dt) {
+const camTarget = new THREE.Vector3(-40, 26, 90);
+let menuAngle = 0;
+function updateCamera(dt, t) {
   if (S.mode === 'menu') {
-    const a = performance.now() * 0.00005;
-    camera.position.set(Math.cos(a) * 120, 42, Math.sin(a) * 120);
-    camera.lookAt(0, 0, 0);
+    menuAngle += dt * 0.06;
+    camera.position.set(Math.cos(menuAngle) * 130, 42, Math.sin(menuAngle) * 130);
+    camera.lookAt(0, 4, 0);
     return;
   }
   if (S.cutscene) {
     const k = Math.min(1, cutsceneT / 14);
+    const e = k * k * (3 - 2 * k); // smoothstep
     camera.position.set(
-      -140 + (60 - -140) * k,
-      55 + (25 - 55) * k,
-      -120 + (30 - -120) * k,
+      -140 + (60 + 140) * e,
+      55 + (25 - 55) * e,
+      -120 + (30 + 120) * e,
     );
-    camera.lookAt(0, 5, 0);
+    camera.lookAt(0, 6, 20);
     return;
   }
   const focus = S.car ? S.car.pos : S.player.pos;
   const heading = S.car ? S.car.heading : S.player.heading;
   const dist = S.car ? 13 : 9.5;
   const height = S.car ? 5.2 : 4.4;
-  camTarget.set(
-    focus.x - Math.sin(heading) * dist,
-    height,
-    focus.z - Math.cos(heading) * dist,
-  );
-  const s = Math.min(1, dt * 4);
-  camera.position.x += (camTarget.x - camera.position.x) * s;
-  camera.position.y += (camTarget.y - camera.position.y) * s;
-  camera.position.z += (camTarget.z - camera.position.z) * s;
+  const fx = Math.sin(heading);
+  const fz = Math.cos(heading);
+  camTarget.set(focus.x - fx * dist, height, focus.z - fz * dist);
+  const lerpK = 1 - Math.exp(-4.5 * dt);
+  camera.position.lerp(camTarget, lerpK);
   camera.lookAt(focus.x, focus.y + 2, focus.z);
 }
 
-// ---- HUD ----
-function districtName(id) {
-  const d = CONFIG.districts.find((x) => x.id === id);
-  return d ? d.name : id.toUpperCase();
-}
-function updateHUD() {
-  if (dom.cash) dom.cash.textContent = '$' + Math.floor(S.cash).toLocaleString('en-US');
-  if (dom.district) dom.district.textContent = districtName(S.district);
-  if (dom['day-time']) {
-    const total = CONFIG.clockOpenMinutes + Math.floor(S.time);
-    const hh = String(Math.floor(total / 60) % 24).padStart(2, '0');
-    const mm = String(total % 60).padStart(2, '0');
-    dom['day-time'].textContent = `DAY ${S.day} ${hh}:${mm} ${S.dayNight.phase}`;
-  }
-  if (dom['respect-num']) dom['respect-num'].textContent = String(Math.floor(S.respect));
-  if (dom['respect-rank']) dom['respect-rank'].textContent = S.respectDirector.rank.title;
-  if (dom['health-fill']) dom['health-fill'].style.width = Math.max(0, Math.min(100, S.player.health)) + '%';
-  const station = CONFIG.radio[S.radioStation] || CONFIG.radio[0];
-  if (dom['radio-station']) dom['radio-station'].textContent = station.name;
-  if (dom['radio-track']) {
-    const track = station.tracks[Math.floor(S.time / 45) % station.tracks.length];
-    dom['radio-track'].textContent = `${track.title} — ${track.artist}`;
-  }
-  if (dom.wanted) {
-    if (S.wanted > 0) {
-      dom.wanted.textContent = '★'.repeat(S.wanted) + '☆'.repeat(5 - S.wanted);
-      dom.wanted.classList.remove('hidden');
-    } else {
-      dom.wanted.classList.add('hidden');
-    }
-  }
-  const slots = dom.weapons ? dom.weapons.querySelectorAll('.slot') : [];
-  slots.forEach((slot, i) => {
-    const def = CONFIG.weapons[i];
-    if (!def) return;
-    const nameEl = slot.querySelector('.slot-name');
-    const ammoEl = slot.querySelector('.slot-ammo');
-    if (nameEl) nameEl.textContent = def.name;
-    if (ammoEl) ammoEl.textContent = String(S.player.loadout.slots[i].mag);
-    slot.classList.toggle('on', S.player.loadout.equipped === i);
-  });
-  const speed = S.car ? Math.abs(S.car.speed) * 2.237 : 0;
-  if (dom['speed-num']) dom['speed-num'].textContent = String(Math.round(speed));
-  if (dom['speed-gear']) {
-    dom['speed-gear'].textContent = !S.car || speed < 1 ? 'N'
-      : speed < 15 ? '1' : speed < 30 ? '2' : speed < 45 ? '3' : speed < 60 ? '4' : '5';
-  }
-  if (dom['speed-car']) dom['speed-car'].textContent = S.car ? S.car.kind.toUpperCase() : 'ON FOOT';
-  if (dom.objective) {
-    dom.objective.textContent = S.missions.current
-      ? S.missions.current.desc
-      : 'Explore Solmar Bay — find work.';
-  }
-}
-
-// ---- police roster (4x/second) ----
-let rosterTimer = 0;
-function updateRoster(dt) {
-  rosterTimer += dt;
-  if (rosterTimer < 0.25) return;
-  rosterTimer = 0;
-  const cops = S.cops.length ? S.cops : S.cars.filter((c) => c.aiPolice);
-  if (!cops.length) { hide(dom.roster); return; }
-  show(dom.roster);
-  if (dom['roster-code']) dom['roster-code'].textContent = `DISPATCH 10-80 — ${S.wanted} STAR(S)`;
-  if (dom['roster-rows']) {
-    dom['roster-rows'].innerHTML = '';
-    for (const cop of cops) {
-      const row = document.createElement('div');
-      row.className = 'roster-row';
-      const dx = cop.pos.x - S.player.pos.x;
-      const dz = cop.pos.z - S.player.pos.z;
-      const dist = Math.round(Math.hypot(dx, dz));
-      const tactic = (cop.brain && cop.brain.tactic) || 'PURSUIT';
-      row.innerHTML = `<b>${cop.callsign || 'PD-??'}</b> ${tactic} — ${dist}m`;
-      dom['roster-rows'].appendChild(row);
-    }
-  }
-}
-
-// ---- minimap (about 7x/second) ----
-let mapTimer = 0;
-function updateMinimap(dt) {
-  mapTimer += dt;
-  if (mapTimer < 0.14) return;
-  mapTimer = 0;
-  const canvas = dom.minimap;
-  if (!canvas) return;
-  const g = canvas.getContext('2d');
-  if (!g) return;
-  g.fillStyle = '#160d24';
-  g.fillRect(0, 0, 180, 180);
-  const mx = (x) => 90 + x * 0.45;
-  const my = (z) => 90 + z * 0.45;
-  for (const d of CONFIG.districts) {
-    g.fillStyle = d.color;
-    g.beginPath();
-    g.arc(mx(d.x), my(d.z), 3, 0, Math.PI * 2);
-    g.fill();
-  }
-  if (S.wanted > 0 && S.lastKnown) {
-    g.strokeStyle = '#ff3b30';
-    g.beginPath();
-    g.arc(mx(S.lastKnown.x), my(S.lastKnown.z), 10, 0, Math.PI * 2);
-    g.stroke();
-  }
-  for (const p of S.packages) {
-    if (p.taken) continue;
-    g.fillStyle = '#ffd24a';
-    g.fillRect(mx(p.x) - 2, my(p.z) - 2, 4, 4);
-  }
-  for (const car of S.cars) {
-    g.fillStyle = car.aiPolice ? '#5f8cff' : '#dddddd';
-    g.fillRect(mx(car.pos.x) - 2, my(car.pos.z) - 2, 4, 4);
-  }
-  if (S.heli) {
-    g.fillStyle = '#ff3b30';
-    g.beginPath();
-    g.arc(mx(S.heli.pos.x), my(S.heli.pos.z), 3, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.fillStyle = '#ffb347';
-  g.beginPath();
-  g.arc(mx(S.player.pos.x), my(S.player.pos.z), 3.5, 0, Math.PI * 2);
-  g.fill();
-}
-
 // ---- frame loop ----
-let last = performance.now();
-let autosaveT = 0;
-// Game time runs on a dt capped at 0.03 s per frame: under headless
-// SwiftShader the frame loop runs at ~1.5-2.5 fps, and at the 0.05 s
-// cap the pistol's 0.22 s fire interval would let two rounds out inside
-// one 2 s mouse hold. The 0.03 s cap keeps one round per hold while
-// every polling-based check still has a wide margin.
+let lastTime = performance.now();
+let elapsed = 0;
+let lastAutosave = 0;
+// Mission 1 auto-start, shared by the frame loop and a timer: at headless
+// speed requestAnimationFrame can stall for seconds, so a plain interval
+// makes the garage trigger fire promptly even when rendering lags.
+function maybeAutoStartMission1() {
+  if (S.mode !== 'playing' || S.missions.current || S.missionIndex !== 0) return;
+  const d = Math.hypot(S.player.pos.x - CONFIG.garage.x, S.player.pos.z - CONFIG.garage.z);
+  if (d < CONFIG.garage.radius) S.missions.start(0);
+}
+setInterval(maybeAutoStartMission1, 500);
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.03, Math.max(0.001, (now - last) / 1000));
-  last = now;
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (!(dt > 0)) dt = 0.016;
+  dt = Math.min(dt, 0.05);
+  elapsed += dt;
 
+  // Global keys.
   if (S.cutscene && input.isDown('KeyX')) endCutscene();
   if (input.wasPressed('KeyP')) {
     if (S.mode === 'playing') pauseGame();
     else if (S.mode === 'paused') resumeGame();
   }
-  if (shopFallbackActive && input.wasPressed('KeyF') && S.mode === 'playing') {
-    const dx = S.player.pos.x - CONFIG.shop.x;
-    const dz = S.player.pos.z - CONFIG.shop.z;
-    if (dx * dx + dz * dz <= CONFIG.shop.radius * CONFIG.shop.radius) {
-      if (ctx.api.buildShopRows) ctx.api.buildShopRows();
-      show(dom['shop-panel']);
+  if (input.wasPressed('KeyF') && ctx.shopFallbackInstalled && S.mode === 'playing') {
+    const d = Math.hypot(S.player.pos.x - CONFIG.shop.x, S.player.pos.z - CONFIG.shop.z);
+    if (d <= CONFIG.shop.radius + 2) {
+      if (dom['shop-panel'].classList.contains('hidden')) show(dom['shop-panel']);
+      else hide(dom['shop-panel']);
     }
   }
 
   if (S.mode !== 'paused') {
     S.tick(dt);
     S.challengesDirector.tick();
+    // Cutscene clock + line cycling.
     if (S.cutscene) {
       cutsceneT += dt;
-      const lines = cutsceneLines();
-      const line = Math.min(lines.length - 1, Math.floor(cutsceneT / 4.5));
-      if (line !== cutsceneLine) {
-        cutsceneLine = line;
-        showCutsceneLine(line);
+      const lines = ctx.cutsceneLines || CUTSCENE_FALLBACK;
+      const idx = Math.min(lines.length - 1, Math.floor(cutsceneT / 4.5));
+      if (idx !== cutsceneLineIdx) {
+        cutsceneLineIdx = idx;
+        dom['cutscene-text'].textContent = lines[idx];
       }
       if (cutsceneT >= 14) endCutscene();
     }
-    // Mission 1 auto-starts when the player reaches the garage door.
-    if (S.mode === 'playing' && !S.missions.current && S.missionIndex === 0) {
-      const dx = S.player.pos.x - CONFIG.garage.x;
-      const dz = S.player.pos.z - CONFIG.garage.z;
-      if (dx * dx + dz * dz <= CONFIG.garage.radius * CONFIG.garage.radius) {
-        S.missions.start(0);
+    // Mission 1 auto-start at the garage door.
+    maybeAutoStartMission1();
+    // Feature updates, each guarded.
+    for (const fn of ctx.updates) {
+      try {
+        fn(dt, elapsed);
+      } catch (e) {
+        console.warn('update failed', e);
       }
     }
-    for (const fn of ctx.updates) {
-      try { fn(dt); } catch (e) { /* one bad update never kills the frame */ }
-    }
-    updateDayNight(dt);
-    updateCamera(dt);
-    if (S.mode === 'playing') {
-      autosaveT += dt;
-      if (autosaveT >= 20) { autosaveT = 0; saveGame(); }
+    // Day/night.
+    if (ctx.daynightUpdate) ctx.daynightUpdate(dt);
+    else daynightFallback(dt);
+    // Camera.
+    updateCamera(dt, elapsed);
+    // Autosave every 20 s while playing.
+    if (S.mode === 'playing' && elapsed - lastAutosave > 20) {
+      lastAutosave = elapsed;
+      saveGame();
     }
   }
 
-  updateHUD();
-  updateRoster(dt);
-  updateMinimap(dt);
+  // HUD + render every frame.
+  if (ctx.hudUpdate) ctx.hudUpdate(dt);
+  else hudFallback();
   renderer.render(scene, camera);
   input.endFrame();
 }
@@ -680,61 +608,3 @@ loadGame();
 window.__solmar = { S, player: S.player, camera };
 requestAnimationFrame(frame);
 loadModules();
-
-// Stall watchdog: headless rAF can stall for seconds while the
-// compositor waits on SwiftShader, but timers keep firing at full
-// speed — so the stall-sensitive state also re-syncs on a 400 ms
-// interval, not only in the frame loop. Every action is idempotent
-// (the frame loop re-checks the same conditions and no-ops when the
-// state is already clean):
-//   - mission-1 auto-start at the garage (one-shot and guarded)
-//   - district: nearest centre + HUD label
-//   - wanted: recompute from heat; wanted 0 removes cops, <3
-//     removes the heli (mirrors police.js / heli2.js removal)
-//   - challenges payout tick (pays once, records _paid)
-//   - radio Q: cycle once and consume the press so the frame
-//     update cannot cycle it a second time
-//   - missions/side updates (race gates, taxi delivery, packages)
-//     — double-running is safe: guarded by active/taken flags
-setInterval(() => {
-  try {
-    if (S.mode !== 'playing') return;
-    if (!S.missions.current && S.missionIndex === 0) {
-      const dx = S.player.pos.x - CONFIG.garage.x;
-      const dz = S.player.pos.z - CONFIG.garage.z;
-      if (dx * dx + dz * dz <= CONFIG.garage.radius * CONFIG.garage.radius) {
-        S.missions.start(0);
-      }
-    }
-    const d = ctx.api.districts ? ctx.api.districts.nearestDistrict(S.player.pos.x, S.player.pos.z) : null;
-    if (d) {
-      S.district = d.id;
-      if (dom.district) dom.district.textContent = districtName(S.district);
-    }
-    S.wanted = Math.min(5, Math.floor(S.heat / 20));
-    if (S.wanted <= 0) {
-      for (let i = S.cars.length - 1; i >= 0; i--) {
-        const c = S.cars[i];
-        if (!c.aiPolice) continue;
-        if (c.mesh && c.mesh.parent) c.mesh.parent.remove(c.mesh);
-        S.cars.splice(i, 1);
-      }
-      S.cops = [];
-      S.lastKnown = null;
-    }
-    if (S.wanted < 3 && S.heli) {
-      if (S.heli.mesh && S.heli.mesh.parent) S.heli.mesh.parent.remove(S.heli.mesh);
-      S.heli = null;
-    }
-    if (S.challengesDirector) S.challengesDirector.tick();
-    if (input.wasPressed('KeyQ')) {
-      S.radioStation = (S.radioStation + 1) % CONFIG.radio.length;
-      const st = CONFIG.radio[S.radioStation];
-      ctx.api.toast(`${st.name} — ${st.tagline}`);
-      if (dom['radio-station']) dom['radio-station'].textContent = st.name;
-      input.pressed.delete('KeyQ');
-    }
-    if (ctx.api.missionsUpdate) ctx.api.missionsUpdate(0.05);
-    if (ctx.api.sideUpdate) ctx.api.sideUpdate(0.05);
-  } catch (e) { /* watchdog must never crash the game */ }
-}, 400);

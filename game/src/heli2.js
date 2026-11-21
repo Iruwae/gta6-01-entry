@@ -1,56 +1,58 @@
-// SOLMAR BAY — the police helicopter. Appears once wanted hits 3 stars,
-// circles overhead above the player (S.heli with pos), and leaves —
-// S.heli back to null — as soon as wanted drops below 3.
+// SOLMAR BAY — police helicopter: appears at 3+ stars, circles overhead.
+import * as THREE from '../vendor/three.module.min.js';
+
 export function init(ctx) {
-  const { THREE, scene, state: S } = ctx;
+  const { THREE: T, scene } = ctx;
+  const S = ctx.state;
+  let rotor = null;
   let angle = 0;
 
-  ctx.updates.push((dt) => {
+  function buildHeli() {
+    const g = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x223344, roughness: 0.4, metalness: 0.5 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 4.5), bodyMat);
+    g.add(body);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 3.5), bodyMat);
+    tail.position.set(0, 0.2, -3.6);
+    g.add(tail);
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x9adfff, roughness: 0.1, metalness: 0.6 });
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 1.2), glassMat);
+    glass.position.set(0, 0.3, 1.8);
+    g.add(glass);
+    rotor = new THREE.Mesh(new THREE.BoxGeometry(9, 0.08, 0.5), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+    rotor.position.y = 1.1;
+    g.add(rotor);
+    const skidMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    for (const x of [-0.9, 0.9]) {
+      const skid = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 3.4), skidMat);
+      skid.position.set(x, -0.9, 0);
+      g.add(skid);
+    }
+    return g;
+  }
+
+  ctx.updates.push((dt, t) => {
     if (S.wanted >= 3) {
       if (!S.heli) {
-        const g = new THREE.Group();
-        const body = new THREE.Mesh(
-          new THREE.BoxGeometry(3, 1.2, 6),
-          new THREE.MeshStandardMaterial({ color: 0x22335e, metalness: 0.4, roughness: 0.5 }),
-        );
-        g.add(body);
-        const tail = new THREE.Mesh(
-          new THREE.BoxGeometry(0.8, 0.8, 4),
-          new THREE.MeshStandardMaterial({ color: 0x22335e, metalness: 0.4, roughness: 0.5 }),
-        );
-        tail.position.set(0, 0.2, -4.5);
-        g.add(tail);
-        const rotor = new THREE.Mesh(
-          new THREE.BoxGeometry(9, 0.12, 0.7),
-          new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6 }),
-        );
-        rotor.position.y = 1.0;
-        g.add(rotor);
-        const lamp = new THREE.Mesh(
-          new THREE.SphereGeometry(0.45, 8, 8),
-          new THREE.MeshBasicMaterial({ color: 0xffffff }),
-        );
-        lamp.position.y = -0.9;
-        g.add(lamp);
-        scene.add(g);
-        S.heli = {
-          pos: new THREE.Vector3(S.player.pos.x, 42, S.player.pos.z),
-          mesh: g,
-          rotor,
-        };
+        const mesh = buildHeli();
+        scene.add(mesh);
+        S.heli = { pos: new THREE.Vector3(0, 28, 0), mesh };
       }
       angle += dt * 0.5;
-      const h = S.heli;
-      h.pos.set(
-        S.player.pos.x + Math.cos(angle) * 18,
-        42,
-        S.player.pos.z + Math.sin(angle) * 18,
-      );
-      h.mesh.position.copy(h.pos);
-      h.rotor.rotation.y += dt * 20;
+      const px = S.player.pos.x;
+      const pz = S.player.pos.z;
+      S.heli.pos.set(px + Math.cos(angle) * 18, 28, pz + Math.sin(angle) * 18);
+      S.heli.mesh.position.copy(S.heli.pos);
+      S.heli.mesh.rotation.y = -angle;
+      if (rotor) rotor.rotation.y = t * 18;
     } else if (S.heli) {
       if (S.heli.mesh && S.heli.mesh.parent) S.heli.mesh.parent.remove(S.heli.mesh);
       S.heli = null;
+      rotor = null;
     }
   });
+
+  return {};
 }
+
+export default init;

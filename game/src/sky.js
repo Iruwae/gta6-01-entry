@@ -1,9 +1,13 @@
-// SOLMAR BAY — sky dressing: stars and a moon that fade in at night,
-// and slow clouds drifting over the bay.
-export function init(ctx) {
-  const { THREE, scene, state: S } = ctx;
+// SOLMAR BAY — sky extras: stars, moon and drifting clouds.
+// The boot hub owns the shader sky dome itself (S.skyDome).
+import * as THREE from '../vendor/three.module.min.js';
 
-  const starCount = 420;
+export function init(ctx) {
+  const { THREE: T, scene } = ctx;
+  const S = ctx.state;
+
+  // Stars: points on the upper dome, fading in at night.
+  const starCount = 320;
   const positions = new Float32Array(starCount * 3);
   for (let i = 0; i < starCount; i++) {
     const a = Math.random() * Math.PI * 2;
@@ -15,35 +19,39 @@ export function init(ctx) {
   }
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, transparent: true, opacity: 0 });
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, transparent: true, opacity: 0, sizeAttenuation: false });
   const stars = new THREE.Points(starGeo, starMat);
   scene.add(stars);
 
-  const moon = new THREE.Mesh(
-    new THREE.CircleGeometry(22, 24),
-    new THREE.MeshBasicMaterial({ color: 0xf5ead0, transparent: true, opacity: 0, fog: false }),
-  );
-  moon.position.set(-320, 300, -420);
+  // Moon: a pale disc that fades in at night.
+  const moonMat = new THREE.MeshBasicMaterial({ color: 0xf2ead8, transparent: true, opacity: 0, fog: false });
+  const moon = new THREE.Mesh(new THREE.CircleGeometry(22, 24), moonMat);
+  moon.position.set(-260, 300, -420);
   moon.lookAt(0, 0, 0);
   scene.add(moon);
 
+  // Clouds: flat translucent blobs drifting slowly.
+  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffd9b0, transparent: true, opacity: 0.28, fog: false });
   const clouds = [];
-  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffc9a0, transparent: true, opacity: 0.22, fog: false });
   for (let i = 0; i < 7; i++) {
-    const c = new THREE.Mesh(new THREE.PlaneGeometry(90 + Math.random() * 70, 22 + Math.random() * 14), cloudMat);
-    c.position.set(-260 + Math.random() * 520, 120 + Math.random() * 60, -260 + Math.random() * 520);
-    c.rotation.x = -Math.PI / 2;
+    const c = new THREE.Mesh(new THREE.SphereGeometry(18 + Math.random() * 14, 10, 8), cloudMat);
+    c.scale.y = 0.22;
+    c.position.set(-240 + Math.random() * 480, 110 + Math.random() * 60, -240 + Math.random() * 480);
     scene.add(c);
     clouds.push(c);
   }
 
-  ctx.updates.push((dt) => {
-    const n = S.dayNight.night;
-    starMat.opacity = n * 0.9;
-    moon.material.opacity = n * 0.95;
+  ctx.updates.push((_dt) => {
+    const night = S.dayNight.night;
+    starMat.opacity = night * 0.9;
+    moonMat.opacity = night * 0.95;
     for (const c of clouds) {
-      c.position.x += dt * 1.5;
-      if (c.position.x > 300) c.position.x = -300;
+      c.position.x += 0.35 * _dt;
+      if (c.position.x > 280) c.position.x = -280;
     }
   });
+
+  return { stars, moon, clouds };
 }
+
+export default init;

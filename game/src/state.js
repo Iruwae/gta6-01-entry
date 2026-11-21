@@ -1,29 +1,36 @@
-// SOLMAR BAY — shared state (createState). Everything the modules talk
-// through lives here: money, clock, heat, missions, loadout, directors.
-// The directors are working fallbacks: feature modules wrap or replace
-// them at init time, but the game still runs if a module is missing.
+// SOLMAR BAY — shared state (createState) + working directors.
+// The feature modules wrap or replace these directors at init time.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
 
-function clamp(v, min, max) {
-  return v < min ? min : v > max ? max : v;
+function nearestDistrict(x, z) {
+  let best = CONFIG.districts[0];
+  let bestD = Infinity;
+  for (const d of CONFIG.districts) {
+    const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z);
+    if (dd < bestD) {
+      bestD = dd;
+      best = d;
+    }
+  }
+  return best.id;
 }
 
-function rankFor(points) {
+function rankFor(respect) {
   let rank = CONFIG.respectLadder[0];
-  for (const row of CONFIG.respectLadder) {
-    if (points >= row.min) rank = row;
+  for (const r of CONFIG.respectLadder) {
+    if (respect >= r.min) rank = r;
   }
-  return rank;
+  return { title: rank.title, min: rank.min };
 }
 
 export function createState(hooks = {}) {
-  const toast = typeof hooks.toast === 'function' ? hooks.toast : () => {};
+  const toast = hooks.toast || (() => {});
 
   const S = {
     cash: CONFIG.startCash,
     day: CONFIG.startDay,
-    time: 0,
+    time: 0, // game minutes after 18:28
     mode: 'menu',
     cutscene: false,
     heat: 0,
@@ -38,148 +45,177 @@ export function createState(hooks = {}) {
     garageCars: [],
     heli: null,
     lastKnown: null,
-    packages: CONFIG.packages.map(([x, z], i) => ({ id: i, x, z, taken: false })),
+    packages: CONFIG.packageSpots.map((p) => ({ x: p.x, z: p.z, taken: false })),
     sunLight: null,
     skyDome: null,
-    objective: 'Explore Solmar Bay — find work.',
+    objective: CONFIG.defaultObjective,
     dayNight: { phase: 'SUNSET', night: 0 },
-    player: {
-      pos: new THREE.Vector3(-84, 0, -58),
-      vel: new THREE.Vector3(),
-      heading: 0,
-      health: CONFIG.maxHealth,
-      reloading: false,
-      reloadT: 0,
-      fireT: 0,
-      loadout: null,
-      mesh: null,
-    },
     crew: { active: false, name: 'Lena Cruz', mesh: null },
     stats: { packages: 0, racesWon: 0, fencesSold: 0, faresDone: 0 },
     sideActivities: {
       taxi: { active: false, dest: null, fare: 0 },
       race: { active: false, gates: [], next: 0 },
     },
-    missions: null,
-    respectDirector: null,
-    challengesDirector: null,
-    banterDirector: null,
-    heatDirector: null,
-    fenceDirector: null,
-    tick: null,
-    _hooks: hooks,
   };
 
-  // S.health mirrors S.player.health both ways.
-  Object.defineProperty(S, 'health', {
-    get() { return S.player.health; },
-    set(v) { S.player.health = clamp(v, 0, CONFIG.maxHealth); },
-    enumerable: true,
-    configurable: true,
-  });
-
-  // ---- loadout: four slots, unlock-gated equip, ammo proxy ----
+  // ---- player + loadout ----
+  const player = {
+    pos: new THREE.Vector3(-84, 0, -58),
+    vel: new THREE.Vector3(0, 0, 0),
+    heading: 0,
+    health: CONFIG.player.maxHealth,
+    reloading: false,
+    reloadT: 0,
+    fireT: 0,
+    loadout: null,
+  };
   const slots = CONFIG.weapons.map((def) => ({ def, mag: def.mag }));
+  let equippedIndex = 0;
   const loadout = {
     slots,
-    _equipped: 0,
-    get equipped() { return this._equipped; },
-    set equipped(i) {
-      if (i < 0 || i >= this.slots.length) return;
-      // Unlock gate: a slot whose unlock count exceeds jobs done refuses.
-      if (this.slots[i].def.unlock > S.missionIndex) return;
-      this._equipped = i;
-      this.slots[i].mag = this.slots[i].def.mag;
+    get equipped() {
+      return equippedIndex;
     },
-    current() { return this.slots[this._equipped]; },
-    equip(i) { this.equipped = i; },
+    set equipped(i) {
+      const slot = slots[i];
+      if (!slot) return;
+      if (slot.def.unlock > S.missionIndex) return; // unlock gate
+      equippedIndex = i;
+    },
+    equip(i) {
+      this.equipped = i;
+    },
+    current() {
+      return slots[equippedIndex];
+    },
   };
-  S.player.loadout = loadout;
-  Object.defineProperty(S.player, 'ammo', {
-    get() { return S.player.loadout.current().mag; },
-    set(v) { S.player.loadout.current().mag = v; },
+  player.loadout = loadout;
+  Object.defineProperty(player, 'ammo', {
+    get() {
+      return loadout.current().mag;
+    },
+    set(v) {
+      loadout.current().mag = v;
+    },
+    enumerable: true,
+    configurable: true,
+  });
+  S.player = player;
+  Object.defineProperty(S, 'health', {
+    get() {
+      return player.health;
+    },
+    set(v) {
+      player.health = v;
+    },
     enumerable: true,
     configurable: true,
   });
 
-  // ---- respect ----
+  // ---- respect director ----
   S.respectDirector = {
     rank: rankFor(0),
-    add(n, why) {
+    add(n, _why) {
       S.respect = Math.max(0, S.respect + n);
       this.rank = rankFor(S.respect);
       return this.rank;
     },
   };
 
-  // ---- daily challenges ----
+  // ---- challenges director ----
+  const challengeDefs = CONFIG.challenges.map((c) => ({ ...c }));
   S.challengesDirector = {
-    today: CONFIG.challenges.map((c) => ({ ...c })),
+    today: challengeDefs.map((c) => ({ ...c })),
     _paid: [],
-    _day: 1,
     rows() {
       return this.today.map((c) => ({
         id: c.id,
         text: c.text,
         target: c.target,
         reward: c.reward,
-        done: S.stats[c.stat] >= c.target,
+        done: (S.stats[c.stat] || 0) >= c.target,
         paid: this._paid.includes(c.id),
       }));
     },
     tick() {
       for (const c of this.today) {
-        if (!this._paid.includes(c.id) && S.stats[c.stat] >= c.target) {
+        if (this._paid.includes(c.id)) continue;
+        if ((S.stats[c.stat] || 0) >= c.target) {
           this._paid.push(c.id);
           S.cash += c.reward;
-          toast(`Challenge complete: ${c.text} — +$${c.reward}`);
+          toast(`CHALLENGE DONE: ${c.text} — +$${c.reward}`);
         }
       }
     },
   };
 
-  // ---- banter (fallback; crew.js installs the live director) ----
+  // ---- banter director (fallback; crew.js installs the live one) ----
+  const banterLines = {
+    raceWin: [
+      ['LENA', 'That was clean. Vic is going to love this.'],
+      ['LENA', 'Told you my lines work. Now drive like you mean it.'],
+    ],
+    pickup: [
+      ['LENA', 'Package is in the bag. Easy money.'],
+      ['VIC', 'Good hands. Keep it quiet and keep it moving.'],
+    ],
+    heatUp: [
+      ['VIC', 'Cops on you now. Lose them or pay for it.'],
+      ['LENA', 'Heat is climbing. Do not lead them back to the garage.'],
+    ],
+  };
   S.banterDirector = {
     _cooldown: 0,
+    _lineIdx: 0,
     say(speaker, text) {
       if (this._cooldown > 0) return false;
       toast(`${speaker}: "${text}"`);
       this._cooldown = 9;
       return true;
     },
+    _pick(kind) {
+      const lines = banterLines[kind];
+      const line = lines[this._lineIdx % lines.length];
+      this._lineIdx += 1;
+      return this.say(line[0], line[1]);
+    },
     raceWin() {
-      return this.say('LENA', 'Told you. Nobody outdrives us on this bay.');
+      return this._pick('raceWin');
     },
     pickup() {
-      return this.say('LENA', 'Package is in the bag. Keep it smooth.');
+      return this._pick('pickup');
     },
     heatUp() {
-      return this.say('VIC', 'You got the whole bay looking at you. Lose them.');
+      return this._pick('heatUp');
     },
   };
 
-  // ---- heat ----
+  // ---- heat director ----
   S.heatDirector = {
     sprayBooth: {
       armed: true,
-      x: CONFIG.spray.x,
-      z: CONFIG.spray.z,
-      cost: CONFIG.spray.cost,
-      radius: CONFIG.spray.radius,
+      x: CONFIG.sprayBooth.x,
+      z: CONFIG.sprayBooth.z,
+      cost: CONFIG.sprayBooth.cost,
+      radius: CONFIG.sprayBooth.radius,
     },
-    add(n) { S.heat = clamp(S.heat + n, 0, 100); },
-    cool(n) { S.heat = clamp(S.heat - n, 0, 100); },
+    add(n) {
+      S.heat = Math.max(0, Math.min(100, S.heat + n));
+    },
+    cool(n) {
+      S.heat = Math.max(0, Math.min(100, S.heat - n));
+    },
   };
 
-  // ---- fence ----
+  // ---- fence director ----
   S.fenceDirector = {
     priceFor(car) {
       const base = CONFIG.fenceBase[car.kind] || 300;
-      const max = car.maxHealth || 100;
-      const condition = clamp((car.health ?? max) / max, 0.2, 1);
+      const maxH = car.maxHealth || 100;
+      const condition = Math.max(0.2, Math.min(1, (car.health ?? maxH) / maxH));
       return Math.round(base * (0.5 + 0.5 * condition));
     },
-    wantedBonus() {
+    wantedBonus(_car) {
       return S.wanted * 20;
     },
   };
@@ -190,79 +226,76 @@ export function createState(hooks = {}) {
     current: null,
     list: missionList,
     start(idOrIndex) {
-      const idx = typeof idOrIndex === 'number'
-        ? idOrIndex
-        : missionList.findIndex((m) => m.id === idOrIndex);
-      if (idx < 0 || idx >= missionList.length) return null;
-      const m = missionList[idx];
-      const job = {
-        id: m.id,
-        index: idx,
-        title: m.title,
-        giver: m.giver,
-        pay: m.pay,
-        desc: m.desc,
-        objective: m.desc,
+      const job = typeof idOrIndex === 'number'
+        ? missionList[idOrIndex]
+        : missionList.find((m) => m.id === idOrIndex);
+      if (!job) return null;
+      const current = {
+        id: job.id,
+        index: job.index,
+        title: job.title,
+        giver: job.giver,
+        pay: job.pay,
+        desc: job.desc,
+        objective: job.desc,
         stage: 0,
         startedAt: S.time,
       };
-      S.missions.current = job;
-      S.objective = m.desc;
-      if (m.id === 'm5') {
+      S.missions.current = current;
+      S.objective = job.desc;
+      if (job.id === 'm5') {
         S.crew.active = true;
-        if (!S.crew.mesh) S.crew.mesh = { visible: true };
-        else S.crew.mesh.visible = true;
+        if (!S.crew.mesh) {
+          const geo = new THREE.BoxGeometry(0.7, 1.7, 0.4);
+          const mat = new THREE.MeshStandardMaterial({ color: 0xff7a9e });
+          S.crew.mesh = new THREE.Mesh(geo, mat);
+          S.crew.mesh.position.copy(S.player.pos);
+        }
+        S.crew.mesh.visible = true;
       }
-      return job;
+      return current;
     },
     complete() {
-      const job = S.missions.current;
-      if (!job) return;
-      S.cash += job.pay;
+      const cur = S.missions.current;
+      if (!cur) return;
+      S.cash += cur.pay;
       S.respectDirector.add(60, 'job done');
-      S.missionIndex = Math.min(10, job.index + 1);
+      S.missionIndex = Math.min(10, cur.index + 1);
       S.missions.current = null;
-      S.objective = 'Explore Solmar Bay — find work.';
+      S.objective = CONFIG.defaultObjective;
+      toast(`JOB DONE: ${cur.title} — +$${cur.pay}`);
     },
     abandon() {
       S.missions.current = null;
-      S.objective = 'Explore Solmar Bay — find work.';
+      S.objective = CONFIG.defaultObjective;
     },
   };
 
-  // ---- per-frame tick ----
-  S.tick = function (dt) {
-    S.time += dt * CONFIG.minutesPerSecond;
+  // ---- frame tick ----
+  S.tick = function tick(dt) {
+    S.time += dt * CONFIG.minutesPerRealSecond;
     if (S.time >= CONFIG.minutesPerDay) {
       S.time -= CONFIG.minutesPerDay;
       S.day += 1;
+      S.challengesDirector.today = challengeDefs.map((c) => ({ ...c }));
+      S.challengesDirector._paid = [];
     }
     S.wanted = Math.min(5, Math.floor(S.heat / 20));
-    if (S.player.reloading) {
-      S.player.reloadT -= dt;
-      if (S.player.reloadT <= 0) {
-        // Atomic commit: reloading clears and the magazine refills whole.
-        S.player.reloading = false;
-        S.player.reloadT = 0;
-        const cur = S.player.loadout.current();
-        cur.mag = cur.def.mag;
+    // Reload: atomic commit when the timer hits zero.
+    if (player.reloading) {
+      player.reloadT -= dt;
+      if (player.reloadT <= 0) {
+        player.reloading = false;
+        player.reloadT = 0;
+        loadout.current().mag = loadout.current().def.mag;
       }
     }
-    if (S.player.fireT > 0) S.player.fireT -= dt;
+    if (player.fireT > 0) player.fireT -= dt;
     if (S.banterDirector._cooldown > 0) {
-      S.banterDirector._cooldown = Math.max(0, S.banterDirector._cooldown - dt);
+      S.banterDirector._cooldown = Math.max(0, S.banterDirector._cooldown - dt * CONFIG.minutesPerRealSecond);
     }
-    S.player.health = clamp(S.player.health, 0, CONFIG.maxHealth);
-    // District = nearest district centre to the player.
-    let best = null;
-    let bestDist = Infinity;
-    for (const d of CONFIG.districts) {
-      const dx = S.player.pos.x - d.x;
-      const dz = S.player.pos.z - d.z;
-      const dist = dx * dx + dz * dz;
-      if (dist < bestDist) { bestDist = dist; best = d; }
-    }
-    if (best) S.district = best.id;
+    player.health = Math.max(0, Math.min(CONFIG.player.maxHealth, player.health));
+    S.district = nearestDistrict(player.pos.x, player.pos.z);
   };
 
   return S;

@@ -1,125 +1,119 @@
-// SOLMAR BAY — vehicles. Cars and bikes are plain objects on S.cars:
-// {kind, pos, heading, speed, maxHealth, health, tune, perf(), mesh}.
-// Parked rides the player can steal: bike (-88,-64), sport (-102,-64),
-// pickup (-110,-58), sedan (30,-30). Driving: WASD accelerate/brake/
-// steer, speed shows in MPH on the HUD, gears by speed. Police cars are
-// added by police.js, never here.
+// SOLMAR BAY — vehicles: parked cars to steal, tuning, and driving.
+import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
 
-const BODY_COLORS = {
-  bike: 0xff7a3d,
-  sport: 0xff2e63,
+const KIND_COLORS = {
+  bike: 0xff5a5a,
+  sport: 0xffb347,
   pickup: 0x5fb4c9,
-  sedan: 0xe8a34c,
+  sedan: 0x7ec98a,
 };
 
-export function makeCarMesh(THREE, kind, colorOverride) {
-  const g = new THREE.Group();
-  const color = colorOverride !== undefined ? colorOverride : BODY_COLORS[kind] || 0xcccccc;
-  const paint = new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.45 });
-  const wide = kind === 'bike' ? 0.7 : 2;
-  const long = kind === 'bike' ? 2.4 : 4.4;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(wide, 0.7, long), paint);
-  body.position.y = 0.55;
-  g.add(body);
-  if (kind !== 'bike') {
-    const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(1.7, 0.6, 2.1),
-      new THREE.MeshStandardMaterial({ color: 0x14142a, metalness: 0.6, roughness: 0.25 }),
-    );
-    cabin.position.set(0, 1.15, -0.2);
-    g.add(cabin);
+export function createCarMesh(THREE, kind, colorHex) {
+  const group = new THREE.Group();
+  const color = colorHex ?? KIND_COLORS[kind] ?? 0x888888;
+  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.5 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.2, metalness: 0.4 });
+  if (kind === 'bike') {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 2.3), bodyMat);
+    body.position.y = 0.7;
+    group.add(body);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.15, 0.7), darkMat);
+    seat.position.set(0, 1.0, -0.4);
+    group.add(seat);
+    const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.18, 12);
+    for (const z of [0.85, -0.85]) {
+      const w = new THREE.Mesh(wheelGeo, darkMat);
+      w.rotation.z = Math.PI / 2;
+      w.position.set(0, 0.38, z);
+      group.add(w);
+    }
+  } else {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, 4.4), bodyMat);
+    body.position.y = 0.6;
+    group.add(body);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.6, 2.1), darkMat);
+    cabin.position.set(0, 1.2, kind === 'pickup' ? -0.9 : -0.2);
+    group.add(cabin);
+    const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 12);
+    for (const [x, z] of [[-0.95, 1.4], [0.95, 1.4], [-0.95, -1.4], [0.95, -1.4]]) {
+      const w = new THREE.Mesh(wheelGeo, darkMat);
+      w.rotation.z = Math.PI / 2;
+      w.position.set(x, 0.42, z);
+      group.add(w);
+    }
   }
-  const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.3, 12);
-  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0c0c12, roughness: 0.9 });
-  const wheelSpots = kind === 'bike'
-    ? [[0, 0.36, 0.85], [0, 0.36, -0.85]]
-    : [[-0.95, 0.36, 1.35], [0.95, 0.36, 1.35], [-0.95, 0.36, -1.35], [0.95, 0.36, -1.35]];
-  for (const [x, y, z] of wheelSpots) {
-    const w = new THREE.Mesh(wheelGeo, wheelMat);
-    w.rotation.z = Math.PI / 2;
-    w.position.set(x, y, z);
-    g.add(w);
-  }
-  const lamp = new THREE.Mesh(
-    new THREE.BoxGeometry(wide * 0.8, 0.18, 0.1),
-    new THREE.MeshStandardMaterial({ color: 0xfff2b0, emissive: 0xffdf80, emissiveIntensity: 0.7 }),
-  );
-  lamp.position.set(0, 0.6, long / 2);
-  g.add(lamp);
-  return g;
+  group.userData.bodyMat = bodyMat;
+  return group;
+}
+
+export function makeVehicle(THREE, kind, x, z, heading = 0) {
+  const stats = CONFIG.vehicleStats[kind] || CONFIG.vehicleStats.sedan;
+  const mesh = createCarMesh(THREE, kind);
+  mesh.position.set(x, 0, z);
+  mesh.rotation.y = heading;
+  const car = {
+    kind,
+    pos: new THREE.Vector3(x, 0, z),
+    heading,
+    speed: 0,
+    maxHealth: stats.maxHealth,
+    health: stats.maxHealth,
+    tune: { nos: false, engine: 0, armor: 0, paint: 0 },
+    color: KIND_COLORS[kind] ?? 0x888888,
+    mesh,
+    perf() {
+      return stats.perf + this.tune.engine * 3 + (this.tune.nos ? 8 : 0);
+    },
+  };
+  return car;
 }
 
 export function init(ctx) {
-  const { THREE, scene, state: S, input } = ctx;
+  const { THREE: T, scene } = ctx;
+  const S = ctx.state;
+  const input = ctx.input;
 
-  function makeCar(kind, x, z, heading = 0, colorOverride) {
-    const stats = CONFIG.vehicleStats[kind] || CONFIG.vehicleStats.sedan;
-    const car = {
-      kind,
-      pos: new THREE.Vector3(x, 0, z),
-      heading,
-      speed: 0,
-      maxHealth: stats.maxHealth,
-      health: stats.maxHealth,
-      tune: { nos: 0, engine: 0, armor: 0, paint: 'Sunset Orange' },
-      mesh: null,
-      aiPolice: false,
-    };
-    car.perf = () => stats.perf + (car.tune.engine || 0) * 2 + (car.tune.nos || 0) * 3;
-    const mesh = makeCarMesh(THREE, kind, colorOverride);
-    mesh.position.copy(car.pos);
-    mesh.rotation.y = car.heading;
-    scene.add(mesh);
-    car.mesh = mesh;
-    return car;
+  // Parked cars the player can steal.
+  const parked = [
+    makeVehicle(T, 'bike', -88, -64, 0.3),
+    makeVehicle(T, 'sport', -102, -64, 0),
+    makeVehicle(T, 'pickup', -108, -72, -0.4),
+    makeVehicle(T, 'sedan', -84, -72, 0.5),
+  ];
+  for (const car of parked) {
+    S.cars.push(car);
+    scene.add(car.mesh);
   }
-  ctx.api.makeCar = makeCar;
-
-  S.cars.push(makeCar('bike', -88, -64));
-  S.cars.push(makeCar('sport', -102, -64));
-  S.cars.push(makeCar('pickup', -110, -58));
-  S.cars.push(makeCar('sedan', 30, -30));
 
   ctx.updates.push((dt) => {
-    // Sync every car mesh to its logical position.
-    for (const car of S.cars) {
-      if (!car.mesh) continue;
-      car.mesh.position.copy(car.pos);
-      car.mesh.rotation.y = car.heading;
-    }
-    if (S.mode !== 'playing') return;
-
-    // E exits the car (entering is the player module's job).
-    if (S.car && input.wasPressed('KeyE')) {
-      const car = S.car;
-      S.player.pos.copy(car.pos);
-      S.player.pos.x += 2.5;
-      S.player.heading = car.heading;
-      car.speed = 0;
-      S.car = null;
-      return;
-    }
-    if (!S.car) return;
     const car = S.car;
-    let accel = 0;
-    if (input.isDown('KeyW') || input.isDown('ArrowUp')) accel += 1;
-    if (input.isDown('KeyS') || input.isDown('ArrowDown')) accel -= 1;
-    const topSpeed = 18 + car.perf() * 0.35;
-    car.speed += accel * 14 * dt;
-    if (accel === 0) car.speed *= Math.max(0, 1 - 1.2 * dt);
-    if (car.speed > topSpeed) car.speed = topSpeed;
-    if (car.speed < -8) car.speed = -8;
-    let steer = 0;
-    if (input.isDown('KeyA') || input.isDown('ArrowLeft')) steer += 1;
-    if (input.isDown('KeyD') || input.isDown('ArrowRight')) steer -= 1;
-    if (Math.abs(car.speed) > 0.5) {
-      car.heading += steer * 1.9 * dt * Math.sign(car.speed);
+    if (!car) return;
+    const fwd = input.isDown('KeyW') || input.isDown('ArrowUp');
+    const back = input.isDown('KeyS') || input.isDown('ArrowDown');
+    const left = input.isDown('KeyA') || input.isDown('ArrowLeft');
+    const right = input.isDown('KeyD') || input.isDown('ArrowRight');
+    const maxSpeed = 16 + car.perf() * 0.4;
+    if (fwd) car.speed += 15 * dt;
+    if (back) car.speed -= (car.speed > 0.5 ? 24 : 9) * dt;
+    if (!fwd && !back) car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 8 * dt);
+    car.speed = Math.max(-10, Math.min(maxSpeed, car.speed));
+    const steer = (left ? 1 : 0) - (right ? 1 : 0);
+    if (Math.abs(car.speed) > 0.3) {
+      car.heading += steer * dt * (1.6 + Math.min(1, Math.abs(car.speed) / 20)) * Math.sign(car.speed);
     }
     car.pos.x += Math.sin(car.heading) * car.speed * dt;
     car.pos.z += Math.cos(car.heading) * car.speed * dt;
+    car.pos.x = Math.max(-185, Math.min(185, car.pos.x));
+    car.pos.z = Math.max(-185, Math.min(185, car.pos.z));
+    car.mesh.position.copy(car.pos);
+    car.mesh.rotation.y = car.heading;
+    // The player rides along.
     S.player.pos.copy(car.pos);
     S.player.heading = car.heading;
-    S.player.vel.set(Math.sin(car.heading) * car.speed, 0, Math.cos(car.heading) * car.speed);
   });
+
+  return { parked, makeVehicle, createCarMesh };
 }
+
+export default init;

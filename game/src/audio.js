@@ -1,58 +1,84 @@
-// SOLMAR BAY — tiny WebAudio synth for UI blips, gunshots, reloads and
-// cash. No audio files, no network. If the browser has no audio context,
-// every call silently does nothing.
+// SOLMAR BAY — tiny WebAudio synth: UI blips, gunshots, reloads, cash.
+// No audio files, no network. Silent when the browser has no audio.
 export function init(ctx) {
-  let audioCtx = null;
-  function ensure() {
-    if (audioCtx) return audioCtx;
+  let ac = null;
+
+  function context() {
+    if (ac) return ac;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
-      audioCtx = new AC();
+      ac = new AC();
     } catch (e) {
-      audioCtx = null;
+      ac = null;
     }
-    return audioCtx;
+    return ac;
   }
-  function blip(freq, dur, type, gain) {
-    const ac = ensure();
-    if (!ac) return;
+
+  function blip(freq, dur, type = 'square', vol = 0.08, slideTo = null) {
+    const c = context();
+    if (!c) return;
     try {
-      if (ac.state === 'suspended') ac.resume();
-      const osc = ac.createOscillator();
-      const g = ac.createGain();
-      osc.type = type || 'sine';
-      osc.frequency.value = freq;
-      g.gain.setValueAtTime(gain || 0.08, ac.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
-      osc.connect(g);
-      g.connect(ac.destination);
-      osc.start();
-      osc.stop(ac.currentTime + dur);
-    } catch (e) { /* silent */ }
+      if (c.state === 'suspended') void c.resume();
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, c.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, c.currentTime + dur);
+      g.gain.setValueAtTime(vol, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
+      o.connect(g);
+      g.connect(c.destination);
+      o.start();
+      o.stop(c.currentTime + dur);
+    } catch (e) { /* audio is best-effort */ }
   }
-  function noise(dur, gain) {
-    const ac = ensure();
-    if (!ac) return;
+
+  function noise(dur, vol = 0.12) {
+    const c = context();
+    if (!c) return;
     try {
-      if (ac.state === 'suspended') ac.resume();
-      const len = Math.floor(ac.sampleRate * dur);
-      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      if (c.state === 'suspended') void c.resume();
+      const len = Math.floor(c.sampleRate * dur);
+      const buf = c.createBuffer(1, len, c.sampleRate);
       const data = buf.getChannelData(0);
       for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-      const src = ac.createBufferSource();
+      const src = c.createBufferSource();
       src.buffer = buf;
-      const g = ac.createGain();
-      g.gain.value = gain || 0.15;
+      const g = c.createGain();
+      g.gain.setValueAtTime(vol, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
       src.connect(g);
-      g.connect(ac.destination);
+      g.connect(c.destination);
       src.start();
-    } catch (e) { /* silent */ }
+    } catch (e) { /* audio is best-effort */ }
   }
-  ctx.api.audio = {
-    blip: () => blip(660, 0.08, 'sine', 0.06),
-    shot: () => noise(0.12, 0.2),
-    reload: () => { blip(330, 0.06, 'square', 0.05); setTimeout(() => blip(440, 0.06, 'square', 0.05), 90); },
-    cash: () => { blip(880, 0.09, 'sine', 0.07); setTimeout(() => blip(1320, 0.12, 'sine', 0.07), 100); },
+
+  ctx.api.audio = (name) => {
+    switch (name) {
+      case 'shot':
+        noise(0.09, 0.14);
+        blip(160, 0.08, 'square', 0.06, 60);
+        break;
+      case 'reload':
+        blip(700, 0.05, 'square', 0.05);
+        setTimeout(() => blip(900, 0.05, 'square', 0.05), 120);
+        break;
+      case 'cash':
+        blip(880, 0.09, 'sine', 0.08);
+        setTimeout(() => blip(1320, 0.12, 'sine', 0.08), 90);
+        break;
+      case 'dry':
+        blip(220, 0.04, 'square', 0.04);
+        break;
+      case 'blip':
+      default:
+        blip(520, 0.06, 'sine', 0.06);
+        break;
+    }
   };
+
+  return {};
 }
+
+export default init;

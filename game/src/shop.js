@@ -1,55 +1,73 @@
-// SOLMAR BAY — the MART corner store. F near the store opens the shop
-// panel with one .shop-row per config item (name, description, price,
-// BUY button); buying applies the item — heal capped at max health,
-// the Ammo Box refills the current magazine. Rows built by this module
-// are never marked as fallback rows.
+// SOLMAR BAY — the MART corner store. F near the store opens the shop.
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const { state: S, input, dom } = ctx;
+  const S = ctx.state;
+  const input = ctx.input;
+  const dom = ctx.dom;
+  ctx.shopLoaded = true;
+
   const panel = dom['shop-panel'];
   const list = dom['shop-items'];
 
-  function buy(item) {
-    if (S.cash < item.price) {
-      ctx.api.toast('Not enough cash.');
-      return;
-    }
-    S.cash -= item.price;
-    if (item.ammo) {
-      const cur = S.player.loadout.current();
-      cur.mag = cur.def.mag;
-      ctx.api.toast(`${item.name} — magazine refilled.`);
-    } else {
-      S.player.health = Math.min(CONFIG.maxHealth, S.player.health + item.heal);
-      ctx.api.toast(`${item.name} — +${item.heal} HP.`);
+  function applyItem(item) {
+    if (item.id === 'ammo') {
+      S.player.loadout.current().mag = S.player.loadout.current().def.mag;
+    } else if (item.heal > 0) {
+      S.player.health = Math.min(CONFIG.player.maxHealth, S.player.health + item.heal);
     }
   }
 
-  function buildRows() {
-    if (!list) return;
-    list.innerHTML = '';
-    for (const item of CONFIG.shop.items) {
-      const row = document.createElement('div');
-      row.className = 'shop-row';
-      row.innerHTML = `<span class="shop-name">${item.name}</span><span class="shop-desc">${item.desc}</span><span class="shop-price">$${item.price}</span>`;
-      const btn = document.createElement('button');
-      btn.className = 'shop-buy';
-      btn.textContent = 'BUY';
-      btn.addEventListener('click', () => buy(item));
-      row.appendChild(btn);
-      list.appendChild(row);
-    }
+  // Build one row per config item (real shop rows — never fallback rows).
+  list.innerHTML = '';
+  for (const item of CONFIG.shop.items) {
+    const row = document.createElement('div');
+    row.className = 'shop-row';
+    row.dataset.itemId = item.id;
+    const name = document.createElement('span');
+    name.className = 'shop-name';
+    name.textContent = item.name;
+    const desc = document.createElement('span');
+    desc.className = 'shop-desc';
+    desc.textContent = item.desc;
+    const price = document.createElement('span');
+    price.className = 'shop-price';
+    price.textContent = '$' + item.price;
+    const buy = document.createElement('button');
+    buy.className = 'shop-buy';
+    buy.textContent = 'BUY';
+    buy.addEventListener('click', () => {
+      if (S.cash < item.price) {
+        ctx.api.toast('Not enough cash for that.');
+        return;
+      }
+      S.cash -= item.price;
+      applyItem(item);
+      ctx.api.toast(`Bought ${item.name} for $${item.price}.`);
+    });
+    row.append(name, desc, price, buy);
+    list.appendChild(row);
   }
 
-  ctx.updates.push((dt) => {
+  function openShop() {
+    panel.classList.remove('hidden');
+  }
+  function closeShop() {
+    panel.classList.add('hidden');
+  }
+
+  ctx.updates.push(() => {
     if (S.mode !== 'playing') return;
-    if (!input.wasPressed('KeyF')) return;
-    const dx = S.player.pos.x - CONFIG.shop.x;
-    const dz = S.player.pos.z - CONFIG.shop.z;
-    if (dx * dx + dz * dz <= CONFIG.shop.radius * CONFIG.shop.radius) {
-      buildRows();
-      if (panel) panel.classList.remove('hidden');
+    if (input.wasPressed('KeyF')) {
+      const d = Math.hypot(S.player.pos.x - CONFIG.shop.x, S.player.pos.z - CONFIG.shop.z);
+      if (d <= CONFIG.shop.radius + 2) {
+        if (panel.classList.contains('hidden')) openShop();
+        else closeShop();
+      }
     }
   });
+
+  return { openShop, closeShop, applyItem };
 }
+
+export default init;

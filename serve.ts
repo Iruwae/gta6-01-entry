@@ -1,17 +1,18 @@
-// SOLMAR BAY — tiny static file server (Node stdlib only). Serves the
-// game/ folder over plain HTTP so the browser can load the modules
-// without file:// or CORS trouble. Listens on 127.0.0.1:8904 (PORT env
-// overrides). Resolves the game folder from its own file location, never
-// from the working directory.
+// SOLMAR BAY — tiny static file server (Node stdlib only).
+// Serves the game/ folder over plain HTTP so the browser can load the
+// modules without file:// or CORS trouble. Listens on 127.0.0.1:8904
+// (PORT env overrides). Resolves game/ from its own file location.
 import { createServer } from 'node:http';
-import { readFileSync, existsSync, statSync } from 'node:fs';
-import { join, resolve, extname, dirname, sep } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), 'game');
+const thisDir = dirname(fileURLToPath(import.meta.url));
+const GAME = resolve(thisDir, 'game');
 const PORT = Number(process.env.PORT || 8904);
 
-const MIME = {
+const MIME: Record<string, string> = {
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.mjs': 'text/javascript',
@@ -26,9 +27,10 @@ const MIME = {
 
 const server = createServer((req, res) => {
   try {
-    const raw = decodeURIComponent((req.url || '/').split('?')[0]);
-    const file = resolve(join(root, raw === '/' ? 'index.html' : raw));
-    if (file !== root && !file.startsWith(root + sep)) {
+    const url = decodeURIComponent((req.url || '/').split('?')[0]);
+    const rel = url === '/' ? 'index.html' : url.replace(/^\/+/, '');
+    const file = resolve(join(GAME, rel));
+    if (!file.startsWith(GAME + '/') && file !== GAME) {
       res.writeHead(403);
       res.end('forbidden');
       return;
@@ -42,7 +44,7 @@ const server = createServer((req, res) => {
     res.end(readFileSync(file));
   } catch (e) {
     res.writeHead(500);
-    res.end('error');
+    res.end('server error');
   }
 });
 

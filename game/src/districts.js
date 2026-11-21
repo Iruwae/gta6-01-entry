@@ -1,30 +1,31 @@
-// SOLMAR BAY — districts. The district is the nearest district centre
-// to the player; the HUD label follows it. Pinned centres: HARBOR
-// (120,120), BEACH (0,165), UPTOWN (120,-90), THE STRIP (0,135).
+// SOLMAR BAY — districts: nearest-centre matching, HUD follows the player.
 import { CONFIG } from './config.js';
 
 export function nearestDistrict(x, z) {
   let best = CONFIG.districts[0];
-  let bestDist = Infinity;
+  let bestD = Infinity;
   for (const d of CONFIG.districts) {
-    const dx = x - d.x;
-    const dz = z - d.z;
-    const dist = dx * dx + dz * dz;
-    if (dist < bestDist) { bestDist = dist; best = d; }
+    const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z);
+    if (dd < bestD) {
+      bestD = dd;
+      best = d;
+    }
   }
   return best;
 }
 
-export function districtName(id) {
-  const d = CONFIG.districts.find((x) => x.id === id);
-  return d ? d.name : id.toUpperCase();
+export function init(ctx) {
+  const S = ctx.state;
+  ctx.nearestDistrict = nearestDistrict;
+  ctx.updates.push(() => {
+    S.district = nearestDistrict(S.player.pos.x, S.player.pos.z).id;
+  });
+  // Recompute on a timer too: at headless speed rAF can stall for
+  // seconds, and the HUD district must follow a teleport promptly.
+  setInterval(() => {
+    S.district = nearestDistrict(S.player.pos.x, S.player.pos.z).id;
+  }, 500);
+  return { nearestDistrict };
 }
 
-export function init(ctx) {
-  const { state: S } = ctx;
-  ctx.api.districts = { nearestDistrict, districtName };
-  ctx.updates.push(() => {
-    const d = nearestDistrict(S.player.pos.x, S.player.pos.z);
-    if (d) S.district = d.id;
-  });
-}
+export default init;

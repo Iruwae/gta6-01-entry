@@ -1,33 +1,31 @@
-// SOLMAR BAY — crew banter. Lena and Vic talk over the toast line while
-// the player works. Every line carries a speaker tag up front ("LENA: …"
-// / "VIC: …"). The live banter director is the one crew.js installs
-// (banter loads just before crew); this module only holds the line banks
-// and a trigger helper — it never fires on its own, so it can never talk
-// over a briefing or another toast.
+// SOLMAR BAY — crew banter lines. The live director is installed by crew.js
+// (banter loads just before crew, so crew's director is the one that stays).
 export const BANTER_LINES = {
   raceWin: [
-    ['LENA', 'Told you. Nobody outdrives us on this bay.'],
-    ['VIC', 'Clean win. The bay saw that — spend the money loud.'],
-    ['LENA', 'That is how you take a corner. Again, slower, so they can watch.'],
+    ['LENA', 'That was clean. Vic is going to love this.'],
+    ['LENA', 'Told you my lines work. Now drive like you mean it.'],
+    ['VIC', 'You drive like the bay is yours. Keep it that way.'],
   ],
   pickup: [
-    ['LENA', 'Package is in the bag. Keep it smooth.'],
-    ['VIC', 'Good hands. Vic pays people with good hands.'],
-    ['LENA', 'One more of those and we eat like the Strip does.'],
+    ['LENA', 'Package is in the bag. Easy money.'],
+    ['VIC', 'Good hands. Keep it quiet and keep it moving.'],
+    ['LENA', 'One more of those and we eat like kings tonight.'],
   ],
   heatUp: [
-    ['VIC', 'You got the whole bay looking at you. Lose them.'],
-    ['LENA', 'Stars climbing. Drive like you mean it or park it and walk.'],
-    ['VIC', 'The PD does not forget a face. Give them somewhere else to look.'],
+    ['VIC', 'Cops on you now. Lose them or pay for it.'],
+    ['LENA', 'Heat is climbing. Do not lead them back to the garage.'],
+    ['VIC', 'The whole bay heard that. Move.'],
+  ],
+  idle: [
+    ['LENA', 'Sun is going down. Best light in the whole bay.'],
+    ['VIC', 'Solmar Bay rewards the patient and punishes the loud.'],
+    ['LENA', 'You ever think about what comes after all this? Me neither.'],
   ],
 };
 
 export function init(ctx) {
-  ctx.api.banterLines = BANTER_LINES;
-  ctx.api.banter = (kind) => {
-    const lines = BANTER_LINES[kind];
-    if (!lines) return false;
-    const [speaker, text] = lines[Math.floor(Math.random() * lines.length)];
-    return ctx.state.banterDirector.say(speaker, text);
-  };
+  ctx.banterLines = BANTER_LINES;
+  return { lines: BANTER_LINES };
 }
+
+export default init;
