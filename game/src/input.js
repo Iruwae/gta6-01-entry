@@ -1,83 +1,58 @@
-// SOLMAR BAY — keyboard + mouse state (round 9 rebuild).
-// main.js wires the listeners through here; every module reads the same
-// object from ctx.input. `keys` is what is held right now, `pressed` is
-// the edge set for this frame (cleared by main.js at the end of each
-// frame), so a 2-second hold at headless speed still registers exactly
-// once per frame.
-
+// Keyboard + mouse input for SOLMAR BAY. `keys` is the held set,
+// `pressed` is the edge set (cleared by endFrame each frame). Key repeat
+// events never re-arm the edge set, so holding a key fires it once.
 export function createInput() {
-  const GAME_KEYS = new Set([
-    'KeyW', 'KeyA', 'KeyS', 'KeyD',
-    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-    'Space', 'KeyX', 'KeyR', 'KeyE', 'KeyQ', 'KeyF', 'KeyH',
-    'KeyG', 'KeyT', 'KeyY', 'KeyV', 'KeyP',
-    'Digit1', 'Digit2', 'Digit3', 'Digit4',
-    'ShiftLeft', 'ShiftRight',
-  ]);
-
   const input = {
     keys: new Set(),
     pressed: new Set(),
-    mouse: { x: 0, y: 0, down: false, clicked: false },
+    mouse: { x: 0, y: 0, down: false },
     attached: false,
 
-    isDown(code) {
-      return this.keys.has(code);
-    },
-    wasPressed(code) {
-      return this.pressed.has(code);
-    },
-    consume(code) {
-      this.pressed.delete(code);
-      return true;
-    },
-
     attach() {
-      if (this.attached) return;
-      this.attached = true;
-
+      if (input.attached) return;
+      input.attached = true;
       window.addEventListener('keydown', (e) => {
-        if (GAME_KEYS.has(e.code)) e.preventDefault();
-        if (!e.repeat) {
-          this.keys.add(e.code);
-          this.pressed.add(e.code);
+        if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'Space') {
+          e.preventDefault();
         }
+        if (!e.repeat) input.pressed.add(e.code);
+        input.keys.add(e.code);
       });
       window.addEventListener('keyup', (e) => {
-        this.keys.delete(e.code);
+        input.keys.delete(e.code);
       });
       window.addEventListener('blur', () => {
-        this.keys.clear();
-        this.mouse.down = false;
-      });
-      window.addEventListener('mousemove', (e) => {
-        this.mouse.x = e.clientX;
-        this.mouse.y = e.clientY;
+        input.keys.clear();
+        input.mouse.down = false;
       });
       window.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        this.mouse.x = e.clientX;
-        this.mouse.y = e.clientY;
-        this.mouse.down = true;
-        this.mouse.clicked = true;
+        input.mouse.down = true;
+        input.mouse.x = e.clientX;
+        input.mouse.y = e.clientY;
       });
       window.addEventListener('mouseup', (e) => {
-        if (e.button !== 0) return;
-        this.mouse.down = false;
+        input.mouse.down = false;
+        input.mouse.x = e.clientX;
+        input.mouse.y = e.clientY;
       });
-      document.addEventListener('contextmenu', (e) => {
-        const c = document.getElementById('game-container');
-        if (c && c.contains(e.target)) e.preventDefault();
+      window.addEventListener('mousemove', (e) => {
+        input.mouse.x = e.clientX;
+        input.mouse.y = e.clientY;
       });
     },
 
-    // Called by main.js after every frame's updates have run.
     endFrame() {
-      this.pressed.clear();
-      this.mouse.clicked = false;
+      input.pressed.clear();
+    },
+
+    wasPressed(code) {
+      return input.pressed.has(code);
+    },
+
+    isDown(code) {
+      return input.keys.has(code);
     },
   };
-
   return input;
 }
 

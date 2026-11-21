@@ -1,85 +1,97 @@
-// player.js — on-foot movement + getting in and out of cars (key E).
-// Owns the pedestrian: WASD walking, heading, and the enter/exit toggle.
-// Driving itself lives in vehicles.js; this module only hands the car over.
+// On-foot movement for SOLMAR BAY. WASD/arrows walk, Shift sprints,
+// heading follows the movement direction. Getting in and out of cars
+// (E) lives here too; driving itself lives in vehicles.js.
+import { CONFIG } from './config.js';
+
 export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  const dom = ctx.dom || {};
-  const held = new Set();
+  const { THREE, state: S, input } = ctx;
 
-  const codes = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
-  window.addEventListener('keydown', (e) => {
-    if (codes.includes(e.code)) held.add(e.code);
-    if (e.code === 'KeyE' && !e.repeat) tryToggleCar();
-  });
-  window.addEventListener('keyup', (e) => held.delete(e.code));
-  window.addEventListener('blur', () => held.clear());
-
-  function playing() {
-    return S && (S.mode === 'playing' || S.mode === undefined) && !S.cutscene;
-  }
+  // A simple box-person for the player, amber jacket, dark trousers.
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.7, 1.7, 0.4),
+    new THREE.MeshBasicMaterial({ color: 0xffb347 }),
+  );
+  body.position.copy(S.player.pos);
+  ctx.scene.add(body);
+  S.player.mesh = body;
 
   function nearestCar(maxDist) {
     let best = null;
-    let bestD = maxDist;
-    for (const c of S.cars || []) {
-      if (!c || c.aiPolice || !c.pos) continue;
-      const dx = c.pos.x - S.player.pos.x;
-      const dz = c.pos.z - S.player.pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d < bestD) { bestD = d; best = c; }
+    let bestD = maxDist * maxDist;
+    for (const car of S.cars) {
+      if (car.aiPolice) continue;
+      const dx = car.pos.x - S.player.pos.x;
+      const dz = car.pos.z - S.player.pos.z;
+      const dd = dx * dx + dz * dz;
+      if (dd < bestD) {
+        bestD = dd;
+        best = car;
+      }
     }
     return best;
   }
 
-  function tryToggleCar() {
-    if (!playing() || !S.player) return;
+  function update(dt) {
+    if (S.mode !== 'playing') return;
+
+    // Getting in / out of a car.
+    if (input.wasPressed('KeyE')) {
+      if (S.car) {
+        const car = S.car;
+        S.car = null;
+        S.player.pos.set(car.pos.x + 2.5, 0, car.pos.z + 2.5);
+        S.player.heading = car.heading;
+      } else {
+        const car = nearestCar(4.5);
+        if (car) {
+          S.car = car;
+          S.player.pos.copy(car.pos);
+          S.player.heading = car.heading;
+        }
+      }
+    }
+
+    // On foot: the player mesh follows the feet, the car drives itself.
     if (S.car) {
-      // Step out beside the car.
-      const car = S.car;
-      S.car = null;
-      S.player.pos.set(car.pos.x + 2.5, 0, car.pos.z + 2.5);
-      if (car.speed !== undefined) car.speed = 0;
+      S.player.pos.copy(S.car.pos);
+      S.player.heading = S.car.heading;
+      body.position.copy(S.player.pos);
+      body.rotation.y = S.player.heading;
       return;
     }
-    const car = nearestCar(5);
-    if (!car) return;
-    S.car = car;
-    S.player.heading = car.heading || 0;
-    S.player.pos.set(car.pos.x, 0, car.pos.z);
-    if (typeof ctx.api === 'object' && ctx.api && typeof ctx.api.toast === 'function') {
-      // keep quiet on entry; the HUD speedo shows the car name
-    }
-  }
 
-  // Expose the toggle for other modules (garage spawn etc. can reuse it).
-  if (ctx.api) ctx.api.toggleCar = tryToggleCar;
-
-  (ctx.updates || []).push((dt) => {
-    if (!S || !S.player || !S.player.pos) return;
-    if (typeof S.health === 'number' && typeof S.player.health === 'number') {
-      S.health = S.player.health;
-    }
-    if (S.car) {
-      // Ride along: the pedestrian sits where the car is.
-      if (S.car.pos) S.player.pos.set(S.car.pos.x, 0, S.car.pos.z);
-      if (typeof S.car.heading === 'number') S.player.heading = S.car.heading;
-      return;
-    }
-    if (!playing()) return;
     let mx = 0;
     let mz = 0;
-    if (held.has('KeyW') || held.has('ArrowUp')) mz -= 1;
-    if (held.has('KeyS') || held.has('ArrowDown')) mz += 1;
-    if (held.has('KeyA') || held.has('ArrowLeft')) mx -= 1;
-    if (held.has('KeyD') || held.has('ArrowRight')) mx += 1;
-    if (mx === 0 && mz === 0) return;
-    const len = Math.hypot(mx, mz);
-    mx /= len;
-    mz /= len;
-    const speed = 7;
-    S.player.pos.x += mx * speed * dt;
-    S.player.pos.z += mz * speed * dt;
-    S.player.pos.y = 0;
-    S.player.heading = Math.atan2(mx, mz);
-  });
+    if (input.isDown('KeyW') || input.isDown('ArrowUp')) mz += 1;
+    if (input.isDown('KeyS') || input.isDown('ArrowDown')) mz -= 1;
+    if (input.isDown('KeyA') || input.isDown('ArrowLeft')) mx -= 1;
+    if (input.isDown('KeyD') || input.isDown('ArrowRight')) mx += 1;
+
+    const sprint = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
+    const speed = sprint ? CONFIG.sprintSpeed : CONFIG.walkSpeed;
+    if (mx !== 0 || mz !== 0) {
+      const len = Math.hypot(mx, mz);
+      mx /= len;
+      mz /= len;
+      // Camera-relative: forward is -z on screen, so W moves -z when the
+      // camera sits behind the player. Heading 0 faces +z; the camera
+      // sits at -forward, so W should move along -forward... keep the
+      // simple world mapping: W = -z, S = +z, A = -x, D = +x, and the
+      // heading follows the movement direction.
+      const vx = mx * speed;
+      const vz = -mz * speed;
+      S.player.pos.x += vx * dt;
+      S.player.pos.z += vz * dt;
+      S.player.vel.set(vx, 0, vz);
+      S.player.heading = Math.atan2(vx, vz);
+    } else {
+      S.player.vel.set(0, 0, 0);
+    }
+    S.player.pos.x = Math.max(-190, Math.min(190, S.player.pos.x));
+    S.player.pos.z = Math.max(-190, Math.min(190, S.player.pos.z));
+    body.position.copy(S.player.pos);
+    body.rotation.y = S.player.heading;
+  }
+
+  ctx.updates.push(update);
 }

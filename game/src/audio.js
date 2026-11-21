@@ -1,60 +1,77 @@
-// audio.js — SOLMAR BAY sound effects.
-// Tiny WebAudio synth for UI blips, gunshots, reloads and cash. No audio
-// files, no network: every sound is an oscillator shaped in code. If the
-// browser has no audio context, every call silently does nothing.
+// Tiny WebAudio synth for SOLMAR BAY: UI blips, gunshots, reloads and
+// cash. No audio files, no network. If the browser has no audio
+// context, every call silently does nothing.
 export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  let ac = null;
+  let audioCtx = null;
+  let muted = false;
 
-  function ensure() {
-    try {
-      if (!ac) {
+  function ac() {
+    if (muted) return null;
+    if (!audioCtx) {
+      try {
         const AC = window.AudioContext || window.webkitAudioContext;
-        if (AC) ac = new AC();
+        if (!AC) {
+          muted = true;
+          return null;
+        }
+        audioCtx = new AC();
+      } catch (e) {
+        muted = true;
+        return null;
       }
-      if (ac && ac.state === 'suspended') ac.resume();
-    } catch (e) { ac = null; }
-    return ac;
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+    return audioCtx;
   }
 
-  function tone(freq, dur, type, vol, slideTo) {
-    const a = ensure();
-    if (!a) return;
+  function blip(freq, dur, type = 'sine', gain = 0.08) {
+    const c = ac();
+    if (!c) return;
     try {
-      const osc = a.createOscillator();
-      const gain = a.createGain();
-      osc.type = type || 'sine';
-      osc.frequency.setValueAtTime(freq, a.currentTime);
-      if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, a.currentTime + dur);
-      gain.gain.setValueAtTime(vol || 0.06, a.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
-      osc.connect(gain);
-      gain.connect(a.destination);
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(gain, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+      osc.connect(g);
+      g.connect(c.destination);
       osc.start();
-      osc.stop(a.currentTime + dur + 0.02);
-    } catch (e) { /* stay silent rather than crash the game */ }
+      osc.stop(c.currentTime + dur);
+    } catch (e) { /* never let sound break the game */ }
   }
 
-  const api = {
-    tone,
-    blip() { tone(660, 0.08, 'square', 0.04); },
-    click() { tone(520, 0.05, 'square', 0.03); },
-    shoot() { tone(190, 0.07, 'sawtooth', 0.05, 70); },
-    reload() { tone(440, 0.09, 'triangle', 0.05); setTimeout(() => tone(620, 0.09, 'triangle', 0.05), 110); },
-    cash() { tone(880, 0.09, 'sine', 0.06); setTimeout(() => tone(1318, 0.14, 'sine', 0.06), 90); },
-    pickup() { tone(740, 0.1, 'sine', 0.06); setTimeout(() => tone(988, 0.12, 'sine', 0.05), 80); },
-    crash() { tone(120, 0.25, 'sawtooth', 0.07, 40); },
-    siren() { tone(700, 0.3, 'sine', 0.02, 950); },
-    ensure,
+  function noise(dur, gain = 0.15) {
+    const c = ac();
+    if (!c) return;
+    try {
+      const len = Math.floor(c.sampleRate * dur);
+      const buf = c.createBuffer(1, len, c.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      const g = c.createGain();
+      g.gain.value = gain;
+      src.connect(g);
+      g.connect(c.destination);
+      src.start();
+    } catch (e) { /* never let sound break the game */ }
+  }
+
+  ctx.api.audio = {
+    blip: () => blip(660, 0.08),
+    shot: () => noise(0.12, 0.2),
+    reload: () => {
+      blip(320, 0.06, 'square', 0.05);
+      setTimeout(() => blip(520, 0.06, 'square', 0.05), 120);
+    },
+    cash: () => {
+      blip(880, 0.09);
+      setTimeout(() => blip(1320, 0.12), 90);
+    },
+    station: () => blip(440, 0.1, 'triangle', 0.07),
   };
-
-  // Warm the audio context up on the first gesture, so later sounds
-  // are allowed to play.
-  const warm = () => ensure();
-  window.addEventListener('pointerdown', warm, { once: true });
-  window.addEventListener('keydown', warm, { once: true });
-
-  ctx.api = ctx.api || {};
-  ctx.api.audio = api;
-  S.audioDirector = api;
 }

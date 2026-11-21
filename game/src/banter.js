@@ -1,88 +1,48 @@
-// banter.js — SOLMAR BAY crew banter.
-// Lena and Vic talk over the toast line while the player works. Every
-// line carries a speaker tag up front ("LENA: ..." / "VIC: ..."). A short
-// cooldown keeps the crew from talking over each other.
-export function init(ctx) {
-  const S = ctx.state || ctx.S;
-  const dom = ctx.dom || {};
-  const $ = (id) => dom[id] || document.getElementById(id);
-
-  const LINES = {
+// Crew banter for SOLMAR BAY. Lena and Vic talk over the toast line
+// while the player works; every line carries a speaker tag up front
+// ("LENA: ..." / "VIC: ..."). A short cooldown keeps the crew from
+// talking over each other. This module installs the director; crew.js
+// installs its own right after, and that one is the live one.
+export function makeBanterDirector(S, toast) {
+  const lines = {
     raceWin: [
-      'LENA: "That was clean — Vic is going to hear about this one."',
-      'LENA: "Told you my lines were faster. Pay up, champ."',
-      'VIC: "Now that is how you drive a getaway. Beautiful."',
+      ['LENA', 'Told you. Nobody outdrives us on this bay.'],
+      ['LENA', 'That was clean. Vic is going to love this.'],
+      ['VIC', 'Not bad, kid. The bay is starting to notice you.'],
     ],
-    taxiDone: [
-      'LENA: "Five stars, easy. The bay loves a smooth driver."',
-      'VIC: "Fare money is honest money. Keep stacking it."',
+    pickup: [
+      ['LENA', 'Package is in the bag. Keep it smooth.'],
+      ['VIC', 'Good hands. That is how you stay alive out here.'],
     ],
-    missionDone: [
-      'LENA: "Job done, no scratches. We are getting good at this."',
-      'VIC: "That is how you build a name in Solmar Bay."',
-    ],
-    packageFound: [
-      'LENA: "Nice — another stash tucked away. Keep looking."',
-      'VIC: "The bay hides its money well. You found some of it."',
-    ],
-    greeting: [
-      'LENA: "Sun is down, streets are ours. What are we doing first?"',
-      'VIC: "Solmar Bay does not wait for anyone, kid. Move."',
+    heatUp: [
+      ['LENA', 'Cops on us! Drive like you mean it!'],
+      ['VIC', 'Heat is climbing. Lose them or pay for it.'],
     ],
   };
-
-  function toast(msg) {
-    if (ctx.api && ctx.api.toast) { ctx.api.toast(msg, 5000); return; }
-    const el = $('toast');
-    if (el) el.textContent = msg;
-  }
-
-  function pick(list) {
-    return list[Math.floor(Math.random() * list.length)];
-  }
-
   const director = {
     _cooldown: 0,
-    raceWin() {
-      if (this._cooldown > 0) return;
-      this._cooldown = 9;
-      toast(pick(LINES.raceWin));
-    },
-    taxiDone() {
-      if (this._cooldown > 0) return;
-      this._cooldown = 9;
-      toast(pick(LINES.taxiDone));
-    },
-    missionDone() {
-      if (this._cooldown > 0) return;
-      this._cooldown = 9;
-      toast(pick(LINES.missionDone));
-    },
-    packageFound() {
-      if (this._cooldown > 0) return;
-      this._cooldown = 9;
-      toast(pick(LINES.packageFound));
-    },
-    greeting() {
-      if (this._cooldown > 0) return;
-      this._cooldown = 9;
-      toast(pick(LINES.greeting));
-    },
     say(speaker, text) {
-      if (this._cooldown > 0) return;
-      this._cooldown = 9;
-      toast(speaker + ': "' + text + '"');
+      if (director._cooldown > 0) return false;
+      toast(`${speaker}: "${text}"`);
+      director._cooldown = 9;
+      return true;
+    },
+    raceWin() {
+      const line = lines.raceWin[Math.floor(Math.random() * lines.raceWin.length)];
+      return director.say(line[0], line[1]);
+    },
+    pickup() {
+      const line = lines.pickup[Math.floor(Math.random() * lines.pickup.length)];
+      return director.say(line[0], line[1]);
+    },
+    heatUp() {
+      const line = lines.heatUp[Math.floor(Math.random() * lines.heatUp.length)];
+      return director.say(line[0], line[1]);
     },
   };
+  return director;
+}
 
-  S.banterDirector = director;
-  ctx.api = ctx.api || {};
-  ctx.api.banter = director;
-
-  ctx.updates = ctx.updates || [];
-  ctx.updates.push((dt) => {
-    if (director._cooldown > 0) {
-      director._cooldown = Math.max(0, director._cooldown - (dt || 0));
-    }
-  });
+export function init(ctx) {
+  ctx.state.banterDirector = makeBanterDirector(ctx.state, ctx.api.toast);
 }

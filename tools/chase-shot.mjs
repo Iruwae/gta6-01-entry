@@ -1,91 +1,55 @@
-// Chase-shot staging for the SOLMAR BAY screenshot run.
-//
-// The police-chase screenshot needs a very specific live moment: the
-// player wanted at 4-5 stars, downtown, with the police helicopter
-// already overhead. Wanted level decays on its own, so this helper
-// keeps re-asserting the heat every couple of seconds until the
-// helicopter has actually lined up above the player — otherwise the
-// shot can come out with the heli still miles away or the stars gone.
-//
-// Used by tools/shots.mjs. It only drives the game through the public
-// debug handle (window.__solmar) and plain DOM reads; it never touches
-// the game source.
+// Chase-shot staging for SOLMAR BAY. Tops the wallet to $500, disarms
+// the pay-n-spray, puts the player downtown, and holds the heat at 90
+// until the helicopter is overhead with at least 3 cops on the roster.
 export const CHASE_STAGING = {
-  // Wallet topped back up before the shot, matching the staging brief.
   walletTopUp: 500,
-  // Chase is staged downtown, at the map origin.
   downtown: { x: 0, y: 0, z: 0 },
-  // Heat 90 reads as 4-5 wanted stars (heli spawns at 3+).
   heat: 90,
-  // Close enough that the helicopter reads as "overhead" in frame.
   heliOverheadDistance: 40,
-  // At least this many police cars should be in the chase.
   minCops: 3,
-  // Re-assert heat this often so the wanted level never decays away
-  // while the helicopter is still positioning itself.
   reassertEveryMs: 2000,
-  // Give up waiting after this long and let the caller shoot anyway.
   settleTimeoutMs: 90000,
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Stage the chase in the live game page and wait until the helicopter
-// is overhead. Returns a snapshot of the final staged state
-// ({ wanted, heat, cops, heli, heliDist, rosterRows }) so the caller
-// can log what the shot actually captured.
 export async function stageChaseShot(page, options = {}) {
   const cfg = { ...CHASE_STAGING, ...options };
-
-  // 1. Safe starting point: disarm the pay-n-spray booth so it cannot
-  //    fire mid-staging, top the wallet back to $500, clear any old
-  //    heat, and put the player downtown at (0, 0).
-  await page.evaluate((cfg) => {
+  await page.evaluate((c) => {
     const S = window.__solmar.S;
-    if (S.heatDirector && S.heatDirector.sprayBooth) {
-      S.heatDirector.sprayBooth.armed = false;
-    }
-    S.cash = cfg.walletTopUp;
-    S.heat = 0;
-    S.player.pos.set(cfg.downtown.x, cfg.downtown.y, cfg.downtown.z);
+    S.cash = c.walletTopUp;
+    if (S.heatDirector) S.heatDirector.sprayBooth.armed = false;
+    S.player.pos.set(c.downtown.x, c.downtown.y, c.downtown.z);
+    S.heat = c.heat;
   }, cfg);
-  await sleep(500);
 
-  // 2. Light the wanted level and keep re-asserting it until the
-  //    helicopter is overhead with police in pursuit.
-  const started = Date.now();
-  let snapshot = null;
-  while (Date.now() - started < cfg.settleTimeoutMs) {
-    snapshot = await page.evaluate((cfg) => {
+  const t0 = Date.now();
+  let last = { wanted: 0, heat: 0, cops: 0, heli: false, heliDist: -1, rosterRows: 0 };
+  while (Date.now() - t0 < cfg.settleTimeoutMs) {
+    // Re-assert the heat: the booth and the natural cooldown fight it.
+    await page.evaluate((h) => {
+      window.__solmar.S.heat = h;
+    }, cfg.heat);
+    await sleep(cfg.reassertEveryMs);
+    last = await page.evaluate(() => {
       const S = window.__solmar.S;
-      S.heat = cfg.heat;
-      const heli = S.heli;
-      let heliDist = null;
-      if (heli && heli.pos) {
-        const dx = heli.pos.x - S.player.pos.x;
-        const dz = heli.pos.z - S.player.pos.z;
-        heliDist = Math.hypot(dx, dz);
+      const cops = S.cars.filter((c) => c.aiPolice);
+      let heliDist = -1;
+      if (S.heli) {
+        heliDist = Math.hypot(S.heli.pos.x - S.player.pos.x, S.heli.pos.z - S.player.pos.z);
       }
       return {
         wanted: S.wanted,
         heat: S.heat,
-        cops: (S.cars || []).filter((c) => c.aiPolice).length,
-        heli: !!heli,
-        heliDist,
+        cops: cops.length,
+        heli: !!S.heli,
+        heliDist: heliDist < 0 ? -1 : Math.round(heliDist),
         rosterRows: document.querySelectorAll('#roster .roster-row').length,
       };
-    }, cfg);
-    if (
-      snapshot.heli &&
-      snapshot.heliDist !== null &&
-      snapshot.heliDist <= cfg.heliOverheadDistance &&
-      snapshot.cops >= cfg.minCops
-    ) {
-      return snapshot;
+    });
+    if (last.heli && last.heliDist >= 0 && last.heliDist <= cfg.heliOverheadDistance && last.cops >= cfg.minCops) {
+      return last;
     }
-    await sleep(cfg.reassertEveryMs);
   }
-  // Timed out: hand back the last observed state so the caller can
-  // log it and still take the shot rather than failing the whole run.
-  return snapshot;
+  return last;
 }

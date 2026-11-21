@@ -1,10 +1,8 @@
-// SOLMAR BAY — tiny random helpers (round 9 rebuild).
-// One seeded generator for anything that must be reproducible, plus
-// plain Math.random wrappers for everyday rolls.
-
-export function makeRng(seed = 1234567) {
+// Small random helpers for SOLMAR BAY. A seeded generator for anything
+// that should be stable, plus plain wrappers over Math.random.
+export function makeRng(seed) {
   let a = seed >>> 0;
-  return function next() {
+  return function () {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -21,29 +19,31 @@ export function randInt(min, max) {
   return Math.floor(rand(min, max + 1));
 }
 
-export function pick(list) {
-  return list[Math.floor(Math.random() * list.length)];
+export function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export function pickRng(rng, list) {
-  return list[Math.floor(rng() * list.length)];
+export function pickRng(rng, arr) {
+  return arr[Math.floor(rng() * arr.length)];
 }
 
 export function chance(p) {
   return Math.random() < p;
 }
 
-export function shuffle(list) {
-  const out = list.slice();
+export function shuffle(arr) {
+  const out = arr.slice();
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
+    const t = out[i];
+    out[i] = out[j];
+    out[j] = t;
   }
   return out;
 }
 
-export function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v;
+export function clamp(v, min, max) {
+  return v < min ? min : v > max ? max : v;
 }
 
 export function lerp(a, b, t) {

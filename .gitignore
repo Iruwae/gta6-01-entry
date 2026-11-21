@@ -1,26 +1,15 @@
-# Dependencies
 node_modules/
 package-lock.json
-
-# Build / dossier output
 /output
 out-*/
 dist/
-
-# Screenshots are committed with the entry: the dossier needs them.
-
-# Logs
 *.log
 npm-debug.log*
-
-# Editor and OS clutter
 .vscode/
 .idea/
 *.swp
 *.swo
 .DS_Store
 Thumbs.db
-
-# Local environment
 .env
 .env.local
