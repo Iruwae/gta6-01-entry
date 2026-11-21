@@ -1,18 +1,14 @@
 // SOLMAR BAY — tiny static file server (Node stdlib only).
-// Serves the game/ folder over plain HTTP so the browser can load the
-// modules without file:// or CORS trouble. Listens on 127.0.0.1:8904
-// (PORT env overrides). Resolves game/ from its own file location.
+// Serves the game/ folder on 127.0.0.1:8904 (PORT env overrides).
 import { createServer } from 'node:http';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join, extname, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
 
-const thisDir = dirname(fileURLToPath(import.meta.url));
-const GAME = resolve(thisDir, 'game');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), 'game');
 const PORT = Number(process.env.PORT || 8904);
-
-const MIME: Record<string, string> = {
+const MIME = {
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.mjs': 'text/javascript',
@@ -25,26 +21,27 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   try {
-    const url = decodeURIComponent((req.url || '/').split('?')[0]);
-    const rel = url === '/' ? 'index.html' : url.replace(/^\/+/, '');
-    const file = resolve(join(GAME, rel));
-    if (!file.startsWith(GAME + '/') && file !== GAME) {
+    const raw = decodeURIComponent((req.url || '/').split('?')[0]);
+    const rel = raw === '/' ? 'index.html' : raw.replace(/^\/+/, '');
+    const file = resolve(join(root, rel));
+    if (!file.startsWith(root + '/') && file !== root) {
       res.writeHead(403);
       res.end('forbidden');
       return;
     }
-    if (!existsSync(file) || !statSync(file).isFile()) {
+    if (!existsSync(file)) {
       res.writeHead(404);
       res.end('not found');
       return;
     }
+    const data = await readFile(file);
     res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream' });
-    res.end(readFileSync(file));
+    res.end(data);
   } catch (e) {
     res.writeHead(500);
-    res.end('server error');
+    res.end('error');
   }
 });
 

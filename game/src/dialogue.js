@@ -1,59 +1,32 @@
-// SOLMAR BAY — the dialogue box: queue, render, advance on click.
+// SOLMAR BAY — the dialogue box: a queue of {name, text} lines, rendered
+// one at a time, advanced by clicking the box. The boot hub owns the queue
+// and exposes it through ctx.api; this module owns the render step.
 export function init(ctx) {
-  const dom = ctx.dom;
-  let queue = [];
-  let current = null;
+  const { dom } = ctx;
 
   function portraitFor(name) {
-    if (name === 'LENA CRUZ') return { initials: 'LC', color: '#ff7a9e' };
-    if (name === 'VIC TORRES') return { initials: 'VT', color: '#ffb347' };
-    if (name === 'MARCO SOLIS') return { initials: 'MS', color: '#5fb4c9' };
     const parts = (name || '?').split(' ');
-    const initials = parts.map((p) => p[0] || '').join('').slice(0, 2).toUpperCase() || '?';
-    return { initials, color: '#7ea8ff' };
+    return parts.map((p) => p[0] || '').join('').slice(0, 2).toUpperCase();
+  }
+  function colorFor(name) {
+    if (name === 'LENA CRUZ') return '#ff7a9e';
+    if (name === 'VIC TORRES') return '#ffb347';
+    return '#5fb4c9';
   }
 
-  function render() {
-    if (!current) {
+  ctx.api.renderDialogue = function renderDialogue(line) {
+    if (!dom.dialogue) return;
+    if (!line) {
       dom.dialogue.classList.add('hidden');
       return;
     }
-    const p = portraitFor(current.name);
-    dom['dlg-portrait'].textContent = p.initials;
-    dom['dlg-portrait'].style.background = p.color;
-    dom['dlg-name'].textContent = current.name;
-    dom['dlg-text'].textContent = current.text;
     dom.dialogue.classList.remove('hidden');
-  }
-
-  function showDialogue(lines) {
-    if (!lines || lines.length === 0) return;
-    queue = lines.map((l) => ({ name: l.name, text: l.text }));
-    current = queue.shift();
-    render();
-  }
-
-  function advanceDialogue() {
-    if (queue.length > 0) {
-      current = queue.shift();
-      render();
-    } else {
-      current = null;
-      queue = [];
-      render();
+    if (dom['dlg-portrait']) {
+      dom['dlg-portrait'].textContent = portraitFor(line.name);
+      dom['dlg-portrait'].style.background = colorFor(line.name);
     }
-  }
-
-  ctx.api.showDialogue = showDialogue;
-  ctx.api.advanceDialogue = advanceDialogue;
-  ctx.dialogueQueue = () => queue;
-  ctx.clearDialogue = () => {
-    queue = [];
-    current = null;
-    render();
+    if (dom['dlg-name']) dom['dlg-name'].textContent = line.name;
+    if (dom['dlg-text']) dom['dlg-text'].textContent = line.text;
   };
-
-  return { showDialogue, advanceDialogue };
+  ctx.dialogueReady = true;
 }
-
-export default init;

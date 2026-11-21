@@ -1,86 +1,76 @@
-// SOLMAR BAY — pedestrians: 14 walkers + 2 standing by the MART and beach.
+// SOLMAR BAY — pedestrians: 14 walkers wandering the streets, plus 2
+// who stand still (one by the MART, one on the beach).
 import * as THREE from '../vendor/three.module.min.js';
 
-const SHIRT_COLORS = [0xff7a9e, 0x5fb4c9, 0xf2d492, 0x7ec98a, 0xb48ce8, 0xe8a34c, 0xffb347];
-
-function makePerson(THREE, shirtColor) {
+function makeWalker(colorHex) {
   const g = new THREE.Group();
-  const shirt = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.9 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0xd9a077, roughness: 0.9 });
-  const pants = new THREE.MeshStandardMaterial({ color: 0x2a2a3a, roughness: 0.95 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.32), shirt);
-  body.position.y = 1.15;
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55, 1.1, 0.35),
+    new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.8 }),
+  );
+  body.position.y = 1.0;
   g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), skin);
-  head.position.y = 1.75;
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xd9a986, roughness: 0.7 }),
+  );
+  head.position.y = 1.8;
   g.add(head);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.75, 0.22), pants);
-  legL.position.set(-0.14, 0.38, 0);
-  legL.geometry.translate(0, -0.35, 0);
-  legL.position.y = 0.75;
-  const legR = legL.clone();
-  legR.position.x = 0.14;
+  const legGeo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x222233, roughness: 0.8 });
+  const legL = new THREE.Mesh(legGeo, legMat);
+  legL.position.set(-0.15, 0.35, 0);
+  const legR = new THREE.Mesh(legGeo, legMat);
+  legR.position.set(0.15, 0.35, 0);
   g.add(legL);
   g.add(legR);
-  g.userData.legs = [legL, legR];
-  return g;
-}
-
-function randomDest() {
-  // Wander the street grid.
-  const gx = -160 + Math.floor(Math.random() * 9) * 40;
-  const gz = -160 + Math.floor(Math.random() * 9) * 40;
-  return { x: gx + (Math.random() * 10 - 5), z: gz + (Math.random() * 10 - 5) };
+  return { group: g, legL, legR };
 }
 
 export function init(ctx) {
-  const { THREE: T, scene } = ctx;
-  const S = ctx.state;
-
+  const { scene, state: S } = ctx;
+  const rng = (() => { let s = 4242; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+  const colors = [0xff7a9e, 0xffb347, 0x5fb4c9, 0x7ec98a, 0xb48ce8, 0xe8a34c, 0xf2d492];
   const walkers = [];
+
+  function newDest() {
+    return { x: -160 + rng() * 320, z: -160 + rng() * 320 };
+  }
   for (let i = 0; i < 14; i++) {
-    const mesh = makePerson(T, SHIRT_COLORS[i % SHIRT_COLORS.length]);
-    const start = randomDest();
-    mesh.position.set(start.x, 0, start.z);
-    scene.add(mesh);
-    walkers.push({
-      mesh,
-      dest: randomDest(),
-      speed: 1.4 + Math.random() * 1.2,
-      phase: Math.random() * Math.PI * 2,
-    });
+    const w = makeWalker(colors[i % colors.length]);
+    const x = -150 + rng() * 300;
+    const z = -150 + rng() * 300;
+    w.group.position.set(x, 0, z);
+    scene.add(w.group);
+    walkers.push({ ...w, dest: newDest(), speed: 1.6 + rng() * 1.4, phase: rng() * 6 });
   }
   // Two stand still: one by the MART, one on the beach.
-  const still = [];
-  for (const [x, z, c] of [[-70, -58, 0xe8a34c], [2, 160, 0x5fb4c9]]) {
-    const mesh = makePerson(T, c);
-    mesh.position.set(x, 0, z);
-    scene.add(mesh);
-    still.push({ mesh });
+  const stillSpots = [[-66, -56], [6, 168]];
+  for (const [x, z] of stillSpots) {
+    const w = makeWalker(0xf2f2f2);
+    w.group.position.set(x, 0, z);
+    scene.add(w.group);
+    walkers.push({ ...w, dest: { x, z }, speed: 0, phase: 0, still: true });
   }
 
-  ctx.updates.push((dt, t) => {
+  ctx.updates.push((dt) => {
+    if (S.mode === 'paused') return;
+    const t = performance.now() / 1000;
     for (const w of walkers) {
-      const dx = w.dest.x - w.mesh.position.x;
-      const dz = w.dest.z - w.mesh.position.z;
+      if (w.still) continue;
+      const dx = w.dest.x - w.group.position.x;
+      const dz = w.dest.z - w.group.position.z;
       const d = Math.hypot(dx, dz);
-      if (d < 1.5) {
-        w.dest = randomDest();
-        continue;
-      }
-      const step = (w.speed * dt) / d;
-      w.mesh.position.x += dx * step;
-      w.mesh.position.z += dz * step;
-      w.mesh.rotation.y = Math.atan2(dx, dz);
-      const swing = Math.sin(t * 5 + w.phase) * 0.55;
-      w.mesh.userData.legs[0].rotation.x = swing;
-      w.mesh.userData.legs[1].rotation.x = -swing;
-      w.mesh.position.y = Math.abs(Math.sin(t * 5 + w.phase)) * 0.06;
+      if (d < 1.5) { w.dest = newDest(); continue; }
+      const step = Math.min(d, w.speed * dt);
+      w.group.position.x += (dx / d) * step;
+      w.group.position.z += (dz / d) * step;
+      w.group.rotation.y = Math.atan2(dx, dz);
+      const swing = Math.sin(t * 6 + w.phase) * 0.5;
+      w.legL.rotation.x = swing;
+      w.legR.rotation.x = -swing;
+      w.group.position.y = Math.abs(Math.sin(t * 6 + w.phase)) * 0.06;
     }
-    void S;
   });
-
-  return { walkers, still };
+  ctx.peopleReady = true;
 }
-
-export default init;

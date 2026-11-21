@@ -1,62 +1,54 @@
-// SOLMAR BAY — collectible packages + the fence sale (V in Vic's yard).
+// SOLMAR BAY — collectible packages ($50 each) and the fence sale:
+// press V while driving inside Vic's yard to sell the car.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const { THREE: T, scene } = ctx;
-  const S = ctx.state;
-  const input = ctx.input;
+  const { scene, state: S, input } = ctx;
 
-  // Glowing package markers.
-  const pkgGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
-  const pkgMat = new THREE.MeshStandardMaterial({ color: 0xffb347, emissive: 0xffb347, emissiveIntensity: 0.9 });
-  const markers = new Map();
-  for (const pkg of S.packages) {
-    const m = new THREE.Mesh(pkgGeo, pkgMat);
-    m.position.set(pkg.x, 0.7, pkg.z);
-    scene.add(m);
-    markers.set(pkg, m);
+  // 12 package spots, fixed positions.
+  for (const spot of CONFIG.packageSpots) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 0.9, 0.9),
+      new THREE.MeshBasicMaterial({ color: 0xffb347 }),
+    );
+    mesh.position.set(spot.x, 0.7, spot.z);
+    scene.add(mesh);
+    S.packages.push({ x: spot.x, z: spot.z, taken: false, mesh });
   }
 
-  ctx.updates.push((_dt, t) => {
-    const pos = S.car ? S.car.pos : S.player.pos;
+  ctx.updates.push(() => {
+    if (S.mode !== 'playing') return;
+    const pp = S.player.pos;
+    const cp = S.car ? S.car.pos : null;
     for (const pkg of S.packages) {
-      const m = markers.get(pkg);
-      if (m) m.visible = !pkg.taken; // re-show after a fresh-game reset
-      if (!pkg.taken) {
-        if (m) {
-          m.position.y = 0.7 + Math.sin(t * 2 + pkg.x) * 0.25;
-          m.rotation.y = t * 0.8;
-        }
-        if (Math.hypot(pos.x - pkg.x, pos.z - pkg.z) < 3.5) {
-          pkg.taken = true;
-          if (m) m.visible = false;
-          S.stats.packages += 1;
-          S.cash += CONFIG.packageValue;
-          ctx.api.toast(`PACKAGE FOUND: +$${CONFIG.packageValue}`);
-          if (S.banterDirector) S.banterDirector.pickup();
-        }
+      if (pkg.taken) continue;
+      const dFoot = Math.hypot(pp.x - pkg.x, pp.z - pkg.z);
+      const dCar = cp ? Math.hypot(cp.x - pkg.x, cp.z - pkg.z) : Infinity;
+      if (Math.min(dFoot, dCar) <= 4) {
+        pkg.taken = true;
+        pkg.mesh.visible = false;
+        S.stats.packages += 1;
+        S.cash += CONFIG.packageValue;
+        ctx.api.toast(`Package found! +$${CONFIG.packageValue}`);
+        if (S.banterDirector) S.banterDirector.pickup();
       }
     }
-
-    // V: sell the car to Vic's fence while driving inside his yard.
-    if (input.wasPressed('KeyV') && S.car) {
-      const yard = CONFIG.fenceYard;
-      if (Math.hypot(S.car.pos.x - yard.x, S.car.pos.z - yard.z) <= yard.radius + 2) {
-        const car = S.car;
+    // Fence sale: V while driving inside Vic's yard.
+    if (S.car && input.wasPressed('KeyV')) {
+      const car = S.car;
+      const d = Math.hypot(car.pos.x - CONFIG.fenceYard.x, car.pos.z - CONFIG.fenceYard.z);
+      if (d <= CONFIG.fenceYard.radius) {
         const price = S.fenceDirector.priceFor(car) + S.fenceDirector.wantedBonus(car);
         S.cash += price;
         S.stats.fencesSold += 1;
         const i = S.cars.indexOf(car);
         if (i >= 0) S.cars.splice(i, 1);
-        if (car.mesh && car.mesh.parent) car.mesh.parent.remove(car.mesh);
+        if (car.mesh) scene.remove(car.mesh);
         S.car = null;
-        ctx.api.toast(`FENCED the ${car.kind} for $${price}. Vic sends his regards.`);
+        ctx.api.toast(`Vic's fence bought the ${car.kind} for $${price}.`);
       }
     }
   });
-
-  return { markers };
+  ctx.sideReady = true;
 }
-
-export default init;

@@ -1,34 +1,39 @@
-// SOLMAR BAY — Vic's fence yard: the place, the quote, the sale lives in side.js.
+// SOLMAR BAY — Vic's fence yard at (110,138): the yard itself, plus the
+// quote logic lives in the fenceDirector (see side.js for the sale action).
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const { THREE: T, scene } = ctx;
-  const S = ctx.state;
+  const { scene, state: S } = ctx;
   const yard = CONFIG.fenceYard;
-
-  // A small office booth at the yard's edge.
-  const booth = new THREE.Mesh(
-    new THREE.BoxGeometry(5, 3.5, 4),
-    new THREE.MeshStandardMaterial({ color: 0x8a6d2f, roughness: 0.85 }),
+  // Yard pad.
+  const pad = new THREE.Mesh(
+    new THREE.PlaneGeometry(26, 22),
+    new THREE.MeshStandardMaterial({ color: 0x2a2030, roughness: 0.95 }),
   );
-  booth.position.set(yard.x - 8, 1.75, yard.z - 6);
-  scene.add(booth);
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.set(yard.x, 0.05, yard.z);
+  scene.add(pad);
   // Fence posts around the yard.
-  const postMat = new THREE.MeshStandardMaterial({ color: 0x555566, roughness: 0.7, metalness: 0.5 });
-  for (let i = 0; i <= 6; i++) {
-    for (const [px, pz] of [
-      [yard.x - 10 + i * 3.4, yard.z - 8],
-      [yard.x - 10 + i * 3.4, yard.z + 8],
-    ]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.2, 6), postMat);
-      post.position.set(px, 1.1, pz);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.6, metalness: 0.6 });
+  for (let i = 0; i <= 8; i++) {
+    for (const [x, z] of [[yard.x - 13 + i * 3.25, yard.z - 11], [yard.x - 13 + i * 3.25, yard.z + 11]]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.4, 6), postMat);
+      post.position.set(x, 1.2, z);
       scene.add(post);
     }
   }
-
-  ctx.fenceQuote = (car) => S.fenceDirector.priceFor(car) + S.fenceDirector.wantedBonus(car);
-  return { yard };
+  // Vic's sign board.
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(6, 1.6, 0.3),
+    new THREE.MeshBasicMaterial({ color: 0xffb347 }),
+  );
+  sign.position.set(yard.x, 3.2, yard.z - 11);
+  scene.add(sign);
+  ctx.updates.push(() => {
+    // Quote preview: keep a live quote on the state for the HUD/debug.
+    if (S.car) S.fenceQuote = S.fenceDirector.priceFor(S.car) + S.fenceDirector.wantedBonus(S.car);
+    else S.fenceQuote = 0;
+  });
+  ctx.fenceReady = true;
 }
-
-export default init;

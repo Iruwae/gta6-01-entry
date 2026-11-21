@@ -1,41 +1,32 @@
-// SOLMAR BAY — wanted-level behaviour: slow heat cooldown + pay-n-spray.
+// SOLMAR BAY — heat: wanted behaviour, slow cooldown, and the pay-n-spray
+// booth that wipes heat clean for $150 (fires once per entry, re-arms
+// when the player leaves the radius).
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const S = ctx.state;
+  const { state: S } = ctx;
   const booth = S.heatDirector.sprayBooth;
   let inside = false;
 
   ctx.updates.push((dt) => {
+    if (S.mode !== 'playing') return;
     // Heat cools slowly on its own.
-    if (S.heat > 0) {
-      S.heat = Math.max(0, S.heat - 0.2 * dt);
-    }
-    // Pay-n-spray: drive through the booth, heat wiped for $150.
-    const px = S.player.pos.x;
-    const pz = S.player.pos.z;
-    const d = Math.hypot(px - booth.x, pz - booth.z);
+    if (S.heat > 0) S.heatDirector.cool(dt * 0.2);
+    const ref = S.car ? S.car.pos : S.player.pos;
+    const d = Math.hypot(ref.x - booth.x, ref.z - booth.z);
     const nowInside = d <= booth.radius;
-    if (nowInside && !inside && S.car && booth.armed) {
-      if (S.heat > 0 && S.cash >= booth.cost) {
+    if (nowInside && !inside) {
+      inside = true;
+      if (booth.armed && S.car && S.heat > 0 && S.cash >= booth.cost) {
         S.cash -= booth.cost;
         S.heat = 0;
         booth.armed = false;
-        ctx.api.toast(`PAY-N-SPRAY: fresh paint, clean slate. -$${booth.cost}`);
-      } else if (S.heat > 0) {
-        ctx.api.toast('PAY-N-SPRAY: not enough cash for a respray.');
+        ctx.api.toast(`Pay-n-spray: heat wiped clean. -$${booth.cost}`);
       }
-    }
-    if (!nowInside) {
-      // Re-arm once the player leaves the booth radius.
-      if (!booth.armed) booth.armed = true;
+    } else if (!nowInside && inside) {
       inside = false;
-    } else {
-      inside = true;
+      booth.armed = true; // re-arms when the player leaves the radius
     }
   });
-
-  return { booth };
+  ctx.heatReady = true;
 }
-
-export default init;

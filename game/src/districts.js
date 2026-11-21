@@ -1,31 +1,22 @@
-// SOLMAR BAY — districts: nearest-centre matching, HUD follows the player.
+// SOLMAR BAY — districts: nearest-centre matching. The HUD district label
+// and S.district both follow the player.
 import { CONFIG } from './config.js';
 
-export function nearestDistrict(x, z) {
+export function districtAt(x, z) {
   let best = CONFIG.districts[0];
   let bestD = Infinity;
   for (const d of CONFIG.districts) {
     const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z);
-    if (dd < bestD) {
-      bestD = dd;
-      best = d;
-    }
+    if (dd < bestD) { bestD = dd; best = d; }
   }
   return best;
 }
 
 export function init(ctx) {
-  const S = ctx.state;
-  ctx.nearestDistrict = nearestDistrict;
+  ctx.districtAt = districtAt;
   ctx.updates.push(() => {
-    S.district = nearestDistrict(S.player.pos.x, S.player.pos.z).id;
+    const S = ctx.state;
+    S.district = districtAt(S.player.pos.x, S.player.pos.z).id;
   });
-  // Recompute on a timer too: at headless speed rAF can stall for
-  // seconds, and the HUD district must follow a teleport promptly.
-  setInterval(() => {
-    S.district = nearestDistrict(S.player.pos.x, S.player.pos.z).id;
-  }, 500);
-  return { nearestDistrict };
+  ctx.districtsReady = true;
 }
-
-export default init;

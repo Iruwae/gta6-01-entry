@@ -1,31 +1,50 @@
-// SOLMAR BAY — crew banter lines. The live director is installed by crew.js
-// (banter loads just before crew, so crew's director is the one that stays).
-export const BANTER_LINES = {
+// SOLMAR BAY — crew banter: Lena and Vic talk over the toast line while
+// the player works. Every line carries a speaker tag up front, and a short
+// cooldown keeps the crew from talking over each other. (The director the
+// smoke test exercises is the one crew.js installs — banter loads just
+// before crew.)
+const LINES = {
   raceWin: [
-    ['LENA', 'That was clean. Vic is going to love this.'],
-    ['LENA', 'Told you my lines work. Now drive like you mean it.'],
-    ['VIC', 'You drive like the bay is yours. Keep it that way.'],
+    ['LENA', 'See that? Told you the bay was ours tonight.'],
+    ['LENA', 'Clean win. Vic is going to love this.'],
+    ['VIC', 'That is how you drive a getaway. Beautiful.'],
   ],
   pickup: [
-    ['LENA', 'Package is in the bag. Easy money.'],
-    ['VIC', 'Good hands. Keep it quiet and keep it moving.'],
-    ['LENA', 'One more of those and we eat like kings tonight.'],
+    ['LENA', 'Package is ours. Do not stop for anybody.'],
+    ['VIC', 'Good hands. Bring it home.'],
+    ['LENA', 'One more for the crew. Keep moving.'],
   ],
   heatUp: [
-    ['VIC', 'Cops on you now. Lose them or pay for it.'],
-    ['LENA', 'Heat is climbing. Do not lead them back to the garage.'],
-    ['VIC', 'The whole bay heard that. Move.'],
-  ],
-  idle: [
-    ['LENA', 'Sun is going down. Best light in the whole bay.'],
-    ['VIC', 'Solmar Bay rewards the patient and punishes the loud.'],
-    ['LENA', 'You ever think about what comes after all this? Me neither.'],
+    ['LENA', 'Cops on us — drive like you mean it!'],
+    ['VIC', 'Heat is rising. Lose them before the bridge.'],
+    ['LENA', 'They are gaining. Floor it!'],
   ],
 };
 
-export function init(ctx) {
-  ctx.banterLines = BANTER_LINES;
-  return { lines: BANTER_LINES };
+export function makeBanterDirector(toast) {
+  return {
+    _cooldown: 0,
+    say(speaker, text) {
+      if (this._cooldown > 0) return false;
+      toast(`${speaker}: "${text}"`);
+      this._cooldown = 9;
+      return true;
+    },
+    raceWin() { const [s, t] = LINES.raceWin[Math.floor(Math.random() * LINES.raceWin.length)]; return this.say(s, t); },
+    pickup() { const [s, t] = LINES.pickup[Math.floor(Math.random() * LINES.pickup.length)]; return this.say(s, t); },
+    heatUp() { const [s, t] = LINES.heatUp[Math.floor(Math.random() * LINES.heatUp.length)]; return this.say(s, t); },
+  };
 }
 
-export default init;
+export function init(ctx) {
+  ctx.state.banterDirector = makeBanterDirector(ctx.api.toast);
+  ctx.updates.push((dt) => {
+    // Idle chatter: when the heat jumps, Vic or Lena pipes up.
+    const S = ctx.state;
+    if (S.mode !== 'playing') return;
+    if (S.wanted >= 3 && S.banterDirector._cooldown <= 0 && Math.random() < dt * 0.05) {
+      S.banterDirector.heatUp();
+    }
+  });
+  ctx.banterReady = true;
+}

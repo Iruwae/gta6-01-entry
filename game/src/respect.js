@@ -1,24 +1,18 @@
-// SOLMAR BAY — respect ranks: the ladder from NOBODY to BAY LEGEND.
+// SOLMAR BAY — respect ranks: the ladder from NOBODY to BAY LEGEND,
+// driven by respectDirector.add.
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const S = ctx.state;
-
-  ctx.respectRankFor = (respect) => {
+  const { state: S } = ctx;
+  ctx.api.respectLadder = () => CONFIG.respectLadder;
+  ctx.api.respectRank = () => S.respectDirector.rank;
+  ctx.updates.push(() => {
+    // Keep the rank in sync even if respect was set directly.
     let rank = CONFIG.respectLadder[0];
     for (const r of CONFIG.respectLadder) {
-      if (respect >= r.min) rank = r;
+      if (S.respect >= r.min) rank = r;
     }
-    return rank;
-  };
-
-  ctx.updates.push(() => {
-    // Keep the director's rank in sync if respect changed outside add().
-    const rank = ctx.respectRankFor(S.respect);
-    S.respectDirector.rank = { title: rank.title, min: rank.min };
+    S.respectDirector.rank = rank;
   });
-
-  return {};
+  ctx.respectReady = true;
 }
-
-export default init;

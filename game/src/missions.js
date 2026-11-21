@@ -1,131 +1,87 @@
-// SOLMAR BAY — story jobs, street races (T) and taxi fares (Y).
+// SOLMAR BAY — story jobs plus the two street side-hustles: checkpoint
+// races (T at the start pad) and taxi fares (Y at the stand).
 import { CONFIG } from './config.js';
 
-const MISSION_TARGETS = [
-  { x: 0, z: 135 }, // m1 FIRST JOB — the Strip
-  { x: 110, z: 138 }, // m2 HOT WHEELS — Vic's yard
-  { x: 0, z: 135 }, // m3 DEAD DROP — the Strip
-  { x: -120, z: -60 }, // m4 QUIET STREETS — Old Town
-  { x: 120, z: 120 }, // m5 CREW UP — the harbor convoy
-  { x: 120, z: 120 }, // m6 HARBOR LIGHTS — the night boat
-  { x: 0, z: 165 }, // m7 THE LONG WAY — the beach
-  { x: 120, z: -90 }, // m8 PAYBACK — Uptown
-  { x: -120, z: 120 }, // m9 GOLDEN HOUR — Palm Row
-  { x: 0, z: 0 }, // m10 BAY LEGEND — downtown
+// Where each story job completes when the player (or their car) arrives.
+const JOB_SPOTS = [
+  { x: 0, z: 135 }, { x: 110, z: 138 }, { x: 0, z: 135 }, { x: 0, z: 165 },
+  { x: 120, z: 120 }, { x: 120, z: 120 }, { x: 120, z: -90 }, { x: 0, z: 0 },
+  { x: 0, z: 165 }, { x: 0, z: 135 },
 ];
 
 export function init(ctx) {
-  const S = ctx.state;
-  const input = ctx.input;
-  let taxiCycle = 0;
+  const { state: S, input } = ctx;
+  let currentId = null;
+  let currentSince = 0;
 
-  function playerPos() {
+  function refPos() {
     return S.car ? S.car.pos : S.player.pos;
   }
-
-  function taxiDestinations() {
-    // Fixed landmarks, never a package spot.
-    return CONFIG.taxiDestinations.filter(
-      (d) => !CONFIG.packageSpots.some((p) => p.x === d.x && p.z === d.z),
-    );
+  function near(x, z, r) {
+    const p = refPos();
+    return Math.hypot(p.x - x, p.z - z) <= r;
   }
 
-  function startRace() {
-    const race = S.sideActivities.race;
-    race.active = true;
-    race.gates = CONFIG.raceGates.map((g) => ({ ...g }));
-    race.next = 0;
-    ctx.api.toast('STREET RACE: hit all 4 gates in order. $300 on the line.');
-  }
-
-  function startTaxi() {
-    const taxi = S.sideActivities.taxi;
-    const dests = taxiDestinations();
-    const dest = dests[taxiCycle % dests.length];
-    taxiCycle += 1;
-    const from = playerPos();
-    const dist = Math.hypot(dest.x - from.x, dest.z - from.z);
-    taxi.active = true;
-    taxi.dest = { x: dest.x, z: dest.z, label: dest.label };
-    taxi.fare = Math.max(80, 80 + Math.round(dist * 0.5));
-    ctx.api.toast(`TAXI FARE: take them to ${dest.label}. $${taxi.fare} if you make it.`);
-  }
-
-  // Position-based checks, sampled on a timer as well as in the frame
-  // update: at headless speed rAF can stall for seconds, and a 2.5 s gate
-  // window or a taxi delivery must not be missed because no frame ran.
-  function logicTick() {
+  ctx.updates.push((dt) => {
     if (S.mode !== 'playing') return;
-    const pos = playerPos();
-
-    // Mission completion: reach the job's target spot.
-    const cur = S.missions.current;
-    if (cur) {
-      const target = MISSION_TARGETS[cur.index];
-      if (target && Math.hypot(pos.x - target.x, pos.z - target.z) < 8) {
+    // Story job completion: reach the job spot (after a short grace).
+    const job = S.missions.current;
+    if (job) {
+      if (currentId !== job.id) { currentId = job.id; currentSince = performance.now(); }
+      const spot = JOB_SPOTS[job.index];
+      if (spot && performance.now() - currentSince > 3000 && near(spot.x, spot.z, 10)) {
+        const pay = job.pay;
+        const title = job.title;
         S.missions.complete();
+        currentId = null;
+        ctx.api.toast(`Job done: ${title} — +$${pay}`);
+        if (S.banterDirector) S.banterDirector.pickup();
       }
+    } else {
+      currentId = null;
     }
 
-    // Race gates, strictly in order. (The start pad IS the final gate's
-    // spot, so a tolerant scan would win the race the moment it starts.)
+    // Street race: T at the start pad.
     const race = S.sideActivities.race;
-    if (race.active && race.gates.length > 0) {
+    if (!race.active && S.car && input.wasPressed('KeyT') && near(CONFIG.racePad.x, CONFIG.racePad.z, CONFIG.racePad.radius)) {
+      race.active = true;
+      race.gates = CONFIG.raceGates.map((g) => ({ ...g }));
+      race.next = 0;
+      ctx.api.toast('Street race started — hit all 4 gates in order!');
+    } else if (race.active && S.car) {
       const gate = race.gates[race.next];
-      if (gate && Math.hypot(pos.x - gate.x, pos.z - gate.z) < 10) {
+      if (gate && Math.hypot(S.car.pos.x - gate.x, S.car.pos.z - gate.z) <= 10) {
         race.next += 1;
-        ctx.api.toast(`GATE ${race.next}/4`);
+        ctx.api.toast(`Gate ${race.next}/4!`);
         if (race.next >= race.gates.length) {
           race.active = false;
-          race.gates = [];
           race.next = 0;
           S.stats.racesWon += 1;
           S.cash += CONFIG.racePad.prize;
-          ctx.api.toast(`RACE WON! +$${CONFIG.racePad.prize}`);
+          ctx.api.toast(`Race won! +$${CONFIG.racePad.prize}`);
           if (S.banterDirector) S.banterDirector.raceWin();
         }
       }
     }
 
-    // Taxi delivery.
+    // Taxi: Y at the stand.
     const taxi = S.sideActivities.taxi;
-    if (taxi.active && taxi.dest) {
-      if (Math.hypot(pos.x - taxi.dest.x, pos.z - taxi.dest.z) < 8) {
-        S.stats.faresDone += 1;
-        S.cash += taxi.fare;
-        ctx.api.toast(`FARE DONE: +$${taxi.fare}`);
+    if (!taxi.active && S.car && input.wasPressed('KeyY') && near(CONFIG.taxiStand.x, CONFIG.taxiStand.z, CONFIG.taxiStand.radius)) {
+      const dest = CONFIG.taxiDests[S.stats.faresDone % CONFIG.taxiDests.length];
+      taxi.active = true;
+      taxi.dest = { x: dest.x, z: dest.z, name: dest.name };
+      taxi.fare = 120;
+      ctx.api.toast(`Taxi fare: take them to ${dest.name}. Fare $${taxi.fare}.`);
+    } else if (taxi.active && S.car && taxi.dest) {
+      if (Math.hypot(S.car.pos.x - taxi.dest.x, S.car.pos.z - taxi.dest.z) <= 10) {
+        const fare = taxi.fare;
         taxi.active = false;
         taxi.dest = null;
-        taxi.fare = 0;
+        S.stats.faresDone += 1;
+        S.cash += fare;
+        ctx.api.toast(`Fare delivered! +$${fare}`);
       }
     }
-  }
-
-  ctx.updates.push((_dt) => {
-    if (S.mode !== 'playing') return;
-    const pos = playerPos();
-
-    // T: street race at the start pad.
-    if (input.wasPressed('KeyT') && !S.sideActivities.race.active) {
-      const pad = CONFIG.racePad;
-      if (Math.hypot(pos.x - pad.x, pos.z - pad.z) <= pad.radius + 2) {
-        startRace();
-      }
-    }
-
-    // Y: taxi fare at the stand.
-    if (input.wasPressed('KeyY') && !S.sideActivities.taxi.active) {
-      const stand = CONFIG.taxiStand;
-      if (Math.hypot(pos.x - stand.x, pos.z - stand.z) <= stand.radius + 2) {
-        startTaxi();
-      }
-    }
-
-    logicTick();
   });
-  setInterval(logicTick, 500);
-
-  return { startRace, startTaxi, MISSION_TARGETS };
+  ctx.missionsReady = true;
 }
-
-export default init;

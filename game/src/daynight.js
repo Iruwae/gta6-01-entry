@@ -1,46 +1,30 @@
-// SOLMAR BAY — day/night progression: phase, night ramp, sun, sky, lights.
-import * as THREE from '../vendor/three.module.min.js';
+// SOLMAR BAY — day/night progression helpers. The boot hub runs the
+// per-frame step; this module owns the phase math and the sun/sky tuning.
 import { CONFIG } from './config.js';
 
-export function init(ctx) {
-  const S = ctx.state;
-
-  function update(dt) {
-    // Phase from the clock: 18:28 + S.time minutes.
-    let target = 0;
-    let phase = 'SUNSET';
-    if (S.time >= CONFIG.nightAt) {
-      target = 1;
-      phase = 'NIGHT';
-    } else if (S.time >= CONFIG.duskAt) {
-      target = (S.time - CONFIG.duskAt) / (CONFIG.nightAt - CONFIG.duskAt);
-      phase = 'DUSK';
-    }
-    S.dayNight.phase = phase;
-    const night = S.dayNight.night;
-    // Ease toward the target at 0.6 per game-second, never overshooting.
-    S.dayNight.night = target > night
-      ? Math.min(target, night + 0.6 * dt)
-      : Math.max(target, night - 0.6 * dt);
-
-    const n = S.dayNight.night;
-    if (S.sunLight) {
-      S.sunLight.intensity = 2.2 - n * 1.85;
-      S.sunLight.color.set(n > 0.6 ? 0x8fb4ff : 0xffb347);
-    }
-    if (S.skyDome) {
-      S.skyDome.material.uniforms.uNight.value = n;
-    }
-    if (ctx.windowMats) {
-      for (const m of ctx.windowMats) m.emissiveIntensity = n * 0.95;
-    }
-    if (ctx.streetlightMats) {
-      for (const m of ctx.streetlightMats) m.emissiveIntensity = n * 1.6;
-    }
+export function phaseFor(timeMinutes) {
+  if (timeMinutes >= CONFIG.nightAt) return { phase: 'NIGHT', target: 1 };
+  if (timeMinutes >= CONFIG.duskAt) {
+    return { phase: 'DUSK', target: (timeMinutes - CONFIG.duskAt) / (CONFIG.nightAt - CONFIG.duskAt) };
   }
-
-  ctx.daynightUpdate = update;
-  return { update };
+  return { phase: 'SUNSET', target: 0 };
 }
 
-export default init;
+export function sunIntensity(night) {
+  return 2.2 - night * 1.85;
+}
+
+export function init(ctx) {
+  ctx.daynight = { phaseFor, sunIntensity };
+  ctx.updates.push(() => {
+    // Mirror of the boot hub's step (idempotent): keep phase + night in
+    // sync even if the hub's copy is ever skipped for a frame.
+    const S = ctx.state;
+    const { phase, target } = phaseFor(S.time);
+    S.dayNight.phase = phase;
+    const step = 0.6 * 0.016;
+    if (S.dayNight.night < target) S.dayNight.night = Math.min(target, S.dayNight.night + step);
+    else if (S.dayNight.night > target) S.dayNight.night = Math.max(target, S.dayNight.night - step);
+  });
+  ctx.daynightReady = true;
+}

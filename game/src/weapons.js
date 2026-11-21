@@ -1,56 +1,47 @@
-// SOLMAR BAY — the four weapon slots: fire (mouse), reload (R), switch (1–4).
+// SOLMAR BAY — the four weapon slots. Pistol always available; the rest
+// unlock as jobs are done. Mouse fires, R reloads (atomic commit on the
+// timer), 1-4 switch (switching sets the mag to the new weapon's magazine).
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const S = ctx.state;
-  const input = ctx.input;
-  const player = S.player;
-
+  const { state: S, input } = ctx;
   ctx.updates.push((dt) => {
     if (S.mode !== 'playing') return;
-    // 1–4: switch weapon (the loadout setter enforces the unlock gate).
+    const p = S.player;
+    // Switch weapons 1-4 (the loadout setter enforces the unlock gate).
     for (let i = 0; i < 4; i++) {
-      if (input.wasPressed('Digit' + (i + 1)) || input.wasPressed('Numpad' + (i + 1))) {
-        const before = player.loadout.equipped;
-        player.loadout.equip(i);
-        if (player.loadout.equipped !== before) {
-          player.reloading = false;
-          player.reloadT = 0;
-          ctx.api.toast(`${player.loadout.current().def.name} ready.`);
-        } else if (player.loadout.slots[i].def.unlock > S.missionIndex) {
-          ctx.api.toast(`${player.loadout.slots[i].def.name} unlocks after job ${player.loadout.slots[i].def.unlock}.`);
+      if (input.wasPressed(`Digit${i + 1}`)) {
+        const before = p.loadout.equipped;
+        p.loadout.equip(i);
+        if (p.loadout.equipped !== before) {
+          p.reloading = false;
+          p.reloadT = 0;
+          ctx.api.toast(`${p.loadout.current().def.name} ready.`);
         }
       }
     }
-    // R: reload the current weapon.
-    if (input.wasPressed('KeyR') && !player.reloading) {
-      const slot = player.loadout.current();
+    // Reload on R.
+    if (input.wasPressed('KeyR') && !p.reloading) {
+      const slot = p.loadout.current();
       if (slot.mag < slot.def.mag) {
-        player.reloading = true;
-        player.reloadT = slot.def.reload;
-        ctx.api.audio('reload');
+        p.reloading = true;
+        p.reloadT = slot.def.reload;
+        ctx.api.audio.reload();
       }
     }
-    // Mouse held: fire.
-    if (input.mouse.down && !player.reloading && player.fireT <= 0) {
-      const slot = player.loadout.current();
+    // Fire while the mouse is held.
+    if (input.mouse.down && !p.reloading && p.fireT <= 0) {
+      const slot = p.loadout.current();
       if (slot.mag > 0) {
         slot.mag -= 1;
-        player.fireT = slot.def.interval;
-        ctx.api.audio('shot');
+        p.fireT = slot.def.interval;
+        ctx.api.audio.shot(slot.def.name);
         ctx.api.flash(60);
-        // Tiny heat for making noise in public.
-        if (S.wanted < 5) S.heatDirector.add(0.4);
       } else {
-        player.fireT = 0.25;
-        ctx.api.audio('dry');
+        p.fireT = 0.25;
+        ctx.api.audio.click();
       }
     }
-    void dt;
-    void CONFIG;
   });
-
-  return {};
+  ctx.weaponsReady = true;
 }
-
-export default init;

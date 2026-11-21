@@ -1,21 +1,18 @@
-// SOLMAR BAY — safehouse: H rests at the motel, full health, heat cools.
+// SOLMAR BAY — the safehouse (motel). H rests there: full health, and
+// the heat cools down by 40. Only works at the safehouse door.
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const S = ctx.state;
-  const input = ctx.input;
-
+  const { state: S, input } = ctx;
   ctx.updates.push(() => {
     if (S.mode !== 'playing') return;
     if (!input.wasPressed('KeyH')) return;
     const d = Math.hypot(S.player.pos.x - CONFIG.safehouse.x, S.player.pos.z - CONFIG.safehouse.z);
-    if (d > CONFIG.safehouse.radius + 2) return;
-    S.player.health = CONFIG.player.maxHealth;
-    S.heat = Math.max(0, S.heat - CONFIG.safehouse.heatCool);
-    ctx.api.toast('SAFEHOUSE: slept it off. Full health, heat cooling down.');
+    if (d <= CONFIG.safehouse.radius) {
+      S.player.health = 100;
+      S.heatDirector.cool(40);
+      ctx.api.toast('Rested at the safehouse. Health full, heat cooling off.');
+    }
   });
-
-  return {};
+  ctx.safehouseReady = true;
 }
-
-export default init;

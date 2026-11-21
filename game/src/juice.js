@@ -1,36 +1,31 @@
-// SOLMAR BAY — game feel: screen shake, hit flashes, toast helper.
-// A toast is only replaced by a newer toast (the boot hub owns showToast).
+// SOLMAR BAY — game feel: screen shake (CSS translate on the game
+// canvas), hit flashes (the #flash overlay) and the toast helper other
+// modules call. A toast is only replaced by a newer toast.
 export function init(ctx) {
-  const dom = ctx.dom;
-  let shakeAmount = 0;
+  const { dom } = ctx;
+  let shakeT = 0;
+  let shakeMag = 0;
 
-  ctx.api.flash = (opacity = 80) => {
-    const el = dom.flash;
-    if (!el) return;
-    el.style.opacity = String(Math.min(1, opacity / 100));
-    setTimeout(() => {
-      el.style.opacity = '0';
-    }, 90);
+  ctx.api.shake = function shake(mag, dur) {
+    shakeMag = Math.max(shakeMag, mag || 6);
+    shakeT = Math.max(shakeT, dur || 0.3);
   };
-
-  ctx.api.shake = (amount) => {
-    shakeAmount = Math.max(shakeAmount, amount);
+  ctx.api.flash = function flash(strength) {
+    if (!dom.flash) return;
+    dom.flash.style.opacity = String(Math.min(0.6, (strength || 80) / 200));
+    setTimeout(() => { dom.flash.style.opacity = '0'; }, 90);
   };
 
   ctx.updates.push((dt) => {
-    const canvas = ctx.renderer.domElement;
-    if (shakeAmount > 0.2) {
-      const x = (Math.random() - 0.5) * shakeAmount;
-      const y = (Math.random() - 0.5) * shakeAmount;
-      canvas.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
-      shakeAmount *= Math.max(0, 1 - 6 * dt);
-    } else if (canvas.style.transform) {
-      canvas.style.transform = '';
-      shakeAmount = 0;
+    if (shakeT > 0) {
+      shakeT -= dt;
+      const el = ctx.renderer.domElement;
+      if (el) {
+        const m = shakeMag * (shakeT > 0 ? 1 : 0);
+        el.style.transform = `translate(${(Math.random() - 0.5) * m}px, ${(Math.random() - 0.5) * m}px)`;
+        if (shakeT <= 0) { el.style.transform = ''; shakeMag = 0; }
+      }
     }
   });
-
-  return {};
+  ctx.juiceReady = true;
 }
-
-export default init;
