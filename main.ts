@@ -99,9 +99,14 @@ function main(): void {
     fail('refusing to use an unsafe output directory: ' + resolvedOut);
   }
 
-  // Mirror the entry into a clean output folder.
-  rmSync(resolvedOut, { recursive: true, force: true });
+  // Mirror the entry into a clean output folder. Only clear the
+  // CONTENTS of the output dir — never remove the dir itself, because
+  // the grader mounts /output as a mount point and rmSync on it fails
+  // EBUSY ("Device or resource busy") -> exit 1.
   mkdirSync(resolvedOut, { recursive: true });
+  for (const name of readdirSync(resolvedOut)) {
+    rmSync(join(resolvedOut, name), { recursive: true, force: true });
+  }
   cpSync(gameDir, join(resolvedOut, 'game'), { recursive: true });
   cpSync(shotsDir, join(resolvedOut, 'screenshots'), { recursive: true });
 
@@ -128,7 +133,7 @@ function main(): void {
   const dossier: Dossier = {
     competition: 'gta6-01',
     entry: 'SOLMAR BAY',
-    round: 9,
+    round: 10,
     blurb: BLURB,
     cover: coverFile ? coverFile.path : null,
     game: gameFiles,
