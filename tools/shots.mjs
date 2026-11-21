@@ -1,24 +1,26 @@
-// SOLMAR BAY — screenshot shoot for gta6-01 round 14.
-// Spawns the repo's own serve.ts on a scratch port (8911), drives the game
-// in headless Chrome through window.__solmar, stages four scenes and
-// screenshots each at 1280x720 JPEG, stepping quality down (72, 55, 40, 28)
-// until the file is under 256 KiB. Run from anywhere — paths resolve from
-// this file's own location.
+// SOLMAR BAY — screenshot shoot. Run from anywhere (paths resolve from
+// this file). Spawns the repo's own serve.ts on scratch port 8911, drives
+// the game in headless Chrome through window.__solmar, stages four scenes
+// and screenshots each at 1280x720 JPEG, stepping quality down
+// (72, 55, 40, 28) until the file is under 256 KiB.
+//   21-sunset-chase.jpg    police chase downtown, 4-5 stars, heli overhead
+//   22-garage-briefing.jpg mission 1 briefing at the garage (LENA CRUZ)
+//   23-street-race.jpg     mid-race at the gates
+//   24-night-ride.jpg      night ride on the bike downtown
 import { spawn } from 'node:child_process';
-import { writeFileSync, existsSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { statSync, mkdirSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { stageChaseShot } from './chase-shot.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const GAME = join(ROOT, 'game');
 const SHOTS_DIR = join(ROOT, 'screenshots');
 const PORT = 8911;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const qaToolsPkg = process.env.HOME + '/workspace/makefun/qa-tools/node_modules/puppeteer-core/package.json';
-const puppeteer = createRequire(existsSync(qaToolsPkg) ? qaToolsPkg : import.meta.url)('puppeteer-core');
+const puppeteer = createRequire(qaToolsPkg)('puppeteer-core');
+const { stageChaseShot } = await import('./chase-shot.mjs');
 
 async function holdKey(page, code, ms = 2000) {
   await page.keyboard.down(code);
@@ -39,16 +41,39 @@ async function holdKeyUntil(page, code, checkFn, timeoutMs = 30000) {
   return await checkFn();
 }
 
-async function shoot(page, file, note) {
-  for (const quality of [72, 55, 40, 28]) {
-    const buf = await page.screenshot({ type: 'jpeg', quality });
-    if (buf.length <= 262144 || quality === 28) {
-      writeFileSync(join(SHOTS_DIR, file), buf);
-      console.log(`shot ${file}: ${buf.length} bytes @ q${quality} — ${note}`);
-      return buf.length;
-    }
+async function waitFor(page, fn, timeoutMs = 60000, pollMs = 2000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (await page.evaluate(fn)) return true;
+    await sleep(pollMs);
   }
-  return 0;
+  return await page.evaluate(fn);
+}
+
+async function closeDialogue(page) {
+  // The m1 briefing auto-starts at spawn; click through it until the box
+  // hides so it does not sit over every other scene.
+  for (let i = 0; i < 3; i++) {
+    const visible = await page.evaluate(() => {
+      const el = document.getElementById('dialogue');
+      return el && !el.classList.contains('hidden');
+    });
+    if (!visible) return;
+    await page.click('#dialogue');
+    await sleep(800);
+  }
+}
+
+async function shoot(page, file) {
+  mkdirSync(SHOTS_DIR, { recursive: true });
+  const path = join(SHOTS_DIR, file);
+  for (const q of [72, 55, 40, 28]) {
+    await page.screenshot({ path, type: 'jpeg', quality: q });
+    const size = statSync(path).size;
+    console.log(`${file}: quality ${q} -> ${size} bytes`);
+    if (size < 262144) return { file, bytes: size };
+  }
+  return { file, bytes: statSync(path).size };
 }
 
 async function main() {
@@ -57,94 +82,96 @@ async function main() {
     env: { ...process.env, PORT: String(PORT) },
     stdio: 'ignore',
   });
-  await sleep(1500);
-  let browser;
   try {
-    browser = await puppeteer.launch({
+    // Wait for the server to answer.
+    for (let i = 0; i < 30; i++) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${PORT}/index.html`);
+        if (res.ok) break;
+      } catch (e) { /* not up yet */ }
+      await sleep(500);
+    }
+
+    const browser = await puppeteer.launch({
       executablePath: process.env.HOME + '/.cache/ms-playwright/chromium_headless_shell-1148/chrome-linux/headless_shell',
       headless: true,
       args: ['--no-sandbox', '--disable-dev-shm-usage', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--window-size=1280,720'],
       defaultViewport: { width: 1280, height: 720 },
     });
-    const page = await browser.newPage();
-    const errors = [];
-    page.on('pageerror', (e) => errors.push(String(e)));
-    await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'networkidle0', timeout: 30000 });
-    await sleep(2500);
-    await page.evaluate(() => { localStorage.clear(); });
-    await page.reload({ waitUntil: 'load', timeout: 60000 });
-    await sleep(2000);
-
-    // (1) Police chase downtown at 4-5 stars with the helicopter overhead.
-    const chase = await stageChaseShot(page);
-    console.log('chase staged:', JSON.stringify(chase));
-    await sleep(1000);
-    const b1 = await shoot(page, '17-sunset-chase.jpg', 'Police chase downtown at 4 stars, helicopter overhead, roster live');
-
-    // Cool off and reset for the briefing.
-    await page.evaluate(() => {
-      const S = window.__solmar.S;
-      S.heat = 0;
-      S.missions.abandon();
-      S.missionIndex = 0;
-      S.player.pos.set(-90, 0, -66);
-    });
-    await sleep(3000);
-    // (2) Mission 1 briefing at the garage — dialogue open, LENA CRUZ.
-    for (let i = 0; i < 10; i++) {
-      const ok = await page.evaluate(() => {
-        const el = document.getElementById('dialogue');
-        return el && !el.classList.contains('hidden') && (document.getElementById('dlg-name') || {}).textContent === 'LENA CRUZ';
-      });
-      if (ok) break;
+    try {
+      const page = await browser.newPage();
+      page.on('pageerror', (e) => console.log('PAGEERROR: ' + String(e)));
+      await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'networkidle0', timeout: 30000 });
       await sleep(2000);
+      await page.evaluate(() => { localStorage.clear(); });
+      await page.reload({ waitUntil: 'load', timeout: 60000 });
+      await sleep(2000);
+      await page.click('#btn-new');
+      await sleep(1500);
+      await holdKey(page, 'KeyX'); // skip the intro cutscene
+      await sleep(1000);
+      await closeDialogue(page); // m1 auto-started at spawn; hide it
+
+      // (1) Police chase downtown, 4-5 stars, heli overhead.
+      const chase = await stageChaseShot(page);
+      console.log('chase staged:', JSON.stringify(chase));
+      await sleep(3000);
+      const s1 = await shoot(page, '21-sunset-chase.jpg');
+
+      // (2) Mission 1 briefing at the garage — dialogue open, LENA CRUZ.
+      await page.evaluate(() => { window.__solmar.S.heat = 0; });
+      await waitFor(page, () => window.__solmar.S.cops.length === 0 && window.__solmar.S.cars.filter((c) => c.aiPolice).length === 0, 60000);
+      await page.evaluate(() => { window.__solmar.S.player.pos.set(-90, 0, -66); });
+      // Re-show the briefing (it was closed for the chase shot).
+      await page.evaluate(() => { window.__solmar.S.missions.start(0); });
+      await waitFor(page, () => {
+        const el = document.getElementById('dialogue');
+        return el && !el.classList.contains('hidden') && document.getElementById('dlg-name').textContent === 'LENA CRUZ';
+      }, 60000);
+      // Step out from the garage wall so the building reads in frame:
+      // stand south-east of the garage, facing back toward it.
+      await page.evaluate(() => {
+        const S = window.__solmar.S;
+        S.player.pos.set(-78, 0, -48);
+        S.player.heading = -2.36;
+      });
+      await sleep(4000);
+      const s2 = await shoot(page, '22-garage-briefing.jpg');
+      await closeDialogue(page);
+
+      // (3) Street race — enter the parked sport car, roll to the pad, T.
+      await page.evaluate(() => { window.__solmar.S.player.pos.set(-102, 0, -64); });
+      await holdKeyUntil(page, 'KeyE', async () => (await page.evaluate(() => !!window.__solmar.S.car)), 20000);
+      await page.evaluate(() => {
+        const S = window.__solmar.S;
+        if (S.car) S.car.pos.set(-60, 0, -60);
+      });
+      await holdKeyUntil(page, 'KeyT', async () => (await page.evaluate(() => window.__solmar.S.sideActivities.race.active)) === true, 30000);
+      await page.evaluate(() => {
+        const S = window.__solmar.S;
+        if (S.car) { S.car.pos.set(20, 0, -60); S.car.heading = Math.PI / 2; }
+      });
+      await sleep(3000);
+      const s3 = await shoot(page, '23-street-race.jpg');
+
+      // (4) Night ride on the bike downtown.
+      await holdKeyUntil(page, 'KeyE', async () => !(await page.evaluate(() => !!window.__solmar.S.car)), 20000);
+      await page.evaluate(() => { window.__solmar.S.player.pos.set(-88, 0, -64); });
+      await holdKeyUntil(page, 'KeyE', async () => (await page.evaluate(() => !!window.__solmar.S.car)), 20000);
+      await page.evaluate(() => {
+        const S = window.__solmar.S;
+        S.time = 200;
+        if (S.car) S.car.pos.set(0, 0, 0);
+      });
+      await waitFor(page, () => window.__solmar.S.dayNight.night > 0.5, 90000, 5000);
+      await sleep(3000);
+      const s4 = await shoot(page, '24-night-ride.jpg');
+
+      console.log(JSON.stringify([s1, s2, s3, s4], null, 2));
+    } finally {
+      await browser.close();
     }
-    const b2 = await shoot(page, '18-garage-briefing.jpg', 'Mission 1 briefing at the garage, Lena Cruz on the dialogue box');
-
-    // Advance past the briefing, then take the sport car to the race pad.
-    await page.click('#dialogue').catch(() => {});
-    await sleep(800);
-    await page.click('#dialogue').catch(() => {});
-    await page.evaluate(() => { window.__solmar.S.player.pos.set(-102, 0, -64); });
-    await holdKeyUntil(page, 'KeyE', async () => (await page.evaluate(() => !!window.__solmar.S.car)), 20000);
-    await page.evaluate(() => {
-      const S = window.__solmar.S;
-      if (S.car) S.car.pos.set(-60, 0, -60);
-    });
-    await holdKeyUntil(page, 'KeyT', async () => (await page.evaluate(() => window.__solmar.S.sideActivities.race.active)) === true, 30000);
-    await page.evaluate(() => {
-      const S = window.__solmar.S;
-      if (S.car) S.car.pos.set(30, 0, -60);
-    });
-    await sleep(2000);
-    // (3) Street race, mid-race between the gates.
-    const b3 = await shoot(page, '19-street-race.jpg', 'Street race mid-run in the sport car, gates ahead, sunset light');
-
-    // (4) Night ride on the bike downtown.
-    await holdKeyUntil(page, 'KeyE', async () => !(await page.evaluate(() => !!window.__solmar.S.car)), 20000);
-    await page.evaluate(() => {
-      const S = window.__solmar.S;
-      S.sideActivities.race.active = false;
-      S.player.pos.set(-88, 0, -64);
-    });
-    await holdKeyUntil(page, 'KeyE', async () => (await page.evaluate(() => !!window.__solmar.S.car)), 20000);
-    await page.evaluate(() => {
-      const S = window.__solmar.S;
-      S.time = 200; // 21:48, night
-      if (S.car) S.car.pos.set(0, 0, 30);
-    });
-    for (let i = 0; i < 24; i++) {
-      const night = await page.evaluate(() => window.__solmar.S.dayNight.night);
-      if (night > 0.5) break;
-      await sleep(5000);
-    }
-    await sleep(1500);
-    const b4 = await shoot(page, '20-night-ride.jpg', 'Night ride on the bike downtown, neon streets, minimap live');
-
-    if (errors.length) console.log('page errors during shoot:', errors.join(' | '));
-    console.log(JSON.stringify({ b1, b2, b3, b4 }));
   } finally {
-    if (browser) await browser.close();
     server.kill();
   }
 }

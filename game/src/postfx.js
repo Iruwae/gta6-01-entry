@@ -1,24 +1,12 @@
 // SOLMAR BAY — post-processing grade: filmic tone mapping whose exposure
-// eases down after dark, the warm sunset band fading out once night lands,
-// the vignette deepening at night.
-import * as THREE from '../vendor/three.module.min.js';
-
+// eases down after dark, the warm sunset band fading out once night
+// lands, the vignette deepening at night.
 export function init(ctx) {
-  const { renderer, dom } = ctx;
-  if (renderer) {
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
-  }
-  ctx.updates.push((dt) => {
-    const n = ctx.state.dayNight.night;
-    if (renderer) {
-      const target = 1.05 - n * 0.35;
-      renderer.toneMappingExposure += (target - renderer.toneMappingExposure) * Math.min(1, dt * 2);
-    }
-    const band = dom['sunset-band'];
-    if (band) band.style.opacity = String(Math.max(0, 0.85 - n));
-    const vig = dom.vignette;
-    if (vig) vig.style.opacity = String(0.55 + n * 0.45);
+  const { renderer, state: S, dom } = ctx;
+  ctx.updates.push(() => {
+    const night = S.dayNight.night;
+    renderer.toneMappingExposure = 1.1 - night * 0.35;
+    if (dom['sunset-band']) dom['sunset-band'].style.opacity = String(1 - night);
+    if (dom.vignette) dom.vignette.style.opacity = String(0.6 + night * 0.4);
   });
-  ctx.postfxReady = true;
 }

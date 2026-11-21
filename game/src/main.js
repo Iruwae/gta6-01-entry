@@ -1,109 +1,88 @@
 // SOLMAR BAY — boot hub. The ONLY file that imports the other modules.
-// Wires the renderer, state, HUD, menus, cutscene, save/load and the frame
-// loop, then loads every feature module in order.
+// Owns the renderer, the look, menus, HUD, save/load and the frame loop.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { createInput } from './input.js';
 
 const $ = (id) => document.getElementById(id);
-const IDS = ['game-container', 'sunset-band', 'vignette', 'flash', 'hud', 'cash', 'district', 'day-time', 'objective', 'respect-line', 'respect-num', 'respect-rank', 'wanted', 'radio', 'radio-station', 'radio-track', 'minimap', 'roster', 'roster-code', 'roster-rows', 'health-bar', 'health-fill', 'weapons', 'speedo', 'speed-num', 'speed-gear', 'speed-car', 'toast', 'dialogue', 'dlg-portrait', 'dlg-name', 'dlg-text', 'cutscene', 'cutscene-text', 'menu', 'pause-menu', 'mission-select', 'mission-list', 'btn-close-jobs', 'shop-panel', 'shop-items', 'btn-close-shop', 'garage-panel', 'garage-list', 'btn-close-garage', 'btn-new', 'btn-resume', 'btn-missions'];
 const dom = {};
-for (const id of IDS) dom[id] = $(id);
+[
+  'game-container', 'sunset-band', 'vignette', 'flash', 'hud', 'cash',
+  'district', 'day-time', 'objective', 'respect-line', 'respect-num',
+  'respect-rank', 'wanted', 'radio', 'radio-station', 'radio-track',
+  'minimap', 'roster', 'roster-code', 'roster-rows', 'health-bar',
+  'health-fill', 'weapons', 'speedo', 'speed-num', 'speed-gear',
+  'speed-car', 'toast', 'dialogue', 'dlg-portrait', 'dlg-name',
+  'dlg-text', 'cutscene', 'cutscene-text', 'menu', 'pause-menu',
+  'btn-new', 'btn-resume', 'btn-missions', 'btn-close-jobs',
+  'mission-select', 'mission-list', 'shop-panel', 'shop-items',
+  'btn-close-shop', 'garage-panel', 'garage-list', 'btn-close-garage',
+].forEach((id) => { dom[id] = $(id); });
 
 function show(el) { if (el) el.classList.remove('hidden'); }
 function hide(el) { if (el) el.classList.add('hidden'); }
 
-// ---------- Toast ----------
+// ---- toast: only a newer toast replaces the current one
 let toastToken = 0;
 function showToast(msg) {
-  const el = dom.toast;
-  if (!el) return;
   const my = ++toastToken;
-  el.textContent = msg;
-  el.classList.remove('hidden');
-  setTimeout(() => { if (my === toastToken) el.classList.add('hidden'); }, 4500);
+  dom.toast.textContent = msg;
+  show(dom.toast);
+  setTimeout(() => { if (my === toastToken) hide(dom.toast); }, 4500);
 }
 
-// ---------- Dialogue ----------
-let dlgQueue = [];
+// ---- dialogue queue
+const dialogueQueue = [];
 function portraitFor(name) {
-  return (name || '?').split(' ').map((p) => p[0] || '').join('').slice(0, 2).toUpperCase();
+  const initials = name.split(' ').map((w) => w[0]).join('').slice(0, 2);
+  let color = '#5fb4c9';
+  if (name === 'LENA CRUZ') color = '#ff7a9e';
+  else if (name === 'VIC TORRES') color = '#ffb347';
+  return { initials, color };
 }
-function colorFor(name) {
-  if (name === 'LENA CRUZ') return '#ff7a9e';
-  if (name === 'VIC TORRES') return '#ffb347';
-  return '#5fb4c9';
-}
-function renderDialogue(line) {
+function renderDialogueLine() {
+  const line = dialogueQueue[0];
   if (!line) { hide(dom.dialogue); return; }
+  const p = portraitFor(line.name);
+  dom['dlg-portrait'].textContent = p.initials;
+  dom['dlg-portrait'].style.background = p.color;
+  dom['dlg-name'].textContent = line.name;
+  dom['dlg-text'].textContent = line.text;
   show(dom.dialogue);
-  if (dom['dlg-portrait']) {
-    dom['dlg-portrait'].textContent = portraitFor(line.name);
-    dom['dlg-portrait'].style.background = colorFor(line.name);
-  }
-  if (dom['dlg-name']) dom['dlg-name'].textContent = line.name;
-  if (dom['dlg-text']) dom['dlg-text'].textContent = line.text;
 }
 function showDialogue(lines) {
-  dlgQueue = (lines || []).slice();
-  renderDialogue(dlgQueue[0] || null);
+  dialogueQueue.length = 0;
+  for (const l of lines) dialogueQueue.push(l);
+  renderDialogueLine();
 }
 function advanceDialogue() {
-  if (dlgQueue.length === 0) { hide(dom.dialogue); return; }
-  dlgQueue.shift();
-  renderDialogue(dlgQueue[0] || null);
+  if (dialogueQueue.length === 0) return;
+  dialogueQueue.shift();
+  renderDialogueLine();
 }
 
-// ---------- Renderer / scene ----------
-const container = dom['game-container'] || document.body;
+// ---- renderer / scene / camera
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setSize(container.clientWidth || 1280, container.clientHeight || 720);
-container.appendChild(renderer.domElement);
+renderer.setSize(dom['game-container'].clientWidth || window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+dom['game-container'].appendChild(renderer.domElement);
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x2a1a3a);
 scene.fog = new THREE.Fog(0x2a1a3a, 120, 520);
-const camera = new THREE.PerspectiveCamera(62, 1280 / 720, 0.1, 1200);
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1200);
 camera.position.set(-40, 26, 90);
-
-// Look: warm directional sun, ambient + hemisphere, shader sky dome, ground.
-const sun = new THREE.DirectionalLight(0xffb347, 2.2);
-sun.position.set(70, 38, -60);
-scene.add(sun);
-scene.add(new THREE.AmbientLight(0x664466, 0.6));
-scene.add(new THREE.HemisphereLight(0xff9a5c, 0x2a1a3a, 0.5));
-const skyDome = new THREE.Mesh(
-  new THREE.SphereGeometry(700, 32, 15),
-  new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: { uNight: { value: 0 } },
-    vertexShader: 'varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: 'uniform float uNight; varying vec3 vPos; void main(){ float h = normalize(vPos).y; vec3 day = mix(vec3(1.0,0.55,0.25), vec3(0.35,0.15,0.45), smoothstep(0.0,0.6,h)); vec3 night = mix(vec3(0.02,0.03,0.12), vec3(0.05,0.07,0.20), smoothstep(0.0,0.6,h)); gl_FragColor = vec4(mix(day, night, uNight), 1.0); }',
-  }),
-);
-skyDome.frustumCulled = false;
-scene.add(skyDome);
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(900, 900),
-  new THREE.MeshStandardMaterial({ color: 0x241a2e, roughness: 1 }),
-);
-ground.rotation.x = -Math.PI / 2;
-ground.position.y = -0.05;
-scene.add(ground);
-
 window.addEventListener('resize', () => {
-  const w = container.clientWidth || 1280;
-  const h = container.clientHeight || 720;
-  camera.aspect = w / h;
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
+  renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ---------- State / input / ctx ----------
+// ---- state + input + shared context
 const S = createState({ toast: showToast });
-S.sunLight = sun;
-S.skyDome = skyDome;
 const input = createInput();
 input.attach();
 
@@ -111,53 +90,72 @@ const api = {
   toast: showToast,
   showDialogue,
   advanceDialogue,
-  renderDialogue,
-  flash(strength) {
-    if (!dom.flash) return;
-    dom.flash.style.opacity = String(Math.min(0.6, (strength || 80) / 200));
-    setTimeout(() => { dom.flash.style.opacity = '0'; }, 90);
+  flash() {
+    dom.flash.style.opacity = '0.85';
+    setTimeout(() => { dom.flash.style.opacity = '0'; }, 70);
   },
-  shake() {},
-  audio: {
-    blip() {}, click() {}, shot() {}, reload() {}, cash() {},
-  },
-  openShop() {},
-  paintRoster,
-  paintMinimap,
 };
 const ctx = { THREE, scene, camera, renderer, config: CONFIG, state: S, dom, updates: [], api, input };
 
-// ---------- Mission briefing fallback (m1 / m5) ----------
-const rawStart = S.missions.start.bind(S.missions);
-S.missions.start = function wrappedStart(idOrIndex) {
-  const job = rawStart(idOrIndex);
-  if (!job) return job;
-  if (job.id === 'm1') {
-    showDialogue([
-      { name: 'LENA CRUZ', text: "Vic's got work, and you're the one doing it. Meet me at the garage — we move at sunset." },
-      { name: 'MARCO SOLIS', text: 'Keep it quiet on the Strip. The package changes hands at dusk, no witnesses.' },
-    ]);
-    showToast('New job: FIRST JOB — meet Lena at the garage.');
-  } else if (job.id === 'm5') {
-    showDialogue([
-      { name: 'LENA CRUZ', text: "I'm riding with you on this one. Don't get us killed, alright?" },
-      { name: 'VIC TORRES', text: 'Hit the convoy together. Everybody walks away rich — or nobody walks away.' },
-    ]);
-    showToast('New job: CREW UP — Lena rides with you.');
-  }
-  return job;
-};
+// ---- the Sunset look, owned by the boot hub
+const sunLight = new THREE.DirectionalLight(0xffb347, 2.2);
+sunLight.position.set(70, 38, -60);
+scene.add(sunLight);
+S.sunLight = sunLight;
+scene.add(new THREE.AmbientLight(0x8a6bb0, 0.7));
+const hemi = new THREE.HemisphereLight(0xffb347, 0x2a1a3a, 0.65);
+scene.add(hemi);
 
-// ---------- Save / load / reset ----------
+// Sky dome: orange horizon through purple dusk by day, deep night blue.
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  depthWrite: false,
+  uniforms: { uNight: { value: 0 } },
+  vertexShader: `
+    varying vec3 vPos;
+    void main() {
+      vPos = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: `
+    uniform float uNight;
+    varying vec3 vPos;
+    void main() {
+      float h = normalize(vPos).y;
+      vec3 dayHorizon = vec3(1.0, 0.62, 0.25);
+      vec3 dayZenith = vec3(0.45, 0.20, 0.45);
+      vec3 nightHorizon = vec3(0.10, 0.08, 0.25);
+      vec3 nightZenith = vec3(0.02, 0.02, 0.10);
+      vec3 horizon = mix(dayHorizon, nightHorizon, uNight);
+      vec3 zenith = mix(dayZenith, nightZenith, uNight);
+      vec3 col = mix(horizon, zenith, smoothstep(-0.05, 0.65, h));
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+});
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(700, 24, 16), skyMat);
+scene.add(skyDome);
+S.skyDome = skyDome;
+
+// Dark ground plane.
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(900, 900),
+  new THREE.MeshStandardMaterial({ color: 0x352a44, roughness: 1 }),
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.05;
+scene.add(ground);
+
+// ---- save / load (localStorage, primitives only)
 const SAVE_KEY = 'solmar-save';
 function saveGame() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({
+    const data = {
       cash: S.cash, day: S.day, time: S.time, missionIndex: S.missionIndex,
       respect: S.respect, stats: { ...S.stats }, health: S.player.health,
       radioStation: S.radioStation, px: S.player.pos.x, pz: S.player.pos.z,
-      garageCars: S.garageCars,
-    }));
+      garageCars: S.garageCars.map((c) => ({ kind: c.kind, tune: { ...c.tune } })),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
   } catch (e) { /* storage unavailable: play on without saving */ }
 }
 function loadGame() {
@@ -166,27 +164,22 @@ function loadGame() {
   if (!data || typeof data !== 'object') return;
   try {
     if (typeof data.cash === 'number') S.cash = data.cash;
-    if (typeof data.day === 'number') S.day = data.day;
-    if (typeof data.time === 'number') S.time = data.time;
-    if (typeof data.missionIndex === 'number') S.missionIndex = Math.max(0, Math.min(10, data.missionIndex));
-    if (typeof data.respect === 'number') S.respect = Math.max(0, data.respect);
+    if (typeof data.day === 'number' && data.day >= 1) S.day = data.day;
+    if (typeof data.time === 'number' && data.time >= 0) S.time = data.time;
+    if (typeof data.missionIndex === 'number') S.missionIndex = Math.min(10, Math.max(0, data.missionIndex));
+    if (typeof data.respect === 'number') { S.respect = Math.max(0, data.respect); S.respectDirector.add(0, 'load'); }
     if (data.stats && typeof data.stats === 'object') {
       for (const k of ['packages', 'racesWon', 'fencesSold', 'faresDone']) {
         if (typeof data.stats[k] === 'number') S.stats[k] = data.stats[k];
       }
     }
     if (typeof data.health === 'number') S.player.health = Math.max(0, Math.min(100, data.health));
-    if (typeof data.radioStation === 'number') S.radioStation = data.radioStation % CONFIG.radio.length;
+    if (typeof data.radioStation === 'number') S.radioStation = data.radioStation % 6;
     if (typeof data.px === 'number' && typeof data.pz === 'number') S.player.pos.set(data.px, 0, data.pz);
-    if (Array.isArray(data.garageCars)) S.garageCars = data.garageCars;
-    S.respectDirector.add(0, 'load');
-  } catch (e) { /* corrupt save = fresh start */ }
+    if (Array.isArray(data.garageCars)) S.garageCars = data.garageCars.filter((c) => c && typeof c.kind === 'string');
+  } catch (e) { /* corrupt save: fresh start */ }
 }
 function resetState() {
-  for (const c of S.cars.filter((c) => c.aiPolice)) {
-    if (c.mesh) scene.remove(c.mesh);
-  }
-  if (S.heli && S.heli.mesh) scene.remove(S.heli.mesh);
   S.cash = CONFIG.startCash;
   S.day = CONFIG.startDay;
   S.time = 0;
@@ -196,20 +189,31 @@ function resetState() {
   S.heat = 0;
   S.wanted = 0;
   S.radioStation = 0;
+  S.district = 'downtown';
+  S.objective = 'Explore Solmar Bay — find work.';
+  S.dayNight = { phase: 'SUNSET', night: 0 };
+  if (S.car && S.car.mesh) scene.remove(S.car.mesh);
   S.car = null;
+  for (const c of S.cops) if (c.mesh) scene.remove(c.mesh);
   S.cops = [];
-  S.garageCars = [];
+  if (S.heli && S.heli.mesh) scene.remove(S.heli.mesh);
   S.heli = null;
   S.lastKnown = null;
+  S.garageCars = [];
   S.missions.current = null;
   S.stats = { packages: 0, racesWon: 0, fencesSold: 0, faresDone: 0 };
   S.sideActivities.taxi = { active: false, dest: null, fare: 0 };
   S.sideActivities.race = { active: false, gates: [], next: 0 };
-  S.challengesDirector._paid = [];
   S.challengesDirector.today = CONFIG.challenges.map((c) => ({ ...c }));
+  S.challengesDirector._paid = [];
   S.crew.active = false;
   if (S.crew.mesh) S.crew.mesh.visible = false;
-  S.player.pos.set(CONFIG.playerStart.x, 0, CONFIG.playerStart.z);
+  for (const p of S.packages) {
+    p.taken = false;
+    if (p.mesh) p.mesh.visible = true;
+  }
+  S.player.pos.set(-84, 0, -58);
+  S.player.vel.set(0, 0, 0);
   S.player.heading = 0;
   S.player.health = CONFIG.maxHealth;
   S.player.reloading = false;
@@ -217,19 +221,36 @@ function resetState() {
   S.player.fireT = 0;
   for (const slot of S.player.loadout.slots) slot.mag = slot.def.mag;
   S.player.loadout._equipped = 0;
-  S.dayNight = { phase: 'SUNSET', night: 0 };
-  S.district = 'downtown';
-  S.objective = CONFIG.defaultObjective;
-  for (const p of S.packages) { p.taken = false; if (p.mesh) p.mesh.visible = true; }
-  dlgQueue = [];
+  dialogueQueue.length = 0;
   hide(dom.dialogue);
 }
 
-// ---------- Cutscene / menu / pause ----------
+// ---- mission briefing fallback (m1 Lena-then-Marco, m5 Lena-then-Vic)
+const _origStart = S.missions.start.bind(S.missions);
+S.missions.start = function (idOrIndex) {
+  const job = _origStart(idOrIndex);
+  if (!job) return job;
+  if (job.id === 'm1') {
+    showDialogue([
+      { name: 'LENA CRUZ', text: 'You made it. Vic has work, and the sun is already going down — so listen fast.' },
+      { name: 'MARCO SOLIS', text: 'First job is simple. Meet the contact, take the package, do not get followed. Welcome to Solmar Bay.' },
+    ]);
+    showToast('New job: FIRST JOB — meet Lena at the garage.');
+  } else if (job.id === 'm5') {
+    showDialogue([
+      { name: 'LENA CRUZ', text: 'From here on we ride together. You drive, I watch the mirrors. Deal?' },
+      { name: 'VIC TORRES', text: 'The convoy rolls at dusk. Hit it clean, split it fair, and nobody gets hurt who does not have to.' },
+    ]);
+    showToast('New job: CREW UP — Lena rides with you.');
+  }
+  return job;
+};
+
+// ---- cutscene
 const CUTSCENE_LINES = [
-  'The sun is going down over Solmar Bay — and the city is just waking up.',
-  'Vic Torres has work. Lena Cruz has the wheel. All you need is nerve.',
-  'One sunset. Ten jobs. The whole bay is watching.',
+  'The sun hangs low over Solmar Bay, and the whole city is turning gold.',
+  'Somewhere below, Vic Torres is waiting — and Lena Cruz is already behind the wheel.',
+  'One hundred and twenty dollars. One long sunset. Make it count.',
 ];
 let cutsceneT = 0;
 let cutsceneLine = -1;
@@ -240,8 +261,6 @@ function startCutscene() {
   cutsceneLine = -1;
   show(dom.cutscene);
   show(dom.hud);
-  if (dom['cutscene-text']) dom['cutscene-text'].textContent = CUTSCENE_LINES[0];
-  cutsceneLine = 0;
 }
 function endCutscene() {
   if (!S.cutscene) return;
@@ -249,6 +268,11 @@ function endCutscene() {
   S.mode = 'playing';
   hide(dom.cutscene);
 }
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyX' && S.cutscene) endCutscene();
+});
+
+// ---- menu / pause / job board
 function startNewGame() {
   resetState();
   hide(dom.menu);
@@ -271,299 +295,288 @@ function resumeGame() {
   hide(dom['pause-menu']);
   hide(dom['mission-select']);
 }
-
-// X skips the cutscene — BOTH a keydown listener (immediate) and the
-// frame loop (held key) can end it, because at headless speed a frame
-// can span a whole key press.
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyX' && !e.repeat && S.cutscene) endCutscene();
-});
-
-// ---------- Job board ----------
 function buildJobBoard() {
-  const list = dom['mission-list'];
-  if (!list) return;
-  list.innerHTML = '';
+  dom['mission-list'].innerHTML = '';
   CONFIG.missions.forEach((m, i) => {
     const row = document.createElement('div');
     row.className = 'job-row';
     const done = i < S.missionIndex;
-    const isCurrent = S.missions.current && S.missions.current.index === i;
-    const right = done ? '✓' : isCurrent ? 'ACTIVE' : `$${m.pay}`;
-    row.innerHTML = `<span class="job-title">${m.title}</span>` +
-      `<span class="job-giver">${m.giver}</span>` +
-      `<span class="job-pay">${right}</span>` +
-      `<span class="job-desc">${m.desc}</span>`;
-    if (!done && !isCurrent && i >= S.missionIndex) {
+    const current = S.missions.current && S.missions.current.index === i;
+    const right = done ? '<span class="job-done">✓ DONE</span>'
+      : current ? '<span class="job-pay">ACTIVE</span>'
+      : `<span class="job-pay">$${m.pay}</span>`;
+    row.innerHTML = `<div><div class="job-title">${m.title}</div><div class="job-giver">${m.giver} — ${m.desc}</div></div>${right}`;
+    if (!done && !current) {
       row.addEventListener('click', () => {
         S.missions.start(i);
         hide(dom['mission-select']);
         resumeGame();
       });
     }
-    list.appendChild(row);
+    dom['mission-list'].appendChild(row);
   });
 }
+dom['btn-new'].addEventListener('click', startNewGame);
+dom['btn-resume'].addEventListener('click', resumeGame);
+dom['btn-missions'].addEventListener('click', () => { buildJobBoard(); show(dom['mission-select']); });
+dom['btn-close-jobs'].addEventListener('click', () => hide(dom['mission-select']));
+dom['btn-close-shop'].addEventListener('click', () => hide(dom['shop-panel']));
+dom['btn-close-garage'].addEventListener('click', () => hide(dom['garage-panel']));
+dom.dialogue.addEventListener('click', advanceDialogue);
+dom.cutscene.addEventListener('click', () => endCutscene());
 
-// ---------- Buttons ----------
-if (dom['btn-new']) dom['btn-new'].addEventListener('click', startNewGame);
-if (dom['btn-resume']) dom['btn-resume'].addEventListener('click', resumeGame);
-if (dom['btn-missions']) dom['btn-missions'].addEventListener('click', () => { buildJobBoard(); show(dom['mission-select']); });
-if (dom['btn-close-jobs']) dom['btn-close-jobs'].addEventListener('click', () => hide(dom['mission-select']));
-if (dom['btn-close-shop']) dom['btn-close-shop'].addEventListener('click', () => hide(dom['shop-panel']));
-if (dom['btn-close-garage']) dom['btn-close-garage'].addEventListener('click', () => hide(dom['garage-panel']));
-if (dom.dialogue) dom.dialogue.addEventListener('click', advanceDialogue);
-if (dom.cutscene) dom.cutscene.addEventListener('click', endCutscene);
-
-// ---------- Shop fallback (only if no shop module loaded) ----------
-let shopFallback = false;
-function installShopFallback() {
-  if (ctx.shopLoaded || shopFallback) return;
-  shopFallback = true;
-  ctx.shopFallback = true;
-}
-function openShopFallback() {
-  const list = dom['shop-items'];
-  if (!list) return;
-  list.innerHTML = '';
-  for (const item of CONFIG.shop) {
+// ---- shop fallback (only installed if no shop module loads)
+let shopFallbackActive = false;
+function buildShopFallbackRows() {
+  dom['shop-items'].innerHTML = '';
+  for (const item of CONFIG.shop.items) {
     const row = document.createElement('div');
-    row.className = 'shop-row fallback-row';
-    row.innerHTML = `<span class="shop-name">${item.name}</span>` +
-      `<span class="shop-desc">${item.desc}</span>` +
-      `<span class="shop-price">$${item.price}</span>` +
-      `<button class="shop-buy" type="button">BUY</button>`;
-    row.querySelector('.shop-buy').addEventListener('click', () => {
-      if (!row.classList.contains('fallback-row')) return; // never touch real shop rows
-      if (S.cash < item.price) { showToast('Not enough cash.'); return; }
+    row.className = 'shop-row';
+    row.dataset.fallback = '1';
+    row.innerHTML = `<div><div class="shop-name">${item.name}</div><div class="shop-desc">${item.desc}</div></div><span class="shop-price">$${item.price}</span>`;
+    const btn = document.createElement('button');
+    btn.className = 'shop-buy';
+    btn.textContent = 'BUY';
+    btn.addEventListener('click', () => {
+      if (row.dataset.fallback !== '1') return; // never touch real shop rows
+      if (S.cash < item.price) { showToast('Not enough cash for that.'); return; }
       S.cash -= item.price;
-      if (item.ammo) {
+      if (item.id === 'ammo') {
         S.player.loadout.current().mag = S.player.loadout.current().def.mag;
-        showToast(`${item.name} bought — magazine refilled.`);
+        showToast(`Ammo Box bought — magazine refilled (-$${item.price}).`);
       } else {
-        S.player.health = Math.min(100, S.player.health + item.heal);
-        showToast(`${item.name} bought — +${item.heal} HP.`);
+        S.player.health = Math.min(CONFIG.maxHealth, S.player.health + item.heal);
+        showToast(`${item.name} bought — healed ${item.heal} HP (-$${item.price}).`);
       }
     });
-    list.appendChild(row);
+    row.appendChild(btn);
+    dom['shop-items'].appendChild(row);
   }
+}
+function openShopFallback() {
+  buildShopFallbackRows();
   show(dom['shop-panel']);
 }
 
-// ---------- Feature modules ----------
-const MODULE_ORDER = ['daynight', 'districts', 'player', 'vehicles', 'city', 'sky', 'ambient', 'people', 'police', 'heli2', 'heat', 'missions', 'side', 'shop', 'garage', 'fence', 'hud', 'dialogue', 'audio', 'banter', 'crew', 'challenges', 'respect', 'radio2', 'safehouse', 'weapons', 'cutscene', 'juice', 'postfx'];
+// ---- feature modules (exact order; missing file = quiet skip)
+const MODULE_ORDER = [
+  'daynight', 'districts', 'player', 'vehicles', 'city', 'sky', 'ambient',
+  'people', 'police', 'heli2', 'heat', 'missions', 'side', 'shop', 'garage',
+  'fence', 'hud', 'dialogue', 'audio', 'banter', 'crew', 'challenges',
+  'respect', 'radio2', 'safehouse', 'weapons', 'cutscene', 'juice', 'postfx',
+];
+let shopLoaded = false;
 async function loadModules() {
   for (const name of MODULE_ORDER) {
     try {
       const url = new URL(`./${name}.js`, import.meta.url);
-      const res = await fetch(url);
-      if (!res.ok) continue; // missing file is a quiet skip
-      const mod = await import(url);
-      if (mod && typeof mod.init === 'function') mod.init(ctx);
-    } catch (e) {
-      // One failing module never kills the boot.
-      console.warn(`module ${name} failed:`, e);
-    }
+      const res = await fetch(url, { method: 'HEAD' });
+      if (!res.ok) continue; // missing file: quiet skip, never a console error
+      const mod = await import(url.href);
+      if (mod && typeof mod.init === 'function') {
+        await mod.init(ctx);
+        if (name === 'shop') shopLoaded = true;
+      }
+    } catch (e) { /* one failing module never kills the boot */ }
   }
-  // De-duplicate parked cars: same kind at the same rounded position —
-  // keep the first, remove later copies (mesh and all). Police never touched.
+  if (!shopLoaded) {
+    shopFallbackActive = true;
+    ctx.shopFallback = { open: openShopFallback };
+  }
+  dedupeParkedCars();
+}
+function dedupeParkedCars() {
   const seen = new Set();
-  for (const car of [...S.cars]) {
-    if (car.aiPolice) continue;
+  const kept = [];
+  for (const car of S.cars) {
+    if (car.aiPolice) { kept.push(car); continue; }
     const key = `${car.kind}@${Math.round(car.pos.x)},${Math.round(car.pos.z)}`;
     if (seen.has(key)) {
       if (car.mesh) scene.remove(car.mesh);
-      const i = S.cars.indexOf(car);
-      if (i >= 0) S.cars.splice(i, 1);
-      if (S.car === car) S.car = null;
-    } else {
-      seen.add(key);
+      continue;
     }
+    seen.add(key);
+    kept.push(car);
   }
-  installShopFallback();
-  ctx.modulesLoaded = true;
+  S.cars = kept;
 }
 
-// ---------- Day / night ----------
+// ---- day / night
 function updateDayNight(dt) {
   const t = S.time;
-  let target;
-  if (t >= CONFIG.nightAt) { S.dayNight.phase = 'NIGHT'; target = 1; }
-  else if (t >= CONFIG.duskAt) {
-    S.dayNight.phase = 'DUSK';
-    target = (t - CONFIG.duskAt) / (CONFIG.nightAt - CONFIG.duskAt);
-  } else { S.dayNight.phase = 'SUNSET'; target = 0; }
+  let target = 0;
+  let phase = 'SUNSET';
+  if (t >= CONFIG.nightAt) { target = 1; phase = 'NIGHT'; }
+  else if (t >= CONFIG.duskAt) { target = (t - CONFIG.duskAt) / (CONFIG.nightAt - CONFIG.duskAt); phase = 'DUSK'; }
+  S.dayNight.phase = phase;
   const n = S.dayNight.night;
   const step = 0.6 * dt;
-  S.dayNight.night = n < target ? Math.min(target, n + step) : n > target ? Math.max(target, n - step) : n;
+  S.dayNight.night = target > n ? Math.min(target, n + step) : Math.max(target, n - step);
   const night = S.dayNight.night;
-  sun.intensity = 2.2 - night * 1.85;
-  sun.color.setHex(night > 0.6 ? 0x8ab4ff : 0xffb347);
-  if (S.skyDome) S.skyDome.material.uniforms.uNight.value = night;
+  sunLight.intensity = 2.2 - night * 1.85;
+  sunLight.color.setHex(night > 0.6 ? 0x7a9fd4 : 0xffb347);
+  skyMat.uniforms.uNight.value = night;
 }
 
-// ---------- Camera ----------
+// ---- camera
+const camTarget = new THREE.Vector3(-40, 26, 90);
 let menuAngle = 0;
-const camTarget = new THREE.Vector3();
 function updateCamera(dt) {
   if (S.mode === 'menu') {
-    menuAngle += dt * 0.06;
-    camera.position.set(Math.cos(menuAngle) * 120, 42, Math.sin(menuAngle) * 120);
-    camera.lookAt(0, 8, 0);
+    menuAngle += dt * 0.05;
+    camTarget.set(Math.cos(menuAngle) * 70, 30, Math.sin(menuAngle) * 70);
+    camera.position.lerp(camTarget, 1 - Math.exp(-dt * 2));
+    camera.lookAt(0, 4, 0);
     return;
   }
-  if (S.mode === 'cutscene') {
-    const t = Math.min(1, cutsceneT / 14);
-    camera.position.set(-140 + (60 + 140) * t, 55 + (25 - 55) * t, -120 + (30 + 120) * t);
-    camera.lookAt(0, 10, 0);
+  if (S.cutscene) {
+    const p = Math.min(1, cutsceneT / 14);
+    camTarget.set(
+      -140 + (60 - -140) * p,
+      55 + (25 - 55) * p,
+      -120 + (30 - -120) * p,
+    );
+    camera.position.lerp(camTarget, 1 - Math.exp(-dt * 3));
+    camera.lookAt(0, 2, 0);
     return;
   }
   const focus = S.car ? S.car.pos : S.player.pos;
+  const heading = S.car ? S.car.heading : S.player.heading;
   const dist = S.car ? 13 : 9.5;
   const height = S.car ? 5.2 : 4.4;
-  const h = S.player.heading;
-  camTarget.set(
-    focus.x - Math.sin(h) * dist,
-    height,
-    focus.z - Math.cos(h) * dist,
-  );
-  const k = 1 - Math.exp(-dt * 5);
-  camera.position.lerp(camTarget, k);
+  const fx = Math.sin(heading);
+  const fz = Math.cos(heading);
+  camTarget.set(focus.x - fx * dist, height, focus.z - fz * dist);
+  // Snap when the target jumps far (teleport / load) instead of
+  // lerping across the whole city.
+  if (camera.position.distanceTo(camTarget) > 25) camera.position.copy(camTarget);
+  camera.position.lerp(camTarget, 1 - Math.exp(-dt * 5));
   camera.lookAt(focus.x, focus.y + 2, focus.z);
 }
 
-// ---------- HUD ----------
-const slotEls = [...document.querySelectorAll('#weapons .slot')];
+// ---- HUD
+function clockText() {
+  const total = CONFIG.dayOpenHour * 60 + CONFIG.dayOpenMinute + S.time;
+  const hh = Math.floor(total / 60) % 24;
+  const mm = Math.floor(total % 60);
+  return `DAY ${S.day} ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} ${S.dayNight.phase}`;
+}
 function updateHUD() {
-  if (dom.cash) dom.cash.textContent = `$${Math.floor(S.cash).toLocaleString('en-US')}`;
+  dom.cash.textContent = '$' + Math.floor(S.cash).toLocaleString('en-US');
   const d = CONFIG.districts.find((x) => x.id === S.district) || CONFIG.districts[0];
-  if (dom.district) dom.district.textContent = d.name;
-  const total = CONFIG.clockOpenMinutes + S.time;
-  const hh = String(Math.floor(total / 60) % 24).padStart(2, '0');
-  const mm = String(Math.floor(total % 60)).padStart(2, '0');
-  if (dom['day-time']) dom['day-time'].textContent = `DAY ${S.day} ${hh}:${mm} ${S.dayNight.phase}`;
-  if (dom['respect-num']) dom['respect-num'].textContent = String(S.respect);
-  if (dom['respect-rank']) dom['respect-rank'].textContent = S.respectDirector.rank.title;
-  if (dom['health-fill']) dom['health-fill'].style.width = `${Math.max(0, Math.min(100, S.player.health))}%`;
-  const st = CONFIG.radio[S.radioStation] || CONFIG.radio[0];
-  if (dom['radio-station']) dom['radio-station'].textContent = st.name;
-  if (dom['radio-track']) {
-    const track = st.tracks[Math.floor(S.time / 45) % st.tracks.length];
-    dom['radio-track'].textContent = `${track.title} — ${track.artist}`;
-  }
-  if (dom.wanted) {
+  dom.district.textContent = d.name;
+  dom['day-time'].textContent = clockText();
+  dom['respect-num'].textContent = String(Math.floor(S.respect));
+  dom['respect-rank'].textContent = S.respectDirector.rank.title;
+  dom['health-fill'].style.width = `${Math.max(0, Math.min(100, S.player.health))}%`;
+  const station = CONFIG.radio[S.radioStation];
+  dom['radio-station'].textContent = station.name;
+  const track = station.tracks[Math.floor(S.time / 45) % station.tracks.length];
+  dom['radio-track'].textContent = `${track.title} — ${track.artist}`;
+  if (S.wanted > 0) {
     dom.wanted.textContent = '★'.repeat(S.wanted) + '☆'.repeat(5 - S.wanted);
-    if (S.wanted === 0) dom.wanted.classList.add('hidden');
-    else dom.wanted.classList.remove('hidden');
+    show(dom.wanted);
+  } else {
+    hide(dom.wanted);
   }
-  slotEls.forEach((el, i) => {
-    const slot = S.player.loadout.slots[i];
-    if (!slot) return;
-    const name = el.querySelector('.slot-name');
-    const ammo = el.querySelector('.slot-ammo');
-    if (name) name.textContent = slot.def.name;
-    if (ammo) ammo.textContent = String(slot.mag);
-    el.classList.toggle('on', S.player.loadout.equipped === i);
+  const slots = dom.weapons.querySelectorAll('.slot');
+  S.player.loadout.slots.forEach((slot, i) => {
+    const el = slots[i];
+    if (!el) return;
+    el.querySelector('.slot-name').textContent = slot.def.name;
+    el.querySelector('.slot-ammo').textContent = String(slot.mag);
+    el.classList.toggle('on', i === S.player.loadout.equipped);
   });
-  const speedMs = S.car ? Math.abs(S.car.speed) : Math.hypot(S.player.vel.x, S.player.vel.z);
-  const mph = Math.round(speedMs * 2.237);
-  if (dom['speed-num']) dom['speed-num'].textContent = String(mph);
-  if (dom['speed-gear']) {
-    dom['speed-gear'].textContent = speedMs < 0.5 ? 'N' : String(Math.min(5, 1 + Math.floor(speedMs / 7)));
-  }
-  if (dom['speed-car']) dom['speed-car'].textContent = S.car ? S.car.kind.toUpperCase() : 'ON FOOT';
-  if (dom.objective) {
-    dom.objective.textContent = S.missions.current ? S.missions.current.desc : CONFIG.defaultObjective;
+  const speed = S.car ? Math.abs(S.car.speed) : Math.hypot(S.player.vel.x, S.player.vel.z);
+  dom['speed-num'].textContent = String(Math.round(speed * 2.237));
+  dom['speed-gear'].textContent = speed < 1 ? 'N' : String(Math.min(5, 1 + Math.floor(speed / 15)));
+  dom['speed-car'].textContent = S.car ? S.car.kind.toUpperCase() : 'ON FOOT';
+  dom.objective.textContent = S.missions.current ? S.missions.current.desc : 'Explore Solmar Bay — find work.';
+  S.objective = dom.objective.textContent;
+}
+
+// ---- police roster (4x/second)
+let rosterTimer = 0;
+function updateRoster(dt) {
+  rosterTimer += dt;
+  if (rosterTimer < 0.25) return;
+  rosterTimer = 0;
+  const cops = S.cops.length > 0 ? S.cops : S.cars.filter((c) => c.aiPolice);
+  if (cops.length === 0) { hide(dom.roster); return; }
+  show(dom.roster);
+  dom['roster-code'].textContent = `DISPATCH 10-80 — ${S.wanted} STAR(S)`;
+  dom['roster-rows'].innerHTML = '';
+  for (const cop of cops) {
+    const dist = Math.round(Math.hypot(cop.pos.x - S.player.pos.x, cop.pos.z - S.player.pos.z));
+    const row = document.createElement('div');
+    row.className = 'roster-row';
+    const tactic = (cop.brain && cop.brain.tactic) || 'PURSUIT';
+    row.innerHTML = `<b>${cop.callsign || 'PD-??'}</b> — ${tactic} — ${dist}m`;
+    dom['roster-rows'].appendChild(row);
   }
 }
 
-// ---------- Roster / minimap ----------
-function paintRoster() {
-  const roster = dom.roster;
-  if (!roster) return;
-  const cops = (S.cops && S.cops.length > 0) ? S.cops : S.cars.filter((c) => c.aiPolice);
-  if (cops.length === 0) { roster.classList.add('hidden'); return; }
-  roster.classList.remove('hidden');
-  if (dom['roster-code']) dom['roster-code'].textContent = `DISPATCH 10-80 — ${S.wanted} STAR(S)`;
-  const rows = dom['roster-rows'];
-  if (rows) {
-    rows.innerHTML = '';
-    for (const cop of cops) {
-      const dist = Math.round(Math.hypot(cop.pos.x - S.player.pos.x, cop.pos.z - S.player.pos.z));
-      const row = document.createElement('div');
-      row.className = 'roster-row';
-      const b = document.createElement('b');
-      b.textContent = cop.callsign || 'PD-??';
-      row.appendChild(b);
-      const span = document.createElement('span');
-      span.textContent = ` ${(cop.brain && cop.brain.tactic) || 'PURSUIT'} · ${dist}m`;
-      row.appendChild(span);
-      rows.appendChild(row);
-    }
-  }
-}
-function paintMinimap() {
+// ---- minimap (~7x/second)
+let mapTimer = 0;
+function updateMinimap(dt) {
+  mapTimer += dt;
+  if (mapTimer < 0.14) return;
+  mapTimer = 0;
   const cv = dom.minimap;
-  if (!cv) return;
   const g = cv.getContext('2d');
-  if (!g) return;
-  const scale = 0.45;
-  const mx = (x) => 90 + x * scale;
-  const my = (z) => 90 + z * scale;
-  g.fillStyle = 'rgba(12,8,24,0.85)';
+  const toMap = (x, z) => [90 + x * 0.45, 90 + z * 0.45];
+  g.fillStyle = '#0d0518';
   g.fillRect(0, 0, 180, 180);
-  for (const dd of CONFIG.districts) {
-    g.fillStyle = dd.color;
-    g.beginPath();
-    g.arc(mx(dd.x), my(dd.z), 4, 0, Math.PI * 2);
-    g.fill();
+  for (const d of CONFIG.districts) {
+    const [mx, my] = toMap(d.x, d.z);
+    g.fillStyle = d.color;
+    g.beginPath(); g.arc(mx, my, 3, 0, Math.PI * 2); g.fill();
   }
   if (S.wanted > 0 && S.lastKnown) {
-    g.strokeStyle = '#ff2244';
+    const [mx, my] = toMap(S.lastKnown.x, S.lastKnown.z);
+    g.strokeStyle = '#ff5a5a';
     g.lineWidth = 2;
-    g.beginPath();
-    g.arc(mx(S.lastKnown.x), my(S.lastKnown.z), 10, 0, Math.PI * 2);
-    g.stroke();
+    g.beginPath(); g.arc(mx, my, 7, 0, Math.PI * 2); g.stroke();
   }
-  g.fillStyle = '#ffd24d';
   for (const p of S.packages) {
-    if (!p.taken) g.fillRect(mx(p.x) - 3, my(p.z) - 3, 6, 6);
+    if (p.taken) continue;
+    const [mx, my] = toMap(p.x, p.z);
+    g.fillStyle = '#ffd27a';
+    g.fillRect(mx - 2, my - 2, 4, 4);
   }
-  for (const c of S.cars) {
-    g.fillStyle = c.aiPolice ? '#4da6ff' : '#dddddd';
-    g.fillRect(mx(c.pos.x) - 3, my(c.pos.z) - 3, 6, 6);
+  for (const car of S.cars) {
+    const [mx, my] = toMap(car.pos.x, car.pos.z);
+    g.fillStyle = car.aiPolice ? '#4d8dff' : '#ffe9c9';
+    g.fillRect(mx - 2, my - 2, 4, 4);
   }
   if (S.heli) {
-    g.fillStyle = '#ff2244';
-    g.beginPath();
-    g.arc(mx(S.heli.pos.x), my(S.heli.pos.z), 4, 0, Math.PI * 2);
-    g.fill();
+    const [mx, my] = toMap(S.heli.pos.x, S.heli.pos.z);
+    g.fillStyle = '#ff3b3b';
+    g.beginPath(); g.arc(mx, my, 3, 0, Math.PI * 2); g.fill();
   }
+  const [px, py] = toMap(S.player.pos.x, S.player.pos.z);
   g.fillStyle = '#ffb347';
-  g.beginPath();
-  g.arc(mx(S.player.pos.x), my(S.player.pos.z), 4, 0, Math.PI * 2);
-  g.fill();
+  g.beginPath(); g.arc(px, py, 3.5, 0, Math.PI * 2); g.fill();
 }
 
-// ---------- Frame loop ----------
-let last = performance.now();
-let rosterT = 0;
-let mapT = 0;
-let saveT = 0;
+// ---- frame loop
+let lastT = performance.now();
+let saveTimer = 0;
+function dist2d(ax, az, bx, bz) {
+  return Math.hypot(ax - bx, az - bz);
+}
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
-  last = now;
+  let dt = (now - lastT) / 1000;
+  lastT = now;
+  if (!(dt > 0)) dt = 0.016;
+  dt = Math.min(dt, 0.05);
 
-  // Global keys.
+  // X skips the cutscene — press or hold, checked every frame.
   if (S.cutscene && (input.isDown('KeyX') || input.wasPressed('KeyX'))) endCutscene();
   if (input.wasPressed('KeyP')) {
     if (S.mode === 'playing') pauseGame();
     else if (S.mode === 'paused') resumeGame();
-  }
-  if (shopFallback && input.wasPressed('KeyF') && S.mode === 'playing') {
-    const d = Math.hypot(S.player.pos.x - CONFIG.shopPos.x, S.player.pos.z - CONFIG.shopPos.z);
-    if (d <= CONFIG.shopPos.radius) openShopFallback();
   }
 
   if (S.mode !== 'paused') {
@@ -571,39 +584,48 @@ function frame(now) {
     S.challengesDirector.tick();
     if (S.cutscene) {
       cutsceneT += dt;
-      const li = Math.min(2, Math.floor(cutsceneT / 4.5));
-      if (li !== cutsceneLine) {
-        cutsceneLine = li;
-        if (dom['cutscene-text']) dom['cutscene-text'].textContent = CUTSCENE_LINES[li];
+      const lineIdx = Math.min(2, Math.floor(cutsceneT / 4.5));
+      if (lineIdx !== cutsceneLine) {
+        cutsceneLine = lineIdx;
+        dom['cutscene-text'].textContent = CUTSCENE_LINES[lineIdx];
       }
       if (cutsceneT >= 14) endCutscene();
     }
-    // Mission 1 auto-start at the garage.
+    // Mission 1 auto-starts at the garage door.
     if (S.mode === 'playing' && !S.missions.current && S.missionIndex === 0) {
-      const d = Math.hypot(S.player.pos.x - CONFIG.garageDoor.x, S.player.pos.z - CONFIG.garageDoor.z);
-      if (d <= CONFIG.garageDoor.radius) S.missions.start(0);
+      if (dist2d(S.player.pos.x, S.player.pos.z, CONFIG.garageDoor.x, CONFIG.garageDoor.z) <= CONFIG.garageDoor.radius) {
+        S.missions.start(0);
+      }
     }
-    for (const fn of ctx.updates) {
-      try { fn(dt); } catch (e) { console.warn('update failed:', e); }
+    // F opens the shop near the MART — only while the shop fallback is live.
+    if (shopFallbackActive && S.mode === 'playing' && input.wasPressed('KeyF')) {
+      if (dist2d(S.player.pos.x, S.player.pos.z, CONFIG.shop.x, CONFIG.shop.z) <= CONFIG.shop.radius) {
+        openShopFallback();
+      }
     }
+    for (const update of ctx.updates) {
+      try { update(dt); } catch (e) { /* one bad update never kills the frame */ }
+    }
+    // Pay out any challenge earned by this frame's updates on the same
+    // frame, so a payout never lands a frame late relative to the stat
+    // change that earned it.
+    S.challengesDirector.tick();
     updateDayNight(dt);
     updateCamera(dt);
     if (S.mode === 'playing') {
-      saveT += dt;
-      if (saveT >= 20) { saveT = 0; saveGame(); }
+      saveTimer += dt;
+      if (saveTimer >= 20) { saveTimer = 0; saveGame(); }
     }
   }
 
   updateHUD();
-  rosterT += dt;
-  if (rosterT >= 0.25) { rosterT = 0; if (typeof ctx.api.paintRoster === 'function') ctx.api.paintRoster(); }
-  mapT += dt;
-  if (mapT >= 0.14) { mapT = 0; if (typeof ctx.api.paintMinimap === 'function') ctx.api.paintMinimap(); }
+  updateRoster(dt);
+  updateMinimap(dt);
   renderer.render(scene, camera);
   input.endFrame();
 }
 
-// ---------- Boot ----------
+// ---- boot
 loadGame();
 window.__solmar = { S, player: S.player, camera };
 requestAnimationFrame(frame);

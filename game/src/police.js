@@ -1,71 +1,68 @@
-// SOLMAR BAY — Solmar PD pursuit. Cops spawn from the wanted level and
-// chase with a utility brain: RAMMING / ROADBLOCK / PURSUIT / SEARCH.
+// SOLMAR BAY — the Solmar PD pursuit. Cops spawn from S.wanted (at least
+// 4 at 4–5 stars), chase with a utility brain, and leave when heat cools
+// to zero. S.cars entries for police carry aiPolice, callsign and brain.
 import * as THREE from '../vendor/three.module.min.js';
+import { rand, randInt } from './random.js';
 
 const TACTICS = ['PURSUIT', 'RAMMING', 'ROADBLOCK', 'SEARCH'];
 
 function makeCopMesh() {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(1.9, 0.85, 4.6),
-    new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.35, metalness: 0.4 }),
-  );
-  body.position.y = 0.6;
-  g.add(body);
-  const stripe = new THREE.Mesh(
-    new THREE.BoxGeometry(1.92, 0.3, 4.62),
-    new THREE.MeshStandardMaterial({ color: 0x2244cc, roughness: 0.4 }),
-  );
-  stripe.position.y = 0.75;
-  g.add(stripe);
-  const cabin = new THREE.Mesh(
-    new THREE.BoxGeometry(1.5, 0.55, 2.0),
-    new THREE.MeshStandardMaterial({ color: 0x18202e, roughness: 0.2, metalness: 0.5 }),
-  );
-  cabin.position.y = 1.25;
-  g.add(cabin);
-  const bar = new THREE.Mesh(
-    new THREE.BoxGeometry(1.0, 0.22, 0.4),
-    new THREE.MeshBasicMaterial({ color: 0xff2244 }),
-  );
-  bar.position.set(0, 1.6, 0.2);
-  g.add(bar);
-  return g;
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1c2f4a, roughness: 0.35, metalness: 0.5 });
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xe8ecf2, roughness: 0.4, metalness: 0.3 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x101826, roughness: 0.15, metalness: 0.6 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.55, 4.4), bodyMat);
+  body.position.y = 0.55;
+  group.add(body);
+  const doors = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.35, 2.0), whiteMat);
+  doors.position.y = 0.62;
+  group.add(doors);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.5, 2.0), glassMat);
+  cabin.position.set(0, 1.05, -0.2);
+  group.add(cabin);
+  // Light bar: red + blue beacons that flash.
+  const redMat = new THREE.MeshStandardMaterial({ color: 0x330000, emissive: new THREE.Color(0xff2222), emissiveIntensity: 1 });
+  const blueMat = new THREE.MeshStandardMaterial({ color: 0x000033, emissive: new THREE.Color(0x2244ff), emissiveIntensity: 1 });
+  const red = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.22, 0.5), redMat);
+  red.position.set(-0.45, 1.4, -0.2);
+  const blue = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.22, 0.5), blueMat);
+  blue.position.set(0.45, 1.4, -0.2);
+  group.add(red);
+  group.add(blue);
+  const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.3, 12);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x141018, roughness: 0.9 });
+  for (const [x, z] of [[-0.95, 1.4], [0.95, 1.4], [-0.95, -1.4], [0.95, -1.4]]) {
+    const w = new THREE.Mesh(wheelGeo, darkMat);
+    w.position.set(x, 0.36, z);
+    group.add(w);
+  }
+  return { group, redMat, blueMat };
+}
+
+function desiredCops(wanted) {
+  if (wanted <= 0) return 0;
+  if (wanted >= 4) return 6;
+  if (wanted >= 3) return 4;
+  if (wanted >= 2) return 3;
+  return 2;
 }
 
 export function init(ctx) {
   const { scene, state: S } = ctx;
-  let callsignN = 0;
-  let decideClock = 0;
-
-  function makeBrain(car) {
-    return {
-      tactic: 'PURSUIT',
-      state: 'PURSUIT',
-      decideT: 0,
-      decide(dt, playerPos, playerVel, playerHeading, playerSpeed) {
-        const dx = playerPos.x - car.pos.x;
-        const dz = playerPos.z - car.pos.z;
-        const dist = Math.hypot(dx, dz);
-        const stale = S.lastKnown && (S.time - S.lastKnown.seenAt) > 5;
-        let tactic;
-        if (stale) tactic = 'SEARCH';
-        else if (dist < 10 && playerSpeed < 5) tactic = 'RAMMING';
-        else if (playerSpeed >= 20 && dist >= 20 && dist <= 50) tactic = 'ROADBLOCK';
-        else tactic = 'PURSUIT';
-        this.tactic = tactic;
-        this.state = tactic;
-        return tactic;
-      },
-    };
-  }
+  let copCounter = 0;
+  let flashT = 0;
 
   function spawnCop() {
-    callsignN += 1;
-    const a = Math.random() * Math.PI * 2;
-    const d = 32 + Math.random() * 14;
-    const x = S.player.pos.x + Math.cos(a) * d;
-    const z = S.player.pos.z + Math.sin(a) * d;
+    copCounter += 1;
+    const n = copCounter;
+    const angle = rand(0, Math.PI * 2);
+    const dist = rand(35, 55);
+    const x = S.player.pos.x + Math.cos(angle) * dist;
+    const z = S.player.pos.z + Math.sin(angle) * dist;
+    const { group, redMat, blueMat } = makeCopMesh();
+    group.position.set(x, 0, z);
+    scene.add(group);
     const car = {
       kind: 'sedan',
       pos: new THREE.Vector3(x, 0, z),
@@ -73,86 +70,102 @@ export function init(ctx) {
       speed: 0,
       maxHealth: 100,
       health: 100,
-      tune: { nos: 0, engine: 0, armor: 0, paint: 'pd' },
-      mesh: makeCopMesh(),
+      tune: { nos: false, engine: 0, armor: 0, paint: '#1c2f4a' },
+      color: '#1c2f4a',
+      mesh: group,
       aiPolice: true,
-      callsign: `PD-${String(callsignN).padStart(2, '0')}`,
+      callsign: `PD-${String(n).padStart(2, '0')}`,
       brain: null,
-      perf() { return 34; },
+      _redMat: redMat,
+      _blueMat: blueMat,
+      perf() { return 32; },
     };
-    car.brain = makeBrain(car);
-    car.mesh.position.set(x, 0, z);
-    scene.add(car.mesh);
+    const brain = {
+      tactic: 'PURSUIT',
+      state: 'PURSUIT',
+      decideT: 0,
+      decide(dt, playerPos, playerVel, playerHeading, playerSpeed) {
+        const dx = playerPos.x - car.pos.x;
+        const dz = playerPos.z - car.pos.z;
+        const d = Math.hypot(dx, dz);
+        const stale = S.lastKnown ? (S.time - S.lastKnown.seenAt) : 999;
+        let t;
+        if (stale > 8) t = 'SEARCH';
+        else if (d < 8 && playerSpeed < 2) t = 'RAMMING';
+        else if (playerSpeed > 15 && d > 20 && d < 50) t = 'ROADBLOCK';
+        else t = 'PURSUIT';
+        this.tactic = t;
+        this.state = t;
+      },
+    };
+    car.brain = brain;
     S.cars.push(car);
+    S.cops.push(car);
     return car;
   }
 
-  function policeCars() {
-    return S.cars.filter((c) => c.aiPolice);
+  function removeCop(car) {
+    scene.remove(car.mesh);
+    S.cars = S.cars.filter((c) => c !== car);
+    S.cops = S.cops.filter((c) => c !== car);
   }
 
   ctx.updates.push((dt) => {
-    if (S.mode !== 'playing') return;
     const wanted = S.wanted;
     if (wanted > 0) {
       S.lastKnown = { x: S.player.pos.x, z: S.player.pos.z, seenAt: S.time };
-      const desired = Math.min(6, wanted + 1);
-      const cops = policeCars();
-      for (let i = cops.length; i < desired; i++) spawnCop();
-    } else if (policeCars().length > 0) {
-      for (const c of policeCars()) {
-        scene.remove(c.mesh);
-        const i = S.cars.indexOf(c);
-        if (i >= 0) S.cars.splice(i, 1);
-      }
+    } else {
+      S.lastKnown = null;
     }
-    const cops = policeCars();
-    S.cops = cops;
-    decideClock += dt;
-    const doDecide = decideClock >= 0.5;
-    if (doDecide) decideClock = 0;
+    const want = desiredCops(wanted);
+    const police = S.cars.filter((c) => c.aiPolice);
+    while (police.length < want) {
+      const c = spawnCop();
+      police.push(c);
+    }
+    while (police.length > want) {
+      removeCop(police.pop());
+    }
+    S.cops = S.cars.filter((c) => c.aiPolice);
+
+    flashT += dt;
+    const flashOn = Math.floor(flashT * 4) % 2 === 0;
     const pp = S.player.pos;
     const pv = S.player.vel;
     const pSpeed = Math.hypot(pv.x, pv.z);
-    for (const cop of cops) {
-      if (doDecide) {
-        cop.brain.decideT = 0;
-        cop.brain.decide(0.5, pp, { x: pv.x, z: pv.z }, S.player.heading, pSpeed);
+    for (const cop of S.cops) {
+      cop._redMat.emissiveIntensity = flashOn ? 2.2 : 0.2;
+      cop._blueMat.emissiveIntensity = flashOn ? 0.2 : 2.2;
+      cop.brain.decideT -= dt;
+      if (cop.brain.decideT <= 0) {
+        cop.brain.decide(0.2, pp, pv, S.player.heading, pSpeed);
+        cop.brain.decideT = 0.5;
       }
-      let tx;
-      let tz;
-      let speed = 20;
+      let tx = pp.x;
+      let tz = pp.z;
+      let speed = 16;
       if (cop.brain.tactic === 'ROADBLOCK') {
-        const len = Math.max(0.001, pSpeed);
-        tx = pp.x + (pv.x / len) * 25;
-        tz = pp.z + (pv.z / len) * 25;
-        speed = 24;
-      } else if (cop.brain.tactic === 'SEARCH' && S.lastKnown) {
-        tx = S.lastKnown.x;
-        tz = S.lastKnown.z;
+        const vl = Math.hypot(pv.x, pv.z) || 1;
+        tx = pp.x + (pv.x / vl) * 16;
+        tz = pp.z + (pv.z / vl) * 16;
         speed = 14;
-      } else {
-        tx = pp.x;
-        tz = pp.z;
-        speed = cop.brain.tactic === 'RAMMING' ? 27 : 21;
+      } else if (cop.brain.tactic === 'RAMMING') {
+        speed = 21;
+      } else if (cop.brain.tactic === 'SEARCH') {
+        if (S.lastKnown) { tx = S.lastKnown.x; tz = S.lastKnown.z; }
+        speed = 10;
       }
       const dx = tx - cop.pos.x;
       const dz = tz - cop.pos.z;
       const d = Math.hypot(dx, dz);
-      if (d > 1.2) {
+      if (d > 0.5) {
         const step = Math.min(d, speed * dt);
-        cop.heading = Math.atan2(dx, dz);
         cop.pos.x += (dx / d) * step;
         cop.pos.z += (dz / d) * step;
-        cop.speed = speed;
-      } else {
-        cop.speed = 0;
+        cop.heading = Math.atan2(dx, dz);
       }
-      if (cop.mesh) {
-        cop.mesh.position.set(cop.pos.x, 0, cop.pos.z);
-        cop.mesh.rotation.y = cop.heading;
-      }
+      cop.mesh.position.copy(cop.pos);
+      cop.mesh.rotation.y = cop.heading;
     }
   });
-  ctx.policeReady = true;
 }

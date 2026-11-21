@@ -1,33 +1,26 @@
-// SOLMAR BAY — entrypoint for make.fun gta6-01 (round 14).
-// Run as `node main.ts`. Mirrors game/ and screenshots/ into the output
-// folder and writes a deterministic dossier.json describing the entry.
-// Node 22 standard library only; no build step, no dependencies.
-import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-  cpSync,
-} from 'node:fs';
+// SOLMAR BAY — make.fun gta6-01 entrypoint (Node 22 stdlib only).
+// Run as: node main.ts
+// Mirrors game/ and screenshots/ into the output folder and writes a
+// deterministic dossier.json describing the entry. The repository root
+// resolves from THIS file's own location, never from the working
+// directory, so the same command works from anywhere and produces a
+// byte-identical dossier.
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, statSync, existsSync } from 'node:fs';
 import { join, resolve, dirname, relative, sep } from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+const REPO_ROOT = process.env.MAKEFUN_BOT_DIR
+  ? resolve(process.env.MAKEFUN_BOT_DIR)
+  : dirname(fileURLToPath(import.meta.url));
+const OUTPUT_DIR = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
 const BLURB = 'SOLMAR BAY — an original open-world sunset crime game for make.fun gta6-01.';
 const MAX_IMAGE_BYTES = 256 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 
-function fail(message) {
-  console.error(`main.ts: ${message}`);
+function fail(msg) {
+  console.error(`main.ts: ${msg}`);
   process.exit(1);
-}
-
-function repoRoot() {
-  if (process.env.MAKEFUN_BOT_DIR) return resolve(process.env.MAKEFUN_BOT_DIR);
-  return resolve(dirname(fileURLToPath(import.meta.url)));
 }
 
 function sha256(file) {
@@ -40,81 +33,96 @@ function walk(dir, base) {
   for (const e of entries) {
     const full = join(dir, e.name);
     if (e.isDirectory()) out.push(...walk(full, base));
-    else if (e.isFile()) {
-      const rel = relative(base, full).split(sep).join('/');
-      out.push({ path: rel, size: statSync(full).size, sha256: sha256(full) });
-    }
+    else if (e.isFile()) out.push(full);
   }
   return out;
 }
 
-function clearContents(dir) {
-  for (const entry of readdirSync(dir)) {
-    rmSync(join(dir, entry), { recursive: true, force: true });
+function copyTree(src, dest) {
+  mkdirSync(dest, { recursive: true });
+  for (const e of readdirSync(src, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const from = join(src, e.name);
+    const to = join(dest, e.name);
+    if (e.isDirectory()) copyTree(from, to);
+    else if (e.isFile()) copyFileSync(from, to);
   }
 }
 
-const root = repoRoot();
-const gameDir = join(root, 'game');
-const shotsDir = join(root, 'screenshots');
-if (!existsSync(gameDir)) fail('game/ is missing');
-if (!existsSync(join(gameDir, 'index.html'))) fail('game/index.html is missing');
-if (!existsSync(join(gameDir, 'src', 'main.js'))) fail('game/src/main.js is missing');
-if (!existsSync(shotsDir)) fail('screenshots/ is missing');
+function main() {
+  const gameDir = join(REPO_ROOT, 'game');
+  const shotsDir = join(REPO_ROOT, 'screenshots');
+  if (!existsSync(gameDir)) fail('game/ is missing');
+  if (!existsSync(join(gameDir, 'index.html'))) fail('game/index.html is missing');
+  if (!existsSync(join(gameDir, 'src', 'main.js'))) fail('game/src/main.js is missing');
+  if (!existsSync(shotsDir)) fail('screenshots/ is missing');
+  if (OUTPUT_DIR === sep || OUTPUT_DIR === REPO_ROOT) {
+    fail(`refusing unsafe output dir: ${OUTPUT_DIR}`);
+  }
 
-const outputDir = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
-if (outputDir === '/' || outputDir === root) {
-  fail(`refusing unsafe output dir: ${outputDir}`);
+  // Mirror into a clean output folder: create it if needed, then clear
+  // ONLY its contents — never remove the output directory itself, because
+  // at the grader /output is a mount point and removing it fails EBUSY.
+  mkdirSync(OUTPUT_DIR, { recursive: true });
+  for (const entry of readdirSync(OUTPUT_DIR)) {
+    rmSync(join(OUTPUT_DIR, entry), { recursive: true, force: true });
+  }
+  copyTree(gameDir, join(OUTPUT_DIR, 'game'));
+  copyTree(shotsDir, join(OUTPUT_DIR, 'screenshots'));
+
+  // Walk both mirrored trees (sorted) and record every file.
+  const record = (relDir) => {
+    const root = join(OUTPUT_DIR, relDir);
+    return walk(root, root).map((full) => {
+      const rel = relative(OUTPUT_DIR, full).split(sep).join('/');
+      return { path: rel, size: statSync(full).size, sha256: sha256(full) };
+    });
+  };
+  const gameFiles = record('game');
+  const shotFiles = record('screenshots');
+
+  // Cover: the screenshots path matching cover.jpg/png, or null.
+  let cover = null;
+  for (const f of shotFiles) {
+    if (/^screenshots\/cover\.(jpg|png)$/i.test(f.path)) { cover = f.path; break; }
+  }
+  const coverEntry = cover ? shotFiles.find((f) => f.path === cover) : null;
+
+  const totalFiles = gameFiles.length + shotFiles.length;
+  const totalBytes = gameFiles.reduce((a, f) => a + f.size, 0)
+    + shotFiles.reduce((a, f) => a + f.size, 0);
+
+  const schemaOk = typeof BLURB === 'string'
+    && Array.isArray(gameFiles) && Array.isArray(shotFiles)
+    && gameFiles.length > 0
+    && gameFiles.some((f) => f.path === 'game/index.html')
+    && gameFiles.some((f) => f.path === 'game/src/main.js')
+    && gameFiles.every((f) => typeof f.path === 'string' && typeof f.size === 'number' && /^[0-9a-f]{64}$/.test(f.sha256))
+    && shotFiles.every((f) => typeof f.path === 'string' && typeof f.size === 'number' && /^[0-9a-f]{64}$/.test(f.sha256))
+    && totalFiles === gameFiles.length + shotFiles.length;
+  const checks = {
+    schema: schemaOk,
+    cover: coverEntry ? coverEntry.size <= MAX_IMAGE_BYTES : true,
+    images: shotFiles.length >= 4 && shotFiles.every((f) => f.size <= MAX_IMAGE_BYTES),
+    textCap: BLURB.length <= 280,
+    sizeCap: totalBytes <= MAX_TOTAL_BYTES,
+  };
+
+  const dossier = {
+    competition: 'gta6-01',
+    entry: 'SOLMAR BAY',
+    round: 15,
+    blurb: BLURB,
+    cover,
+    game: gameFiles,
+    screenshots: shotFiles,
+    totals: { files: totalFiles, bytes: totalBytes },
+    checks,
+  };
+  writeFileSync(join(OUTPUT_DIR, 'dossier.json'), JSON.stringify(dossier, null, 2) + '\n');
+
+  console.log(`SOLMAR BAY: ${gameFiles.length} game files + ${shotFiles.length} screenshots, ${totalBytes} bytes -> ${OUTPUT_DIR}`);
+  console.log(`checks: schema=${checks.schema} cover=${checks.cover} images=${checks.images} textCap=${checks.textCap} sizeCap=${checks.sizeCap}`);
+  if (!Object.values(checks).every(Boolean)) process.exit(1);
 }
 
-mkdirSync(outputDir, { recursive: true });
-clearContents(outputDir);
-cpSync(gameDir, join(outputDir, 'game'), { recursive: true });
-cpSync(shotsDir, join(outputDir, 'screenshots'), { recursive: true });
-
-const gameFiles = walk(join(outputDir, 'game'), outputDir);
-const shotFiles = walk(join(outputDir, 'screenshots'), outputDir);
-const allFiles = [...gameFiles, ...shotFiles].sort((a, b) => (a.path < b.path ? -1 : 1));
-const totalBytes = allFiles.reduce((n, f) => n + f.size, 0);
-
-const coverEntry = shotFiles.find((f) => /(^|\/)cover\.(jpg|png)$/.test(f.path));
-const cover = coverEntry ? coverEntry.path : null;
-
-const checks = {
-  schema:
-    typeof BLURB === 'string' &&
-    Array.isArray(gameFiles) &&
-    Array.isArray(shotFiles) &&
-    gameFiles.length > 0 &&
-    gameFiles.every((f) => f.path.startsWith('game/') && typeof f.size === 'number' && f.size >= 0 && /^[0-9a-f]{64}$/.test(f.sha256)) &&
-    shotFiles.every((f) => f.path.startsWith('screenshots/') && typeof f.size === 'number' && f.size >= 0 && /^[0-9a-f]{64}$/.test(f.sha256)) &&
-    typeof totalBytes === 'number' &&
-    (typeof cover === 'string' || cover === null),
-  cover: cover === null || (coverEntry && coverEntry.size <= MAX_IMAGE_BYTES),
-  images: shotFiles.length >= 4 && shotFiles.every((f) => f.size <= MAX_IMAGE_BYTES),
-  textCap: BLURB.length <= 280,
-  sizeCap: totalBytes <= MAX_TOTAL_BYTES,
-};
-
-const dossier = {
-  competition: 'gta6-01',
-  entry: 'SOLMAR BAY',
-  round: 14,
-  blurb: BLURB,
-  cover,
-  game: gameFiles,
-  screenshots: shotFiles,
-  totals: { files: allFiles.length, bytes: totalBytes },
-  checks,
-};
-
-writeFileSync(join(outputDir, 'dossier.json'), JSON.stringify(dossier, null, 2) + '\n');
-
-console.log(`SOLMAR BAY round 14: ${allFiles.length} files, ${totalBytes} bytes -> ${outputDir}`);
-console.log(`checks: schema=${checks.schema} cover=${checks.cover} images=${checks.images} textCap=${checks.textCap} sizeCap=${checks.sizeCap}`);
-
-if (!Object.values(checks).every(Boolean)) {
-  console.error('main.ts: one or more dossier checks failed');
-  process.exit(1);
-}
-process.exit(0);
+main();

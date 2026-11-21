@@ -1,93 +1,94 @@
-// SOLMAR BAY — the player on foot: WASD movement, heading follows motion,
-// E to get in/out of the nearest car.
+// SOLMAR BAY — on-foot movement and getting in/out of cars.
+// Driving itself lives in vehicles.js.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
+import { clamp } from './random.js';
 
 export function init(ctx) {
   const { scene, state: S, input } = ctx;
 
-  // Player mesh: a small hustler in an amber jacket.
-  const mesh = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.6, 1.1, 0.35),
-    new THREE.MeshStandardMaterial({ color: 0xffb347, roughness: 0.7 }),
-  );
-  body.position.y = 1.0;
-  mesh.add(body);
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.28, 10, 8),
-    new THREE.MeshStandardMaterial({ color: 0xd9a986, roughness: 0.7 }),
-  );
-  head.position.y = 1.8;
-  mesh.add(head);
-  const legs = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 0.7, 0.3),
-    new THREE.MeshStandardMaterial({ color: 0x222233, roughness: 0.8 }),
-  );
-  legs.position.y = 0.35;
-  mesh.add(legs);
-  mesh.position.copy(S.player.pos);
-  scene.add(mesh);
-  S.player.mesh = mesh;
+  // The player on foot: a small amber-jacketed figure.
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffb347, roughness: 0.8 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x241a2e, roughness: 0.9 });
+  const playerMesh = new THREE.Group();
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), bodyMat);
+  torso.position.y = 1.15;
+  playerMesh.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), new THREE.MeshStandardMaterial({ color: 0xe8b98a, roughness: 0.8 }));
+  head.position.y = 1.85;
+  playerMesh.add(head);
+  const legGeo = new THREE.BoxGeometry(0.26, 0.7, 0.26);
+  const legL = new THREE.Mesh(legGeo, darkMat);
+  legL.position.set(-0.18, 0.35, 0);
+  const legR = new THREE.Mesh(legGeo, darkMat);
+  legR.position.set(0.18, 0.35, 0);
+  playerMesh.add(legL);
+  playerMesh.add(legR);
+  scene.add(playerMesh);
+  ctx.api.playerMesh = playerMesh;
 
-  function nearestCar(maxD) {
-    let best = null;
-    let bestD = maxD;
-    for (const c of S.cars) {
-      if (c.aiPolice) continue;
-      const d = Math.hypot(c.pos.x - S.player.pos.x, c.pos.z - S.player.pos.z);
-      if (d < bestD) { bestD = d; best = c; }
-    }
-    return best;
-  }
+  let walkPhase = 0;
 
   ctx.updates.push((dt) => {
-    if (S.mode !== 'playing') {
-      mesh.position.copy(S.player.pos);
-      mesh.visible = !S.car;
-      return;
-    }
+    // E: get in / out of the nearest car.
     if (input.wasPressed('KeyE')) {
       if (S.car) {
         const car = S.car;
         S.car = null;
-        S.player.pos.set(car.pos.x + 2, 0, car.pos.z + 2);
+        S.player.pos.set(car.pos.x + 2.5, 0, car.pos.z + 2.5);
         S.player.vel.set(0, 0, 0);
-        ctx.api.toast('On foot.');
+        car.speed = 0;
       } else {
-        const car = nearestCar(5);
-        if (car) {
-          S.car = car;
-          S.player.pos.copy(car.pos);
-          ctx.api.toast(`In the ${car.kind}. Drive!`);
+        let best = null;
+        let bestD = 5;
+        for (const car of S.cars) {
+          if (car.aiPolice) continue;
+          const d = Math.hypot(car.pos.x - S.player.pos.x, car.pos.z - S.player.pos.z);
+          if (d < bestD) { bestD = d; best = car; }
+        }
+        if (best) {
+          S.car = best;
+          best.speed = 0;
+          S.player.pos.copy(best.pos);
+          S.player.heading = best.heading;
         }
       }
     }
-    if (!S.car) {
-      const fwd = (input.isDown('KeyW') || input.isDown('ArrowUp')) ? 1 : 0;
-      const back = (input.isDown('KeyS') || input.isDown('ArrowDown')) ? 1 : 0;
-      const left = (input.isDown('KeyA') || input.isDown('ArrowLeft')) ? 1 : 0;
-      const right = (input.isDown('KeyD') || input.isDown('ArrowRight')) ? 1 : 0;
+
+    if (S.car) {
+      playerMesh.visible = false;
+      return;
+    }
+    playerMesh.visible = true;
+
+    let mx = 0;
+    let mz = 0;
+    if (input.isDown('KeyW') || input.isDown('ArrowUp')) mz -= 1;
+    if (input.isDown('KeyS') || input.isDown('ArrowDown')) mz += 1;
+    if (input.isDown('KeyA') || input.isDown('ArrowLeft')) mx -= 1;
+    if (input.isDown('KeyD') || input.isDown('ArrowRight')) mx += 1;
+    const moving = mx !== 0 || mz !== 0;
+    if (moving) {
+      const len = Math.hypot(mx, mz);
+      mx /= len;
+      mz /= len;
       const sprint = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
       const speed = sprint ? CONFIG.sprintSpeed : CONFIG.walkSpeed;
-      const dx = right - left;
-      const dz = back - fwd;
-      if (dx !== 0 || dz !== 0) {
-        const len = Math.hypot(dx, dz);
-        S.player.pos.x += (dx / len) * speed * dt;
-        S.player.pos.z += (dz / len) * speed * dt;
-        S.player.heading = Math.atan2(dx / len, dz / len);
-        S.player.vel.set((dx / len) * speed, 0, (dz / len) * speed);
-      } else {
-        S.player.vel.set(0, 0, 0);
-      }
-      // Stay inside the city.
-      S.player.pos.x = Math.max(-190, Math.min(190, S.player.pos.x));
-      S.player.pos.z = Math.max(-190, Math.min(190, S.player.pos.z));
+      S.player.pos.x += mx * speed * dt;
+      S.player.pos.z += mz * speed * dt;
+      S.player.pos.x = clamp(S.player.pos.x, -190, 190);
+      S.player.pos.z = clamp(S.player.pos.z, -190, 190);
+      S.player.heading = Math.atan2(mx, mz);
+      S.player.vel.set(mx * speed, 0, mz * speed);
+      walkPhase += dt * speed * 1.4;
+      legL.rotation.x = Math.sin(walkPhase) * 0.6;
+      legR.rotation.x = -Math.sin(walkPhase) * 0.6;
+    } else {
+      S.player.vel.set(0, 0, 0);
+      legL.rotation.x *= 0.8;
+      legR.rotation.x *= 0.8;
     }
-    mesh.position.copy(S.player.pos);
-    mesh.rotation.y = S.player.heading;
-    mesh.visible = !S.car;
+    playerMesh.position.copy(S.player.pos);
+    playerMesh.rotation.y = S.player.heading;
   });
-  ctx.playerReady = true;
 }

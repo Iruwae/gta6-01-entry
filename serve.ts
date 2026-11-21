@@ -1,12 +1,14 @@
-// SOLMAR BAY — tiny static file server (Node stdlib only).
-// Serves the game/ folder on 127.0.0.1:8904 (PORT env overrides).
+// SOLMAR BAY — tiny static file server (Node stdlib only). Serves the
+// game/ folder over plain HTTP so the browser can load the ES modules
+// without file:// or CORS trouble. Listens on 127.0.0.1:8904 (PORT env
+// overrides). Resolves the game folder from its own file location, never
+// from the working directory.
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { join, extname, resolve, dirname } from 'node:path';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join, resolve, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), 'game');
+const GAME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'game');
 const PORT = Number(process.env.PORT || 8904);
 const MIME = {
   '.html': 'text/html',
@@ -21,30 +23,34 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
   try {
-    const raw = decodeURIComponent((req.url || '/').split('?')[0]);
-    const rel = raw === '/' ? 'index.html' : raw.replace(/^\/+/, '');
-    const file = resolve(join(root, rel));
-    if (!file.startsWith(root + '/') && file !== root) {
+    const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+    const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
+    const file = resolve(join(GAME_DIR, rel));
+    if (!file.startsWith(GAME_DIR + '/') && file !== GAME_DIR) {
       res.writeHead(403);
       res.end('forbidden');
       return;
     }
-    if (!existsSync(file)) {
+    if (!existsSync(file) || !statSync(file).isFile()) {
       res.writeHead(404);
       res.end('not found');
       return;
     }
-    const data = await readFile(file);
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream' });
-    res.end(data);
+    const body = readFileSync(file);
+    res.writeHead(200, {
+      'Content-Type': MIME[extname(file).toLowerCase()] || 'application/octet-stream',
+      'Content-Length': body.length,
+    });
+    if (req.method === 'HEAD') res.end();
+    else res.end(body);
   } catch (e) {
     res.writeHead(500);
-    res.end('error');
+    res.end('server error');
   }
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`SOLMAR BAY serving game/ at http://127.0.0.1:${PORT}/`);
+  console.log(`SOLMAR BAY serving ${GAME_DIR} at http://127.0.0.1:${PORT}/`);
 });

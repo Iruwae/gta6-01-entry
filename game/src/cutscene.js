@@ -1,17 +1,12 @@
-// SOLMAR BAY — intro flyover + cutscene overlay behaviour. The boot hub
-// owns the cutscene clock and the overlay; this module owns the lines and
-// the flyover camera path it cycles through.
+// SOLMAR BAY — intro cutscene. The flyover and the overlay behaviour
+// (3 sunset lines cycling every 4.5s over 14s, X skips) live in the boot
+// hub; this module is the cutscene's home and exposes the same surface.
 export const CUTSCENE_LINES = [
-  'The sun is going down over Solmar Bay — and the city is just waking up.',
-  'Vic Torres has work. Lena Cruz has the wheel. All you need is nerve.',
-  'One sunset. Ten jobs. The whole bay is watching.',
+  'The sun hangs low over Solmar Bay, and the whole city is turning gold.',
+  'Somewhere below, Vic Torres is waiting — and Lena Cruz is already behind the wheel.',
+  'One hundred and twenty dollars. One long sunset. Make it count.',
 ];
 
 export function init(ctx) {
-  ctx.cutsceneLines = CUTSCENE_LINES;
-  ctx.api.cutsceneLines = CUTSCENE_LINES;
-  ctx.updates.push(() => {
-    // Flyover camera is driven by the boot hub from ctx.cutsceneT.
-  });
-  ctx.cutsceneReady = true;
+  ctx.api.cutscene = { lines: CUTSCENE_LINES };
 }

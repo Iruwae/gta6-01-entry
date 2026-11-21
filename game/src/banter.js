@@ -1,28 +1,29 @@
-// SOLMAR BAY — crew banter: Lena and Vic talk over the toast line while
-// the player works. Every line carries a speaker tag up front, and a short
-// cooldown keeps the crew from talking over each other. (The director the
-// smoke test exercises is the one crew.js installs — banter loads just
-// before crew.)
+// SOLMAR BAY — crew banter. Lena and Vic talk over the toast line while
+// the player works; every line carries a speaker tag up front
+// ("LENA: ..." / "VIC: ...") and a short cooldown keeps the crew from
+// talking over each other. The director the smoke test exercises is the
+// one crew.js installs (banter loads just before crew).
 const LINES = {
   raceWin: [
-    ['LENA', 'See that? Told you the bay was ours tonight.'],
-    ['LENA', 'Clean win. Vic is going to love this.'],
-    ['VIC', 'That is how you drive a getaway. Beautiful.'],
+    ['LENA', 'That was clean. Vic is going to love this.'],
+    ['LENA', 'Told you my line through the gates was faster.'],
+    ['VIC', 'You drive like the bay owes you money. Good.'],
   ],
   pickup: [
-    ['LENA', 'Package is ours. Do not stop for anybody.'],
-    ['VIC', 'Good hands. Bring it home.'],
-    ['LENA', 'One more for the crew. Keep moving.'],
+    ['LENA', 'Package is in the bag. Keep it moving.'],
+    ['VIC', 'Quiet hands, quick feet. That is how we work.'],
+    ['LENA', 'One more and the whole bay knows our name.'],
   ],
   heatUp: [
-    ['LENA', 'Cops on us — drive like you mean it!'],
-    ['VIC', 'Heat is rising. Lose them before the bridge.'],
-    ['LENA', 'They are gaining. Floor it!'],
+    ['LENA', 'Cops on us. Do not stop for anything.'],
+    ['VIC', 'Lose them first, talk later. Go.'],
+    ['LENA', 'Heat is climbing — find a spray booth or a motel.'],
   ],
 };
 
 export function makeBanterDirector(toast) {
-  return {
+  let idx = 0;
+  const director = {
     _cooldown: 0,
     say(speaker, text) {
       if (this._cooldown > 0) return false;
@@ -30,21 +31,21 @@ export function makeBanterDirector(toast) {
       this._cooldown = 9;
       return true;
     },
-    raceWin() { const [s, t] = LINES.raceWin[Math.floor(Math.random() * LINES.raceWin.length)]; return this.say(s, t); },
-    pickup() { const [s, t] = LINES.pickup[Math.floor(Math.random() * LINES.pickup.length)]; return this.say(s, t); },
-    heatUp() { const [s, t] = LINES.heatUp[Math.floor(Math.random() * LINES.heatUp.length)]; return this.say(s, t); },
+    _pick(kind) {
+      const lines = LINES[kind];
+      const line = lines[idx % lines.length];
+      idx++;
+      return this.say(line[0], line[1]);
+    },
+    raceWin() { return this._pick('raceWin'); },
+    pickup() { return this._pick('pickup'); },
+    heatUp() { return this._pick('heatUp'); },
   };
+  return director;
 }
 
 export function init(ctx) {
-  ctx.state.banterDirector = makeBanterDirector(ctx.api.toast);
-  ctx.updates.push((dt) => {
-    // Idle chatter: when the heat jumps, Vic or Lena pipes up.
-    const S = ctx.state;
-    if (S.mode !== 'playing') return;
-    if (S.wanted >= 3 && S.banterDirector._cooldown <= 0 && Math.random() < dt * 0.05) {
-      S.banterDirector.heatUp();
-    }
-  });
-  ctx.banterReady = true;
+  const { state: S, api } = ctx;
+  // Install a working director; crew.js installs the final one right after.
+  S.banterDirector = makeBanterDirector(api.toast);
 }

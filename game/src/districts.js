@@ -1,22 +1,22 @@
-// SOLMAR BAY — districts: nearest-centre matching. The HUD district label
-// and S.district both follow the player.
+// SOLMAR BAY — districts: nearest-centre matching. S.district and the
+// HUD district label follow the player.
 import { CONFIG } from './config.js';
 
-export function districtAt(x, z) {
+export function nearestDistrictId(x, z) {
   let best = CONFIG.districts[0];
   let bestD = Infinity;
   for (const d of CONFIG.districts) {
-    const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z);
+    const dx = d.x - x;
+    const dz = d.z - z;
+    const dd = dx * dx + dz * dz;
     if (dd < bestD) { bestD = dd; best = d; }
   }
-  return best;
+  return best.id;
 }
 
 export function init(ctx) {
-  ctx.districtAt = districtAt;
+  const { state: S } = ctx;
   ctx.updates.push(() => {
-    const S = ctx.state;
-    S.district = districtAt(S.player.pos.x, S.player.pos.z).id;
+    S.district = nearestDistrictId(S.player.pos.x, S.player.pos.z);
   });
-  ctx.districtsReady = true;
 }
