@@ -1,4 +1,5 @@
-// SOLMAR BAY — small seeded-random helpers shared by the game.
+// SOLMAR BAY — small random helpers. Seeded generator for anything that
+// wants a repeatable roll, plus plain wrappers for everyday use.
 export function makeRng(seed) {
   let a = seed >>> 0;
   return function rng() {
@@ -34,7 +35,9 @@ export function shuffle(arr) {
   const out = arr.slice();
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
+    const t = out[i];
+    out[i] = out[j];
+    out[j] = t;
   }
   return out;
 }
@@ -46,5 +49,3 @@ export function clamp(v, min, max) {
 export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
-
-export default { makeRng, rand, randInt, pick, pickRng, chance, shuffle, clamp, lerp };

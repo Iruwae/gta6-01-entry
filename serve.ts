@@ -1,16 +1,16 @@
 // SOLMAR BAY — tiny static file server (Node stdlib only). Serves the
 // game/ folder over plain HTTP so the browser can load the modules
 // without file:// or CORS trouble. Listens on 127.0.0.1:8904 (PORT env
-// overrides). Resolves the game folder from its own file location.
+// overrides). Resolves the game folder from its own file location,
+// never from the working directory.
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { join, resolve, extname } from 'node:path';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join, resolve, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const GAME = resolve(here, 'game');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), 'game');
 const PORT = Number(process.env.PORT || 8904);
+
 const MIME = {
   '.html': 'text/html',
   '.js': 'text/javascript',
@@ -24,30 +24,28 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
   try {
-    const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
-    const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-    const file = resolve(GAME, rel);
-    if (file !== GAME && !file.startsWith(GAME + '/')) {
+    const urlPath = decodeURIComponent(req.url.split('?')[0]);
+    const file = resolve(join(root, urlPath === '/' ? 'index.html' : urlPath));
+    if (!file.startsWith(root + '/') && file !== root) {
       res.writeHead(403);
       res.end('forbidden');
       return;
     }
-    if (!existsSync(file)) {
+    if (!existsSync(file) || !statSync(file).isFile()) {
       res.writeHead(404);
       res.end('not found');
       return;
     }
-    const data = await readFile(file);
     res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream' });
-    res.end(data);
+    res.end(readFileSync(file));
   } catch (e) {
     res.writeHead(500);
-    res.end('error');
+    res.end('server error');
   }
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`SOLMAR BAY serving game/ on http://127.0.0.1:${PORT}/`);
+  console.log(`SOLMAR BAY serving game/ at http://127.0.0.1:${PORT}/`);
 });

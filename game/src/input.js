@@ -1,46 +1,60 @@
-// SOLMAR BAY — keyboard + mouse input. Edge presses live for one frame.
+// SOLMAR BAY — keyboard + mouse input. `keys` is the held set, `pressed`
+// is the edge set (cleared by endFrame), and `justPressed` is a true edge:
+// it fires once per physical press even when the OS auto-repeats the
+// keydown while the key is held, which is what headless play needs.
 export function createInput() {
   const input = {
     keys: new Set(),
     pressed: new Set(),
+    prevKeys: new Set(),
     mouse: { x: 0, y: 0, down: false },
-    attached: false,
+    _attached: false,
+
     attach() {
-      if (input.attached) return;
-      input.attached = true;
+      if (this._attached) return;
+      this._attached = true;
       window.addEventListener('keydown', (e) => {
-        if (e.repeat) return;
-        if (!input.keys.has(e.code)) input.pressed.add(e.code);
-        input.keys.add(e.code);
+        this.keys.add(e.code);
+        this.pressed.add(e.code);
       });
       window.addEventListener('keyup', (e) => {
-        input.keys.delete(e.code);
+        this.keys.delete(e.code);
       });
       window.addEventListener('blur', () => {
-        input.keys.clear();
-        input.mouse.down = false;
-      });
-      window.addEventListener('mousemove', (e) => {
-        input.mouse.x = e.clientX;
-        input.mouse.y = e.clientY;
+        this.keys.clear();
+        this.mouse.down = false;
       });
       window.addEventListener('mousedown', (e) => {
-        input.mouse.x = e.clientX;
-        input.mouse.y = e.clientY;
-        input.mouse.down = true;
+        this.mouse.down = true;
+        this.mouse.x = e.clientX;
+        this.mouse.y = e.clientY;
       });
-      window.addEventListener('mouseup', () => {
-        input.mouse.down = false;
+      window.addEventListener('mouseup', (e) => {
+        this.mouse.down = false;
+        this.mouse.x = e.clientX;
+        this.mouse.y = e.clientY;
+      });
+      window.addEventListener('mousemove', (e) => {
+        this.mouse.x = e.clientX;
+        this.mouse.y = e.clientY;
       });
     },
+
     endFrame() {
-      input.pressed.clear();
+      this.prevKeys = new Set(this.keys);
+      this.pressed.clear();
     },
+
     wasPressed(code) {
-      return input.pressed.has(code);
+      return this.pressed.has(code);
     },
+
+    justPressed(code) {
+      return this.keys.has(code) && !this.prevKeys.has(code);
+    },
+
     isDown(code) {
-      return input.keys.has(code);
+      return this.keys.has(code);
     },
   };
   return input;

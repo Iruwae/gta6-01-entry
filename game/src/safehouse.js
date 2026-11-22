@@ -1,18 +1,23 @@
-// SOLMAR BAY — safehouse. H rests at the motel: full health, and the heat
-// cools down by 40. Only works when the player is at the safehouse door.
-export function init(ctx) {
-  const { state: S, input, config, api } = ctx;
-  ctx.updates.push(() => {
-    if (S.mode !== 'playing') return;
-    if (!input.wasPressed('KeyH')) return;
-    const d = Math.hypot(S.player.pos.x - config.safehouse.x, S.player.pos.z - config.safehouse.z);
-    if (d < config.safehouse.radius + 2) {
-      S.health = config.maxHealth;
-      S.heatDirector.cool(40);
-      api.toast('You rested at the safehouse. Full health, cooler heat.');
-    }
-  });
-  ctx.api.safehouseLoaded = true;
-}
+// SOLMAR BAY — the safehouse. H rests at the motel: full health, and
+// the heat cools down (reduce heat by 40, floor 0). Only works when the
+// player is actually at the safehouse door.
+import { CONFIG } from './config.js';
 
-export default { init };
+export function init(ctx) {
+  const S = ctx.state;
+  const { input } = ctx;
+  const toast = (m) => ctx.api.toast && ctx.api.toast(m);
+
+  ctx.updates.push(() => {
+    if (S.mode !== 'playing' || S.cutscene) return;
+    if (!input.justPressed('KeyH')) return;
+    const loc = CONFIG.locations.safehouse;
+    const d = Math.hypot(S.player.pos.x - loc.x, S.player.pos.z - loc.z);
+    if (d >= loc.radius) return;
+    S.player.health = CONFIG.maxHealth;
+    S.heat = Math.max(0, S.heat - 40);
+    toast('Rested at the safehouse. Health restored, heat cooled.');
+  });
+
+  ctx.flags.safehouse = true;
+}

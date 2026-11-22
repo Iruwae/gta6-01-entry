@@ -1,25 +1,25 @@
-// SOLMAR BAY — game feel: screen shake, hit flashes on the #flash overlay,
-// and the toast helper other modules call. A toast is only replaced by a
-// newer toast.
+// SOLMAR BAY — game feel. Screen shake (a CSS translate on the game
+// canvas) and the toast helper other modules call. A toast is only
+// replaced by a newer toast — the boot hub owns that rule.
 export function init(ctx) {
-  const { dom } = ctx;
-  ctx.api.flash = () => {
-    const el = dom.flash;
-    if (!el) return;
-    el.style.opacity = '0.55';
-    setTimeout(() => {
-      el.style.opacity = '0';
-    }, 110);
+  let shakeT = 0;
+  let shakeMag = 0;
+  ctx.api.shake = (mag) => {
+    shakeMag = Math.max(shakeMag, mag || 4);
+    shakeT = 0.35;
   };
-  ctx.api.shake = (amt = 6) => {
-    const el = dom.gameContainer;
-    if (!el) return;
-    el.style.transform = `translate(${(Math.random() - 0.5) * amt}px, ${(Math.random() - 0.5) * amt}px)`;
-    setTimeout(() => {
-      el.style.transform = '';
-    }, 130);
-  };
-  ctx.api.juiceLoaded = true;
+  ctx.updates.push((dt) => {
+    const canvas = ctx.renderer ? ctx.renderer.domElement : null;
+    if (!canvas) return;
+    if (shakeT > 0) {
+      shakeT -= dt;
+      const m = shakeMag * (shakeT / 0.35);
+      canvas.style.transform = `translate(${(Math.random() - 0.5) * m}px, ${(Math.random() - 0.5) * m}px)`;
+      if (shakeT <= 0) {
+        canvas.style.transform = '';
+        shakeMag = 0;
+      }
+    }
+  });
+  ctx.flags.juice = true;
 }
-
-export default { init };

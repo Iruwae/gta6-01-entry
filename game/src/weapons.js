@@ -1,42 +1,45 @@
 // SOLMAR BAY — the four weapon slots. Pistol always available; SMG stays
-// locked until the first job is done. Firing spends ammo (mouse held), R
-// reloads (reloadT counts down, the refill commits atomically to a full
-// magazine when it hits zero), switching sets the mag to the new weapon's
-// magazine. Keys 1-4 switch.
+// locked until the first job is done (missionIndex >= 1). Firing spends
+// ammo (mouse held), R reloads (reloadT counts down, the refill commits
+// atomically to a full magazine when it hits zero), switching sets the
+// mag to the new weapon's magazine. Keys 1-4 switch.
 export function init(ctx) {
-  const { state: S, input, api } = ctx;
-  ctx.updates.push(() => {
-    if (S.mode !== 'playing') return;
+  const S = ctx.state;
+  const { input } = ctx;
+
+  ctx.updates.push((dt) => {
+    if (S.mode !== 'playing' || S.cutscene) return;
     const p = S.player;
+    const loadout = p.loadout;
+
+    // Switch weapons on 1-4 (edge-triggered, unlock-gated in the loadout).
     for (let i = 0; i < 4; i++) {
-      if (input.wasPressed('Digit' + (i + 1))) {
-        const ok = p.loadout.equip(i);
-        if (ok) {
-          api.toast(`${p.loadout.current().def.name} equipped.`);
-        } else {
-          api.toast(`${S.player.loadout.slots[i].def.name} is locked — finish more jobs.`);
-        }
+      if (input.justPressed(`Digit${i + 1}`)) loadout.equip(i);
+    }
+
+    // Reload on R.
+    if (input.justPressed('KeyR') && !p.reloading) {
+      const cur = loadout.current();
+      if (cur.mag < cur.def.mag) {
+        p.reloading = true;
+        p.reloadT = cur.def.reload;
+        if (ctx.api.audio) ctx.api.audio.reload();
       }
     }
-    const slot = p.loadout.current();
-    if (input.wasPressed('KeyR') && !p.reloading && slot.mag < slot.def.mag) {
-      p.reloading = true;
-      p.reloadT = slot.def.reload;
-      if (api.audio) api.audio.reload();
-    }
+
+    // Fire while the mouse is held.
     if (input.mouse.down && !p.reloading && p.fireT <= 0) {
-      if (slot.mag > 0) {
-        slot.mag -= 1;
-        p.fireT = slot.def.interval;
-        if (api.audio) api.audio.shot();
-        if (api.flash) api.flash();
+      const cur = loadout.current();
+      if (cur.mag > 0) {
+        cur.mag -= 1;
+        p.fireT = cur.def.interval;
+        if (ctx.api.audio) ctx.api.audio.shot();
+        if (ctx.api.flash) ctx.api.flash(0.12);
       } else {
-        p.reloading = true;
-        p.reloadT = slot.def.reload;
+        p.fireT = 0.15; // dry-fire click pause
       }
     }
   });
-  ctx.api.weaponsLoaded = true;
-}
 
-export default { init };
+  ctx.flags.weapons = true;
+}

@@ -1,50 +1,51 @@
-// SOLMAR BAY — crew banter: Lena and Vic talk over the toast line while
-// the player works. Every line carries a speaker tag up front. A short
-// cooldown keeps the crew from talking over each other. The director the
-// smoke test exercises is the one crew.js installs; this module provides
-// the same director shape as a fallback.
-export function init(ctx) {
-  const { state: S } = ctx;
-  const lines = {
-    raceWin: [
-      ['LENA', 'Told you. Nobody outdrives us on this bay.'],
-      ['LENA', 'That was clean. Vic is going to love this.'],
-      ['VIC', 'Beautiful driving. You are worth every dollar.'],
-    ],
-    pickup: [
-      ['LENA', 'Package is in the bag. Move, before they notice.'],
-      ['VIC', 'Good hands. Bring it home slow and quiet.'],
-      ['LENA', 'Got it. Now disappear like the sun just did.'],
-    ],
-    heatUp: [
-      ['VIC', 'Cops are on you. Lose them or lose everything.'],
-      ['LENA', 'Heat is climbing. Drive like you mean it.'],
-      ['VIC', 'They saw you. Do not bring them to my yard.'],
-    ],
-  };
-  let idx = 0;
-  S.banterDirector = {
-    _cooldown: 0,
-    say(speaker, text) {
-      if (this._cooldown > 0) return false;
-      ctx.api.toast(`${speaker}: "${text}"`);
-      this._cooldown = 9;
-      return true;
-    },
-    raceWin() {
-      const l = lines.raceWin[idx++ % lines.raceWin.length];
-      return this.say(l[0], l[1]);
-    },
-    pickup() {
-      const l = lines.pickup[idx++ % lines.pickup.length];
-      return this.say(l[0], l[1]);
-    },
-    heatUp() {
-      const l = lines.heatUp[idx++ % lines.heatUp.length];
-      return this.say(l[0], l[1]);
-    },
-  };
-  ctx.api.banterLines = lines;
-}
+// SOLMAR BAY — crew banter. Lena and Vic talk over the toast line while
+// the player works. Every line carries a speaker tag up front
+// ("LENA: ..." / "VIC: ..."). A short cooldown keeps the crew from
+// talking over each other. The director the game actually uses is the
+// one crew.js installs (banter loads just before crew); this module
+// makes sure a working director exists and fires contextual lines.
+import { pick } from './random.js';
 
-export default { init };
+const LINES = {
+  raceWin: ['LENA: "Told you. Nobody outdrives us on this bay."'],
+  pickup: ['LENA: "Package secured. You make this look easy."'],
+  heatUp: ['VIC: "You lit the whole bay up. Cool it down, kid."'],
+};
+
+export function init(ctx) {
+  const S = ctx.state;
+  if (!S.banterDirector) {
+    S.banterDirector = {
+      _cooldown: 0,
+      say(speaker, text) {
+        if (this._cooldown > 0) return false;
+        if (ctx.api.toast) ctx.api.toast(`${speaker}: "${text}"`);
+        this._cooldown = 9;
+        return true;
+      },
+      raceWin() {
+        return this.say('LENA', pick(LINES.raceWin).replace(/^LENA: "/, '').replace(/"$/, ''));
+      },
+      pickup() {
+        return this.say('LENA', 'Package secured. You make this look easy.');
+      },
+      heatUp() {
+        return this.say('VIC', 'You lit the whole bay up. Cool it down, kid.');
+      },
+    };
+  }
+  let lastPackages = S.stats.packages;
+  let lastHeat = S.heat;
+  ctx.updates.push(() => {
+    if (S.stats.packages > lastPackages) {
+      lastPackages = S.stats.packages;
+      return; // side.js already fires the pickup line
+    }
+    lastPackages = S.stats.packages;
+    if (S.heat >= 60 && lastHeat < 60 && S.banterDirector) {
+      S.banterDirector.heatUp();
+    }
+    lastHeat = S.heat;
+  });
+  ctx.flags.banter = true;
+}

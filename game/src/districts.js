@@ -1,11 +1,15 @@
-// SOLMAR BAY — districts: nearest-centre matching drives S.district.
-export function nearestDistrict(config, x, z) {
-  let best = config.districts[0];
-  let bd = Infinity;
-  for (const d of config.districts) {
+// SOLMAR BAY — districts. The player's district is the nearest district
+// centre; the HUD label follows it. Pinned centres: HARBOR (120,120),
+// BEACH (0,165), UPTOWN (120,-90), THE STRIP (0,135).
+import { CONFIG } from './config.js';
+
+export function nearestDistrict(x, z) {
+  let best = CONFIG.districts[0];
+  let bestD = Infinity;
+  for (const d of CONFIG.districts) {
     const dd = (d.x - x) * (d.x - x) + (d.z - z) * (d.z - z);
-    if (dd < bd) {
-      bd = dd;
+    if (dd < bestD) {
+      bestD = dd;
       best = d;
     }
   }
@@ -13,11 +17,9 @@ export function nearestDistrict(config, x, z) {
 }
 
 export function init(ctx) {
-  const { state: S, config } = ctx;
+  const S = ctx.state;
   ctx.updates.push(() => {
-    S.district = nearestDistrict(config, S.player.pos.x, S.player.pos.z).id;
+    S.district = nearestDistrict(S.player.pos.x, S.player.pos.z).id;
   });
-  ctx.api.districtAt = (x, z) => nearestDistrict(config, x, z);
+  ctx.flags.districts = true;
 }
-
-export default { init };
