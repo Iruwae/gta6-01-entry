@@ -1,34 +1,28 @@
-// SOLMAR BAY — wanted level behaviour. Heat cools slowly on its own;
-// the pay-n-spray booth wipes it clean for $150 while the player drives
-// through it (fires once per entry, re-arms when the player leaves the
-// radius, and can be disarmed via S.heatDirector.sprayBooth.armed).
+// Wanted behaviour: heat cools slowly on its own; the pay-n-spray booth
+// wipes heat clean for $150 while the player drives through it.
 import { CONFIG } from './config.js';
 
 export function init(ctx) {
-  const S = ctx.state;
+  const { state: S } = ctx;
   const booth = S.heatDirector.sprayBooth;
-
   ctx.updates.push((dt) => {
-    if (S.mode !== 'playing') return;
     // Slow natural cooldown.
-    if (S.heat > 0) S.heatDirector.cool(0.25 * dt);
-    const loc = CONFIG.locations.spray;
-    const ref = S.car ? S.car.pos : S.player.pos;
-    const d = Math.hypot(ref.x - loc.x, ref.z - loc.z);
-    if (d > loc.radius) {
-      booth.armed = true;
-      return;
+    if (S.heat > 0) S.heat = Math.max(0, S.heat - dt * 0.2);
+    // Pay-n-spray: only while driving through, once per entry.
+    const car = S.car;
+    const px = car ? car.pos.x : S.player.pos.x;
+    const pz = car ? car.pos.z : S.player.pos.z;
+    const dx = px - booth.x;
+    const dz = pz - booth.z;
+    const inside = Math.sqrt(dx * dx + dz * dz) < booth.radius;
+    if (inside && booth.armed && car && Math.abs(car.speed) > 3 && S.heat > 0 && S.cash >= booth.cost) {
+      S.cash -= booth.cost;
+      S.heat = 0;
+      booth.armed = false;
+      if (ctx.api.toast) ctx.api.toast(`Pay-n-spray: heat wiped clean. -$${booth.cost}`);
     }
-    // Inside the booth: only a driven car gets the spray.
-    if (!S.car) return;
-    if (!booth.armed) return;
-    if (S.heat <= 0) return;
-    if (S.cash < loc.cost) return;
-    S.cash -= loc.cost;
-    S.heat = 0;
-    booth.armed = false;
-    if (ctx.api.toast) ctx.api.toast(`Pay-n-spray: heat wiped clean -$${loc.cost}`);
+    if (!inside && !booth.armed) booth.armed = true;
   });
-
-  ctx.flags.heat = true;
 }
+
+export default init;

@@ -1,38 +1,45 @@
-// SOLMAR BAY — day/night progression. The clock opens at 18:28; dusk
-// starts at +62 minutes (19:30), night lands at +150 (21:00). The night
-// value eases toward its target so the sunset slides into neon, the sun
-// dims and cools, and the sky dome follows.
+// Day/night progression: phase + night ramp + sun + sky uniform.
+// The boot hub owns the per-frame application; this module exposes the
+// same math as helpers so the hub and the module never drift apart.
 import { CONFIG } from './config.js';
-import { clamp } from './random.js';
 
-export function computeDayNight(S) {
-  const t = S.time;
-  let target = 0;
-  let phase = 'SUNSET';
-  if (t >= CONFIG.nightAt) {
-    target = 1;
-    phase = 'NIGHT';
-  } else if (t >= CONFIG.duskAt) {
-    target = (t - CONFIG.duskAt) / (CONFIG.nightAt - CONFIG.duskAt);
-    phase = 'DUSK';
+export function phaseFor(timeMinutes) {
+  if (timeMinutes >= CONFIG.nightAt) return 'NIGHT';
+  if (timeMinutes >= CONFIG.duskAt) return 'DUSK';
+  return 'SUNSET';
+}
+
+export function targetNightFor(timeMinutes) {
+  if (timeMinutes >= CONFIG.nightAt) return 1;
+  if (timeMinutes >= CONFIG.duskAt) {
+    return (timeMinutes - CONFIG.duskAt) / (CONFIG.nightAt - CONFIG.duskAt);
   }
-  return { target, phase };
+  return 0;
+}
+
+export function sunIntensityFor(night) {
+  return 2.2 - night * 1.85;
+}
+
+export function updateDayNight(S, dt) {
+  const phase = phaseFor(S.time);
+  const target = targetNightFor(S.time);
+  S.dayNight.phase = phase;
+  const step = 0.6 * dt;
+  if (S.dayNight.night < target) S.dayNight.night = Math.min(target, S.dayNight.night + step);
+  else if (S.dayNight.night > target) S.dayNight.night = Math.max(target, S.dayNight.night - step);
+  const night = S.dayNight.night;
+  if (S.sunLight) {
+    S.sunLight.intensity = sunIntensityFor(night);
+    S.sunLight.color.setHex(night > 0.6 ? 0x8fb4ff : 0xffb347);
+  }
+  if (S.skyDome) {
+    S.skyDome.material.uniforms.uNight.value = night;
+  }
 }
 
 export function init(ctx) {
-  const S = ctx.state;
-  ctx.updates.push((dt) => {
-    const { target, phase } = computeDayNight(S);
-    S.dayNight.phase = phase;
-    S.dayNight.night += (target - S.dayNight.night) * Math.min(1, 0.6 * dt);
-    S.dayNight.night = clamp(S.dayNight.night, 0, 1);
-    if (S.sunLight) {
-      S.sunLight.intensity = 2.2 - S.dayNight.night * 1.85;
-      S.sunLight.color.set(S.dayNight.night > 0.6 ? 0x8fb4ff : 0xffb347);
-    }
-    if (S.skyDome) {
-      S.skyDome.material.uniforms.uNight.value = S.dayNight.night;
-    }
-  });
-  ctx.flags.daynight = true;
+  ctx.daynight = { phaseFor, targetNightFor, sunIntensityFor, update: (dt) => updateDayNight(ctx.state, dt) };
 }
+
+export default init;

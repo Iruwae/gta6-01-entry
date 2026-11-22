@@ -1,9 +1,11 @@
-// SOLMAR BAY — daily challenges board. The three rows (collect 3
-// packages, win 1 street race, finish 1 taxi fare) each pay exactly once
-// the moment their stat reaches target, via the challengesDirector in
-// state.js. The boot hub ticks it every frame.
+// Daily challenges board — the three rows, each paying exactly once the
+// moment its stat reaches target (via the challengesDirector in state.js).
 export function init(ctx) {
-  const S = ctx.state;
-  ctx.api.challengeRows = () => S.challengesDirector.rows();
-  ctx.flags.challenges = true;
+  const { state: S } = ctx;
+  ctx.updates.push(() => {
+    if (S.mode !== 'playing') return;
+    S.challengesDirector.tick();
+  });
 }
+
+export default init;

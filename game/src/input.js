@@ -1,60 +1,60 @@
-// SOLMAR BAY — keyboard + mouse input. `keys` is the held set, `pressed`
-// is the edge set (cleared by endFrame), and `justPressed` is a true edge:
-// it fires once per physical press even when the OS auto-repeats the
-// keydown while the key is held, which is what headless play needs.
+// Keyboard + mouse input.
+//
+// Edge presses are frame-safe: a keydown lands in `pressed` the moment it
+// fires, and `beginFrame()` (called once per frame, before any update
+// runs) moves that set into `active`, which is what `wasPressed` reads.
+// A press that arrives mid-frame — e.g. during a long software render —
+// therefore survives into the next frame's updates instead of being
+// cleared by the same frame that never observed it.
 export function createInput() {
   const input = {
     keys: new Set(),
     pressed: new Set(),
-    prevKeys: new Set(),
+    active: new Set(),
     mouse: { x: 0, y: 0, down: false },
     _attached: false,
-
     attach() {
-      if (this._attached) return;
-      this._attached = true;
+      if (input._attached) return;
+      input._attached = true;
       window.addEventListener('keydown', (e) => {
-        this.keys.add(e.code);
-        this.pressed.add(e.code);
+        if (!input.keys.has(e.code)) input.pressed.add(e.code);
+        input.keys.add(e.code);
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+          e.preventDefault();
+        }
       });
       window.addEventListener('keyup', (e) => {
-        this.keys.delete(e.code);
+        input.keys.delete(e.code);
       });
       window.addEventListener('blur', () => {
-        this.keys.clear();
-        this.mouse.down = false;
-      });
-      window.addEventListener('mousedown', (e) => {
-        this.mouse.down = true;
-        this.mouse.x = e.clientX;
-        this.mouse.y = e.clientY;
-      });
-      window.addEventListener('mouseup', (e) => {
-        this.mouse.down = false;
-        this.mouse.x = e.clientX;
-        this.mouse.y = e.clientY;
+        input.keys.clear();
+        input.mouse.down = false;
       });
       window.addEventListener('mousemove', (e) => {
-        this.mouse.x = e.clientX;
-        this.mouse.y = e.clientY;
+        input.mouse.x = e.clientX;
+        input.mouse.y = e.clientY;
+      });
+      window.addEventListener('mousedown', (e) => {
+        input.mouse.x = e.clientX;
+        input.mouse.y = e.clientY;
+        input.mouse.down = true;
+      });
+      window.addEventListener('mouseup', () => {
+        input.mouse.down = false;
       });
     },
-
-    endFrame() {
-      this.prevKeys = new Set(this.keys);
-      this.pressed.clear();
+    // Call once per frame, before any update reads wasPressed.
+    beginFrame() {
+      input.active = new Set(input.pressed);
+      input.pressed.clear();
     },
-
+    // Kept for API compatibility; the edge set is consumed by beginFrame.
+    endFrame() {},
     wasPressed(code) {
-      return this.pressed.has(code);
+      return input.active.has(code);
     },
-
-    justPressed(code) {
-      return this.keys.has(code) && !this.prevKeys.has(code);
-    },
-
     isDown(code) {
-      return this.keys.has(code);
+      return input.keys.has(code);
     },
   };
   return input;

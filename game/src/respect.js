@@ -1,23 +1,20 @@
-// SOLMAR BAY — respect ranks. The ladder (NOBODY at 0, SMALL-TIME at
-// 50, STREET HUSTLER at 150, CREW LEADER at 400, BAY BOSS at 800, BAY
-// LEGEND at 1500) is driven by respectDirector.add; this module keeps
-// the HUD rank line honest even if the director is swapped.
+// Respect ranks — the ladder from config, driven by respectDirector.add.
 import { CONFIG } from './config.js';
 
-export function rankFor(points) {
+export function rankFor(respect) {
   let rank = CONFIG.respectLadder[0];
-  for (const entry of CONFIG.respectLadder) {
-    if (points >= entry.min) rank = entry;
+  for (const r of CONFIG.respectLadder) {
+    if (respect >= r.min) rank = r;
   }
-  return rank;
+  return { title: rank.title, min: rank.min };
 }
 
 export function init(ctx) {
-  const S = ctx.state;
+  const { state: S } = ctx;
+  // Keep the rank object honest even if respect was set directly.
   ctx.updates.push(() => {
-    if (S.respectDirector) {
-      S.respectDirector.rank = rankFor(S.respect);
-    }
+    S.respectDirector.rank = rankFor(S.respect);
   });
-  ctx.flags.respect = true;
 }
+
+export default init;

@@ -1,59 +1,52 @@
-// SOLMAR BAY — police helicopter. Appears once wanted hits 3 stars,
-// circles overhead above the player, and leaves (S.heli back to null)
-// as soon as wanted drops below 3.
+// Police helicopter: appears at 3+ stars, circles overhead, leaves below 3.
 import * as THREE from '../vendor/three.module.min.js';
 
 export function init(ctx) {
-  const S = ctx.state;
-  const { scene } = ctx;
+  const { THREE, scene, state: S } = ctx;
   let angle = 0;
-
-  function spawnHeli() {
-    const group = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 1.2, 5.0),
-      new THREE.MeshLambertMaterial({ color: 0x2a3a55 })
-    );
-    group.add(body);
-    const rotor = new THREE.Mesh(
-      new THREE.BoxGeometry(9, 0.12, 0.5),
-      new THREE.MeshBasicMaterial({ color: 0xcccccc })
-    );
-    rotor.position.y = 1.0;
-    group.add(rotor);
-    const light = new THREE.Mesh(
-      new THREE.SphereGeometry(0.35, 8, 6),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    light.position.set(0, -0.9, 1.5);
-    group.add(light);
-    scene.add(group);
-    S.heli = { pos: new THREE.Vector3(0, 38, 0), mesh: group, rotor };
-  }
-
-  function removeHeli() {
-    if (S.heli && S.heli.mesh) scene.remove(S.heli.mesh);
-    S.heli = null;
-  }
-
+  let rotor = null;
   ctx.updates.push((dt) => {
-    if (S.wanted >= 3) {
-      if (!S.heli) spawnHeli();
-      angle += dt * 0.35;
-      S.heli.pos.set(
-        S.player.pos.x + Math.cos(angle) * 22,
-        38,
-        S.player.pos.z + Math.sin(angle) * 22
+    if (S.wanted >= 3 && !S.heli) {
+      const group = new THREE.Group();
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a2a44, roughness: 0.5, metalness: 0.4 });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 4.5), bodyMat);
+      group.add(body);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 3.5), bodyMat);
+      tail.position.set(0, 0.2, -3.6);
+      group.add(tail);
+      rotor = new THREE.Mesh(
+        new THREE.BoxGeometry(9, 0.08, 0.5),
+        new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.6 })
       );
-      if (S.heli.mesh) {
-        S.heli.mesh.position.copy(S.heli.pos);
-        S.heli.mesh.rotation.y = -angle;
-        if (S.heli.rotor) S.heli.rotor.rotation.y += dt * 18;
-      }
-    } else if (S.heli) {
-      removeHeli();
+      rotor.position.y = 0.9;
+      group.add(rotor);
+      const spot = new THREE.Mesh(
+        new THREE.ConeGeometry(1.2, 6, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.25, side: THREE.DoubleSide })
+      );
+      spot.position.y = -3.4;
+      spot.rotation.x = Math.PI;
+      group.add(spot);
+      group.position.set(S.player.pos.x + 12, 30, S.player.pos.z);
+      scene.add(group);
+      S.heli = { pos: group.position, mesh: group };
+    }
+    if (S.wanted < 3 && S.heli) {
+      scene.remove(S.heli.mesh);
+      S.heli = null;
+      rotor = null;
+      return;
+    }
+    if (S.heli) {
+      angle += dt * 0.4;
+      S.heli.pos.set(
+        S.player.pos.x + Math.cos(angle) * 12,
+        30,
+        S.player.pos.z + Math.sin(angle) * 12
+      );
+      if (rotor) rotor.rotation.y += dt * 9;
     }
   });
-
-  ctx.flags.heli2 = true;
 }
+
+export default init;

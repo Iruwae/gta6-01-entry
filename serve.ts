@@ -1,16 +1,14 @@
-// SOLMAR BAY — tiny static file server (Node stdlib only). Serves the
-// game/ folder over plain HTTP so the browser can load the modules
-// without file:// or CORS trouble. Listens on 127.0.0.1:8904 (PORT env
-// overrides). Resolves the game folder from its own file location,
-// never from the working directory.
+// SOLMAR BAY — tiny static file server (Node stdlib only).
+// Serves the game/ folder over plain HTTP so the browser can load the
+// modules without file:// or CORS trouble.
+// Listens on 127.0.0.1:8904 (PORT env overrides).
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), 'game');
-const PORT = Number(process.env.PORT || 8904);
-
+const root = join(dirname(fileURLToPath(import.meta.url)), 'game');
+const port = Number(process.env.PORT || 8904);
 const MIME = {
   '.html': 'text/html',
   '.js': 'text/javascript',
@@ -26,9 +24,9 @@ const MIME = {
 
 const server = createServer((req, res) => {
   try {
-    const urlPath = decodeURIComponent(req.url.split('?')[0]);
-    const file = resolve(join(root, urlPath === '/' ? 'index.html' : urlPath));
-    if (!file.startsWith(root + '/') && file !== root) {
+    const p = decodeURIComponent((req.url || '/').split('?')[0]);
+    const file = resolve(join(root, p === '/' ? 'index.html' : p));
+    if (file !== root && !file.startsWith(root + '/')) {
       res.writeHead(403);
       res.end('forbidden');
       return;
@@ -42,10 +40,10 @@ const server = createServer((req, res) => {
     res.end(readFileSync(file));
   } catch (e) {
     res.writeHead(500);
-    res.end('server error');
+    res.end('error');
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`SOLMAR BAY serving game/ at http://127.0.0.1:${PORT}/`);
+server.listen(port, '127.0.0.1', () => {
+  console.log(`SOLMAR BAY serving game/ on http://127.0.0.1:${port}/`);
 });

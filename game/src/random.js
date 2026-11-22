@@ -1,5 +1,4 @@
-// SOLMAR BAY — small random helpers. Seeded generator for anything that
-// wants a repeatable roll, plus plain wrappers for everyday use.
+// Seeded RNG + small helpers. No DOM, no three.js — pure math.
 export function makeRng(seed) {
   let a = seed >>> 0;
   return function rng() {
@@ -35,9 +34,9 @@ export function shuffle(arr) {
   const out = arr.slice();
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    const t = out[i];
+    const tmp = out[i];
     out[i] = out[j];
-    out[j] = t;
+    out[j] = tmp;
   }
   return out;
 }
@@ -49,3 +48,5 @@ export function clamp(v, min, max) {
 export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
+
+export default { makeRng, rand, randInt, pick, pickRng, chance, shuffle, clamp, lerp };

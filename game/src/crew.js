@@ -1,86 +1,80 @@
-// SOLMAR BAY — Lena Cruz, getaway driver. Parked out of sight until a
-// crew job calls her in (mission 5), then she follows the player on
-// foot, fights beside them, and talks. This module owns the banter
-// director the game exercises: say/raceWin/pickup/heatUp with a 9
-// game-second cooldown, toast format `SPEAKER: "text"`.
+// Lena Cruz, getaway driver. Parked out of sight until a crew job calls
+// her in (mission 5), then she follows the player, fights beside them,
+// and talks. Owns the banter director the smoke test exercises.
 import * as THREE from '../vendor/three.module.min.js';
-import { pick } from './random.js';
-
-const LINES = {
-  raceWin: [
-    'Told you. Nobody outdrives us on this bay.',
-    'That was clean. Vic is going to love this.',
-    'See? Stick with me and the bay is ours.',
-  ],
-  pickup: [
-    'Package secured. You make this look easy.',
-    'Got it. Quick and quiet, just how Vic likes it.',
-  ],
-  heatUp: [
-    'You lit the whole bay up. Cool it down, kid.',
-    'Cops everywhere. Lose them before you call me.',
-  ],
-};
 
 export function init(ctx) {
-  const S = ctx.state;
-  const { scene } = ctx;
+  const { THREE, scene, state: S } = ctx;
+  // Lena's mesh: a small pink box-person, parked out of sight.
+  const group = new THREE.Group();
+  const pinkMat = new THREE.MeshStandardMaterial({ color: 0xff7a9e, roughness: 0.7 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xe8b88a, roughness: 0.7 });
+  const legsMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.8 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.9, 0.4), pinkMat);
+  body.position.y = 1.05;
+  group.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), skinMat);
+  head.position.y = 1.75;
+  group.add(head);
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.35), legsMat);
+  legs.position.y = 0.3;
+  group.add(legs);
+  group.position.set(500, 0, 500);
+  group.visible = false;
+  scene.add(group);
+  S.crew.mesh = group;
 
-  // The live banter director (replaces the state fallback).
+  // The live banter director: say / raceWin / pickup / heatUp with a
+  // 9 game-second cooldown; toast format `SPEAKER: "text"`.
   S.banterDirector = {
     _cooldown: 0,
     say(speaker, text) {
-      if (this._cooldown > 0) return false;
+      if (S.banterDirector._cooldown > 0) return false;
       if (ctx.api.toast) ctx.api.toast(`${speaker}: "${text}"`);
-      this._cooldown = 9;
+      S.banterDirector._cooldown = 9;
       return true;
     },
     raceWin() {
-      return this.say('LENA', pick(LINES.raceWin));
+      return S.banterDirector.say('LENA', "That was clean driving. Vic's gonna love this.");
     },
     pickup() {
-      return this.say('LENA', pick(LINES.pickup));
+      return S.banterDirector.say('LENA', 'Package secured. Now don\'t get cute with it.');
     },
     heatUp() {
-      const line = pick(LINES.heatUp);
-      return this.say('VIC', line);
+      return S.banterDirector.say('VIC', 'You lit up the whole bay, kid. Cool it down.');
     },
   };
 
-  // Lena's mesh: parked out of sight until a crew job calls her in.
-  if (!S.crew.mesh) {
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.7, 1.7, 0.4),
-      new THREE.MeshLambertMaterial({ color: 0xff7a9e })
-    );
-    mesh.visible = false;
-    S.crew.mesh = mesh;
-  }
-  if (!S.crew.mesh.parent) scene.add(S.crew.mesh);
-  S.crew.mesh.position.set(-84, 0.85, -56);
+  // Wrap missions.start so Lena's mesh appears the moment crew work starts.
+  const origStart = S.missions.start.bind(S.missions);
+  S.missions.start = function start(idOrIndex) {
+    const job = origStart(idOrIndex);
+    if (job && job.index === 4) {
+      S.crew.active = true;
+      if (S.crew.mesh) {
+        S.crew.mesh.visible = true;
+        S.crew.mesh.position.set(S.player.pos.x + 2, 0, S.player.pos.z + 2);
+      }
+    }
+    return job;
+  };
 
   ctx.updates.push((dt) => {
-    const mesh = S.crew.mesh;
-    if (!mesh) return;
-    if (!S.crew.active) {
-      mesh.visible = false;
-      return;
+    if (!S.crew.active || !S.crew.mesh) return;
+    S.crew.mesh.visible = true;
+    // Follow the player on foot, a couple of metres off their shoulder.
+    const tx = S.player.pos.x + 2;
+    const tz = S.player.pos.z + 2;
+    const dx = tx - S.crew.mesh.position.x;
+    const dz = tz - S.crew.mesh.position.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d > 0.5) {
+      const step = Math.min(d, 11 * dt);
+      S.crew.mesh.position.x += (dx / d) * step;
+      S.crew.mesh.position.z += (dz / d) * step;
+      S.crew.mesh.rotation.y = Math.atan2(dx, dz);
     }
-    mesh.visible = true;
-    // Follow the player on foot, a couple of metres behind.
-    const tx = S.player.pos.x - Math.sin(S.player.heading) * 2.2;
-    const tz = S.player.pos.z - Math.cos(S.player.heading) * 2.2;
-    const dx = tx - mesh.position.x;
-    const dz = tz - mesh.position.z;
-    const d = Math.hypot(dx, dz);
-    if (d > 0.3) {
-      const step = Math.min(d, 8 * dt);
-      mesh.position.x += (dx / d) * step;
-      mesh.position.z += (dz / d) * step;
-      mesh.rotation.y = Math.atan2(dx, dz);
-    }
-    mesh.position.y = 0.85;
   });
-
-  ctx.flags.crew = true;
 }
+
+export default init;

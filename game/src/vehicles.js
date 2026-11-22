@@ -1,130 +1,114 @@
-// SOLMAR BAY — vehicles. Cars and bikes are plain objects on S.cars:
-// {kind, pos, heading, speed, maxHealth, health, tune, perf(), mesh}.
-// perf() is the base perf for the kind plus tuning. Driving: WASD
-// accelerate/brake/steer, speed in MPH on the HUD, gears by speed.
-// Police cars are added by police.js, never here.
+// Vehicles: parked rides, driving, and the car factory the garage reuses.
 import * as THREE from '../vendor/three.module.min.js';
 import { CONFIG } from './config.js';
-import { clamp } from './random.js';
 
-const BODY_COLORS = {
-  bike: 0xc23a5e,
-  sedan: 0x4a7a9e,
-  pickup: 0x7a5a2e,
-  sport: 0xff7a3d,
+const COLORS = {
+  bike: 0x2a2a33,
+  sport: 0xff4d6d,
+  pickup: 0xe8853d,
+  sedan: 0x4d7dd1,
 };
 
-export function makeCar(ctx, kind, x, z, opts = {}) {
-  const S = ctx.state;
-  const base = CONFIG.vehicleStats[kind] || CONFIG.vehicleStats.sedan;
+export function makeCar(THREE, kind, x, z, heading = 0, tune = null) {
+  const base = CONFIG.vehicleBase[kind] || CONFIG.vehicleBase.sedan;
   const car = {
     kind,
     pos: new THREE.Vector3(x, 0, z),
-    heading: opts.heading || 0,
+    heading,
     speed: 0,
     maxHealth: base.maxHealth,
-    health: opts.health ?? base.maxHealth,
-    tune: { nos: 0, engine: 0, armor: 0, paint: 'default', ...(opts.tune || {}) },
-    color: opts.color || BODY_COLORS[kind] || 0x888888,
-    aiPolice: false,
-    traffic: false,
-    callsign: null,
-    brain: null,
+    health: base.maxHealth,
+    tune: tune || { nos: 0, engine: 0, armor: 0, paint: 'default' },
     mesh: null,
     perf() {
-      return base.perf + this.tune.engine * 4 + this.tune.nos * 6;
+      return base.perf + (car.tune.engine || 0) * 4 + (car.tune.nos || 0) * 6;
     },
   };
   const group = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: car.color });
+  const bodyMat = new THREE.MeshStandardMaterial({ color: COLORS[kind] || 0x888888, roughness: 0.5, metalness: 0.4 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x111118, roughness: 0.9 });
   if (kind === 'bike') {
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 2.0), bodyMat);
-    body.position.y = 0.7;
-    group.add(body);
-    const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
-    for (const wz of [-0.8, 0.8]) {
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.2, 10), wheelMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(0, 0.35, wz);
-      group.add(wheel);
-    }
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 2.2), bodyMat);
+    frame.position.y = 0.6;
+    group.add(frame);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.25, 0.7), darkMat);
+    seat.position.set(0, 0.9, -0.4);
+    group.add(seat);
   } else {
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, 4.2), bodyMat);
-    body.position.y = 0.6;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.7, 4.2), bodyMat);
+    body.position.y = 0.55;
     group.add(body);
-    const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(1.7, 0.6, 2.2),
-      new THREE.MeshLambertMaterial({ color: 0x1a2433 })
-    );
-    cabin.position.set(0, 1.2, kind === 'pickup' ? 0.9 : -0.2);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.6, 2.2), darkMat);
+    cabin.position.set(0, 1.15, -0.2);
     group.add(cabin);
-    const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
-    for (const [wx, wz] of [[-1.0, -1.4], [1.0, -1.4], [-1.0, 1.4], [1.0, 1.4]]) {
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.3, 10), wheelMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(wx, 0.38, wz);
-      group.add(wheel);
+    const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 10);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 1 });
+    for (const [wx, wz] of [[-0.95, 1.4], [0.95, 1.4], [-0.95, -1.4], [0.95, -1.4]]) {
+      const w = new THREE.Mesh(wheelGeo, wheelMat);
+      w.rotation.z = Math.PI / 2;
+      w.position.set(wx, 0.38, wz);
+      group.add(w);
     }
   }
-  group.position.copy(car.pos);
-  ctx.scene.add(group);
+  group.position.set(x, 0, z);
+  group.rotation.y = heading;
   car.mesh = group;
   return car;
 }
 
 export function init(ctx) {
-  const S = ctx.state;
-  const { input } = ctx;
-
-  ctx.api.makeCar = (kind, x, z, opts) => makeCar(ctx, kind, x, z, opts);
-
-  // Parked, stealable: bike, sport car, pickup, sedan.
+  const { THREE, scene, state: S } = ctx;
   const parked = [
-    { kind: 'bike', x: -88, z: -64 },
-    { kind: 'sport', x: -102, z: -64 },
-    { kind: 'pickup', x: -96, z: -70 },
-    { kind: 'sedan', x: -78, z: -70 },
+    makeCar(THREE, 'bike', -88, -64, 0.4),
+    makeCar(THREE, 'sport', -102, -64, -0.2),
+    makeCar(THREE, 'pickup', -112, -58, 0.1),
+    makeCar(THREE, 'sedan', -96, -52, 1.2),
   ];
-  for (const p of parked) {
-    const car = makeCar(ctx, p.kind, p.x, p.z);
+  for (const car of parked) {
     S.cars.push(car);
+    scene.add(car.mesh);
   }
-
+  ctx.api.spawnCar = function spawnCar(kind, tune, x, z, heading = 0) {
+    const car = makeCar(THREE, kind, x, z, heading, tune ? { ...tune } : null);
+    S.cars.push(car);
+    scene.add(car.mesh);
+    return car;
+  };
   ctx.updates.push((dt) => {
-    // Keep every mesh glued to its car object.
-    for (const car of S.cars) {
-      if (car.mesh) {
-        car.mesh.position.copy(car.pos);
-        car.mesh.position.y = 0;
-        car.mesh.rotation.y = car.heading;
+    const input = ctx.input;
+    // Drive the player's car.
+    if (S.car) {
+      const car = S.car;
+      const maxSpeed = 8 + car.perf() * 0.35;
+      const fwd = input.isDown('KeyW') || input.isDown('ArrowUp');
+      const back = input.isDown('KeyS') || input.isDown('ArrowDown');
+      const left = input.isDown('KeyA') || input.isDown('ArrowLeft');
+      const right = input.isDown('KeyD') || input.isDown('ArrowRight');
+      if (fwd) car.speed += 14 * dt;
+      else if (back) car.speed -= 10 * dt;
+      else {
+        // drag
+        car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 8 * dt);
       }
+      car.speed = Math.max(-8, Math.min(maxSpeed, car.speed));
+      const steer = (left ? 1 : 0) - (right ? 1 : 0);
+      if (Math.abs(car.speed) > 0.5) {
+        car.heading += steer * 1.6 * dt * Math.sign(car.speed) * Math.min(1, Math.abs(car.speed) / 8);
+      }
+      car.pos.x += Math.sin(car.heading) * car.speed * dt;
+      car.pos.z += Math.cos(car.heading) * car.speed * dt;
+      car.pos.x = Math.max(-210, Math.min(210, car.pos.x));
+      car.pos.z = Math.max(-210, Math.min(210, car.pos.z));
+      S.player.pos.copy(car.pos);
+      S.player.heading = car.heading;
     }
-    if (S.mode !== 'playing' || S.cutscene) return;
-    const car = S.car;
-    if (!car) return;
-    const topSpeed = car.perf() * 0.95;
-    let accel = 0;
-    if (input.isDown('KeyW') || input.isDown('ArrowUp')) accel += 26;
-    if (input.isDown('KeyS') || input.isDown('ArrowDown')) accel -= 34;
-    car.speed = clamp(car.speed + accel * dt, -12, topSpeed);
-    if (accel === 0) {
-      car.speed *= Math.max(0, 1 - 0.6 * dt);
-      if (Math.abs(car.speed) < 0.2) car.speed = 0;
+    // Keep every mesh glued to its car object (teleports included).
+    for (const car of S.cars) {
+      if (!car.mesh) continue;
+      car.mesh.position.copy(car.pos);
+      car.mesh.rotation.y = car.heading;
     }
-    let steer = 0;
-    if (input.isDown('KeyA') || input.isDown('ArrowLeft')) steer += 1;
-    if (input.isDown('KeyD') || input.isDown('ArrowRight')) steer -= 1;
-    if (steer !== 0 && Math.abs(car.speed) > 0.5) {
-      car.heading += steer * 1.9 * dt * Math.sign(car.speed) * clamp(Math.abs(car.speed) / 12, 0.3, 1);
-    }
-    const fx = Math.sin(car.heading);
-    const fz = Math.cos(car.heading);
-    car.pos.x += fx * car.speed * dt;
-    car.pos.z += fz * car.speed * dt;
-    car.pos.x = clamp(car.pos.x, -260, 260);
-    car.pos.z = clamp(car.pos.z, -260, 260);
-    S.player.vel.set(fx * car.speed, 0, fz * car.speed);
   });
-
-  ctx.flags.vehicles = true;
 }
+
+export default init;

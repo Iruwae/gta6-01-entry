@@ -1,46 +1,53 @@
-// SOLMAR BAY — tiny WebAudio synth for UI blips, gunshots, reloads and
-// cash. No audio files, no network. If the browser has no audio context,
-// every call silently does nothing.
+// Tiny WebAudio synth: UI blips, gunshots, reloads, cash. No audio files,
+// no network. If the browser has no audio context, every call is silent.
 export function init(ctx) {
-  let audioCtx = null;
-  function ac() {
-    if (audioCtx) return audioCtx;
+  let ac = null;
+  function ensure() {
+    if (ac) return ac;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
-      audioCtx = new AC();
+      ac = new AC();
     } catch (e) {
-      return null;
+      ac = null;
     }
-    return audioCtx;
+    return ac;
   }
-  function blip(freq, dur, type, vol) {
-    const c = ac();
+  function tone(freq, dur, type = 'sine', gain = 0.08) {
+    const c = ensure();
     if (!c) return;
     try {
-      if (c.state === 'suspended') c.resume();
-      const o = c.createOscillator();
+      if (c.state === 'suspended') c.resume().catch(() => {});
+      const osc = c.createOscillator();
       const g = c.createGain();
-      o.type = type || 'square';
-      o.frequency.value = freq;
-      g.gain.setValueAtTime(vol || 0.06, c.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
-      o.connect(g);
+      osc.type = type;
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(gain, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+      osc.connect(g);
       g.connect(c.destination);
-      o.start();
-      o.stop(c.currentTime + dur);
+      osc.start();
+      osc.stop(c.currentTime + dur);
     } catch (e) {
-      // Audio is decoration; never break the game over it.
+      /* silent */
     }
   }
-  ctx.api.audio = {
-    blip: () => blip(660, 0.07, 'square', 0.05),
-    shot: () => blip(160, 0.09, 'sawtooth', 0.09),
-    reload: () => blip(440, 0.12, 'triangle', 0.06),
-    cash: () => {
-      blip(880, 0.08, 'sine', 0.07);
-      setTimeout(() => blip(1320, 0.12, 'sine', 0.07), 90);
+  ctx.audio = {
+    blip() {
+      tone(660, 0.08, 'square', 0.04);
+    },
+    shot() {
+      tone(140, 0.12, 'sawtooth', 0.12);
+    },
+    reload() {
+      tone(440, 0.06, 'square', 0.05);
+      setTimeout(() => tone(520, 0.06, 'square', 0.05), 90);
+    },
+    cash() {
+      tone(880, 0.09, 'sine', 0.07);
+      setTimeout(() => tone(1320, 0.12, 'sine', 0.07), 90);
     },
   };
-  ctx.flags.audio = true;
 }
+
+export default init;
